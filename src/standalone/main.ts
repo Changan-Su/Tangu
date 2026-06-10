@@ -12,6 +12,7 @@ import { createNoopBilling } from '../adapters/standalone/noopBilling.js';
 import { createTanguProfile } from '../profiles/index.js';
 import { parseConfig, validate, HELP } from './config.js';
 import { loadCreds } from './credStore.js';
+import { loadOAuthDirectProviders } from '../llm/providerOAuth.js';
 import { resolveSandboxMode, setupHost, buildBrain, fixLegacyAppIds } from './assemble.js';
 
 async function main(): Promise<void> {
@@ -21,6 +22,13 @@ async function main(): Promise<void> {
   const creds = loadCreds();
   if (!cfg.token) cfg.token = creds.token || '';
   if (!cfg.cloudUrl) cfg.cloudUrl = creds.cloudUrl || '';
+  // `tangu login <provider>`(xAI 等 OAuth 直连)的凭证同样接进 registry——与 TUI 对齐,
+  // 桌面端 managed 后端登录 provider 后即可用 <providerId>/<model>。
+  try {
+    cfg.providers.push(...(await loadOAuthDirectProviders()));
+  } catch {
+    /* ignore */
+  }
   const errs = validate(cfg);
   if (errs.length) {
     process.stderr.write('配置错误:\n  - ' + errs.join('\n  - ') + '\n\n' + HELP);

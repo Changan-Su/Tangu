@@ -4,9 +4,13 @@
  * agent 调用由 renderer 直连 HTTP/SSE(localhost),不经主进程代理。
  */
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
-import { join } from 'path'
+import { dirname, join } from 'path'
+import { pathToFileURL } from 'url'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { BackendManager, type BackendStatus } from './backendManager'
+import {
+  forsionDeviceLogin, forsionLogout, forsionWhoami, loadTanguCreds,
+} from './forsionAuth'
 
 /** 持久化配置(userData/tangu-desktop-config.json)。 */
 interface TanguStoredConfig {
@@ -33,11 +37,22 @@ const DEFAULT_CONFIG: TanguStoredConfig = {
 const configPath = (): string => join(app.getPath('userData'), 'tangu-desktop-config.json')
 
 async function loadConfig(): Promise<TanguStoredConfig> {
+  let merged: TanguStoredConfig
   try {
-    return { ...DEFAULT_CONFIG, ...JSON.parse(await readFile(configPath(), 'utf8')) }
+    merged = { ...DEFAULT_CONFIG, ...JSON.parse(await readFile(configPath(), 'utf8')) }
   } catch {
-    return { ...DEFAULT_CONFIG }
+    merged = { ...DEFAULT_CONFIG }
   }
+  // 环境变量兜底(与包内 standalone/worker 同名约定):配置里没填时生效。
+  //   TANGU_CLOUD_URL    Forsion 云端地址(managed 模式 / 登录默认地址)
+  //   TANGU_BACKEND_URL  external 模式的外部 tangu-server 地址
+  if (!merged.cloudUrl) {
+    merged.cloudUrl = process.env.TANGU_CLOUD_URL || loadTanguCreds().cloudUrl || ''
+  }
+  if (process.env.TANGU_BACKEND_URL && merged.backendUrl === DEFAULT_CONFIG.backendUrl) {
+    merged.backendUrl = process.env.TANGU_BACKEND_URL
+  }
+  return merged
 }
 async function saveConfig(patch: Partial<TanguStoredConfig>): Promise<TanguStoredConfig> {
   const merged = { ...(await loadConfig()), ...patch }
@@ -128,6 +143,78 @@ app.whenReady().then(() => {
   ipcMain.handle('backend:restart', async () => {
     await ensureBackend()
     return backend.getStatus()
+  })
+
+  // ── Forsion 账号 / provider OAuth 登录(与 `tangu login` 同一份凭证)──
+  const broadcast = (channel: string, payload: any): void => {
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send(channel, payload)
+  }
+
+  ipcMain.handle('auth:status', async () => {
+    const stored = await loadConfig()
+    const creds = loadTanguCreds()
+    const cloudUrl = stored.cloudUrl || creds.cloudUrl || ''
+    const token = stored.cloudToken || creds.token || ''
+    const who = token ? await forsionWhoami(cloudUrl, token) : null
+    return {
+      loggedIn: !!token,
+      cloudUrl,
+      username: who?.username || null,
+      tokenSource: stored.cloudToken ? 'config' : creds.token ? 'tangu-login' : null,
+    }
+  })
+
+  ipcMain.handle('auth:forsionLogin', async (_e, cloudUrl?: string) => {
+    const stored = await loadConfig()
+    const url = (cloudUrl || stored.cloudUrl || '').trim()
+    const r = await forsionDeviceLogin(url, (info) => broadcast('auth:device', info))
+    // 登录成功:cloudUrl 记进配置(token 留在 auth.json,managed 后端/getToken 自动回退读取);
+    // managed 模式重启后端让子进程吃到新凭证。
+    await saveConfig({ cloudUrl: r.cloudUrl })
+    if (stored.mode === 'managed') void ensureBackend()
+    return { ok: true, cloudUrl: r.cloudUrl }
+  })
+
+  ipcMain.handle('auth:logout', async () => {
+    forsionLogout()
+    const stored = await loadConfig()
+    if (stored.mode === 'managed') void ensureBackend()
+    return { ok: true }
+  })
+
+  // provider OAuth(xAI 等):动态 import 包 dist 的 providerOAuth(dev=包根 dist,打包=resources/tangu-server/dist),
+  // 与 `tangu login <provider>` 同一实现、同一份 ~/.tangu/provider-auth.json。
+  const providerOAuthModule = async (): Promise<any> => {
+    const entry = BackendManager.resolveEntry()
+    if (!entry) throw new Error('找不到 tangu-server dist(dev 下请先在包根 npm run build)')
+    const distRoot = dirname(dirname(entry)) // …/dist/standalone/main.js → …/dist
+    return import(pathToFileURL(join(distRoot, 'llm', 'providerOAuth.js')).href)
+  }
+
+  ipcMain.handle('auth:providers', async () => {
+    try {
+      const m = await providerOAuthModule()
+      const ids: string[] = Object.keys(m.OAUTH_PROVIDERS || {})
+      const logged = new Set<string>()
+      try {
+        const credsPath = join(app.getPath('home'), '.tangu', 'provider-auth.json')
+        const raw = JSON.parse(await readFile(credsPath, 'utf8'))
+        for (const k of Object.keys(raw || {})) logged.add(k)
+      } catch { /* 未登录过 */ }
+      return ids.map((id) => ({ id, loggedIn: logged.has(id) }))
+    } catch {
+      return []
+    }
+  })
+
+  ipcMain.handle('auth:providerLogin', async (_e, id: string) => {
+    const m = await providerOAuthModule()
+    const p = m.OAUTH_PROVIDERS?.[id]
+    if (!p) throw new Error(`未知 provider: ${id}`)
+    await m.providerOAuthLogin(p) // loopback+PKCE,自动开浏览器,落盘 provider-auth.json
+    const stored = await loadConfig()
+    if (stored.mode === 'managed') void ensureBackend() // 重启让后端加载该 provider
+    return { ok: true, id }
   })
 
   backend.onStatus((st) => {

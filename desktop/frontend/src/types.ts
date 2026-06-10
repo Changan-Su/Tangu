@@ -148,7 +148,14 @@ export interface StoredDesktopConfig extends TanguDesktopConfig {
   backendState?: BackendStatusInfo
 }
 
-/** preload 注入的 window.tangu(浏览器内调试时缺省,backend* 能力按需探测)。 */
+export interface AuthStatusInfo {
+  loggedIn: boolean
+  cloudUrl: string
+  username: string | null
+  tokenSource: 'config' | 'tangu-login' | null
+}
+
+/** preload 注入的 window.tangu(浏览器内调试时缺省,backend/auth 能力按需探测)。 */
 declare global {
   interface Window {
     tangu?: {
@@ -158,6 +165,12 @@ declare global {
       backendLogs?(): Promise<string[]>
       backendRestart?(): Promise<BackendStatusInfo>
       onBackendStatus?(cb: (st: BackendStatusInfo) => void): () => void
+      authStatus?(): Promise<AuthStatusInfo>
+      forsionLogin?(cloudUrl?: string): Promise<{ ok: boolean; cloudUrl: string }>
+      forsionLogout?(): Promise<{ ok: boolean }>
+      authProviders?(): Promise<Array<{ id: string; loggedIn: boolean }>>
+      providerLogin?(id: string): Promise<{ ok: boolean; id: string }>
+      onAuthDevice?(cb: (info: { url: string; userCode: string }) => void): () => void
     }
   }
 }

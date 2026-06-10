@@ -3,14 +3,14 @@
  * tabs 形态对齐 AI Studio SettingsModal;连接页的 managed/external 切换在 M6 接 backendManager。
  */
 import React, { useEffect, useState } from 'react'
-import { X, Loader2, RefreshCw, Sun, Moon, RotateCcw } from 'lucide-react'
+import { X, Loader2, RefreshCw, Sun, Moon, RotateCcw, LogIn, LogOut, ExternalLink, KeyRound } from 'lucide-react'
 import { AnimatedModalBackdrop, AnimatedModalContent, AnimatePresence } from './AnimatedUI'
 import { ThemeCard } from './ThemeCard'
 import { listThemes } from '../theme/registry'
 import { applyTheme } from '../theme/loader'
 import { testConnection } from '../services/agentRunService'
 import { listModels } from '../services/backendService'
-import type { BackendStatusInfo, ModelsResponse, StoredDesktopConfig, TanguDesktopConfig } from '../types'
+import type { AuthStatusInfo, BackendStatusInfo, ModelsResponse, StoredDesktopConfig, TanguDesktopConfig } from '../types'
 
 type Tab = 'connection' | 'model' | 'theme' | 'advanced'
 
@@ -45,23 +45,72 @@ export const SettingsModal: React.FC<{
   const [stored, setStored] = useState<StoredDesktopConfig | null>(null)
   const [backendSt, setBackendSt] = useState<BackendStatusInfo | null>(null)
   const [logs, setLogs] = useState<string[] | null>(null)
+  // Forsion 账号 / provider OAuth 登录态
+  const [authSt, setAuthSt] = useState<AuthStatusInfo | null>(null)
+  const [loggingIn, setLoggingIn] = useState(false)
+  const [device, setDevice] = useState<{ url: string; userCode: string } | null>(null)
+  const [providers, setProviders] = useState<Array<{ id: string; loggedIn: boolean }> | null>(null)
+  const [providerBusy, setProviderBusy] = useState<string | null>(null)
+
+  const refreshAuth = (): void => {
+    if (!window.tangu?.authStatus) return
+    void window.tangu.authStatus().then(setAuthSt).catch(() => setAuthSt(null))
+    void window.tangu.authProviders?.().then(setProviders).catch(() => setProviders([]))
+  }
 
   useEffect(() => {
     if (p.open) {
       setDraft(p.cfg)
       setTestResult('')
       setLogs(null)
+      setDevice(null)
       if (isDesktop) {
         void window.tangu!.getConfig().then(setStored)
         void window.tangu!.backendStatus!().then(setBackendSt)
+        refreshAuth()
       }
     }
   }, [p.open, p.cfg, isDesktop])
 
   useEffect(() => {
     if (!p.open || !isDesktop) return
-    return window.tangu!.onBackendStatus?.((st) => setBackendSt(st))
+    const off1 = window.tangu!.onBackendStatus?.((st) => setBackendSt(st))
+    const off2 = window.tangu!.onAuthDevice?.((info) => setDevice(info))
+    return () => {
+      off1?.()
+      off2?.()
+    }
   }, [p.open, isDesktop])
+
+  const doForsionLogin = async (): Promise<void> => {
+    if (!window.tangu?.forsionLogin) return
+    setLoggingIn(true)
+    setDevice(null)
+    try {
+      const r = await window.tangu.forsionLogin(stored?.cloudUrl || undefined)
+      setStored((s) => (s ? { ...s, cloudUrl: r.cloudUrl } : s))
+      refreshAuth()
+      p.onReconnect()
+    } catch (e: any) {
+      setTestResult(String(e?.message || e).replace(/^Error invoking remote method '[^']+': Error: /, ''))
+    } finally {
+      setLoggingIn(false)
+      setDevice(null)
+    }
+  }
+
+  const doProviderLogin = async (id: string): Promise<void> => {
+    if (!window.tangu?.providerLogin) return
+    setProviderBusy(id)
+    try {
+      await window.tangu.providerLogin(id)
+      refreshAuth()
+    } catch (e: any) {
+      setTestResult(String(e?.message || e).replace(/^Error invoking remote method '[^']+': Error: /, ''))
+    } finally {
+      setProviderBusy(null)
+    }
+  }
 
   const mode = stored?.mode || 'external'
   const setMode = (m: 'managed' | 'external') => {
@@ -161,14 +210,55 @@ export const SettingsModal: React.FC<{
                             onChange={(e) => setStored({ ...stored, cloudUrl: e.target.value })}
                             placeholder="https://api.forsion.app"
                           />
+                          <div className="hint">可用环境变量 TANGU_CLOUD_URL 预设;登录成功后自动记住。</div>
                         </div>
+
+                        <div className="field">
+                          <label>Forsion 账号</label>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                            {authSt?.loggedIn ? (
+                              <>
+                                <span className="conn-pill ok">
+                                  <span className="dot" />
+                                  已登录{authSt.username ? ` · ${authSt.username}` : ''}
+                                  {authSt.tokenSource === 'config' ? '(手动 token)' : ''}
+                                </span>
+                                <button className="btn ghost sm" onClick={() => {
+                                  void window.tangu!.forsionLogout?.().then(() => refreshAuth())
+                                }}>
+                                  <LogOut size={12} /> 登出
+                                </button>
+                              </>
+                            ) : (
+                              <span className="conn-pill"><span className="dot" />未登录</span>
+                            )}
+                            <button className="btn primary sm" onClick={() => void doForsionLogin()} disabled={loggingIn || !stored.cloudUrl}>
+                              {loggingIn ? <Loader2 size={12} className="spin" /> : <LogIn size={12} />}
+                              通过浏览器登录
+                            </button>
+                          </div>
+                          {device && (
+                            <div className="hint" style={{ marginTop: 6 }}>
+                              浏览器没弹出来?手动打开:
+                              <a href={device.url} target="_blank" rel="noreferrer" style={{ wordBreak: 'break-all' }}>
+                                {device.url} <ExternalLink size={10} style={{ verticalAlign: -1 }} />
+                              </a>
+                              {device.userCode ? <> · 验证码 <b>{device.userCode}</b></> : null}
+                            </div>
+                          )}
+                          {!authSt?.loggedIn && (
+                            <div className="hint">与 `tangu login` 同一份凭证(~/.tangu/auth.json),CLI/TUI/桌面通用。</div>
+                          )}
+                        </div>
+
                         <div className="field-row">
                           <div className="field">
-                            <label>forsion_token(留空用 tangu login 凭证)</label>
+                            <label><KeyRound size={11} style={{ verticalAlign: -1 }} /> 手动 token(高级,可选;覆盖登录凭证)</label>
                             <input
                               type="password"
                               value={stored.cloudToken}
                               onChange={(e) => setStored({ ...stored, cloudToken: e.target.value })}
+                              placeholder="一般不需要,浏览器登录即可"
                             />
                           </div>
                           <div className="field" style={{ maxWidth: 160 }}>
@@ -231,7 +321,7 @@ export const SettingsModal: React.FC<{
                             onChange={(e) => setDraft({ ...draft, backendUrl: e.target.value })}
                             placeholder="http://localhost:8787"
                           />
-                          <div className="hint">tangu-server 的 HTTP 地址(本机或远程)。</div>
+                          <div className="hint">tangu-server 的 HTTP 地址(本机或远程);可用环境变量 TANGU_BACKEND_URL 预设。</div>
                         </div>
                         <div className="field">
                           <label>访问令牌</label>
@@ -309,6 +399,30 @@ export const SettingsModal: React.FC<{
                         </div>
                       ) : null}
                     </div>
+
+                    {isDesktop && providers && providers.length > 0 && (
+                      <div className="field">
+                        <label>Provider 账号登录(用订阅账号当 LLM,直连不计 Forsion 额度)</label>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          {providers.map((pr) => (
+                            <button
+                              key={pr.id}
+                              className="btn ghost sm"
+                              disabled={providerBusy === pr.id}
+                              onClick={() => void doProviderLogin(pr.id)}
+                            >
+                              {providerBusy === pr.id ? <Loader2 size={12} className="spin" /> : <LogIn size={12} />}
+                              {pr.id}
+                              {pr.loggedIn ? ' · 已登录(重新登录)' : ''}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="hint">
+                          OAuth 浏览器登录,凭证存 ~/.tangu/provider-auth.json(与 `tangu login {'<provider>'}` 通用);
+                          托管后端会自动重启加载,之后用 <code>provider/模型名</code>(如 xai/grok-3)即可。
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
 

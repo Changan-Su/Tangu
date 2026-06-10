@@ -22,6 +22,17 @@ const api = {
     ipcRenderer.on('backend:status', listener)
     return () => ipcRenderer.removeListener('backend:status', listener)
   },
+  // ── Forsion 账号 / provider OAuth 登录(与 `tangu login` 同一份凭证)──
+  authStatus: (): Promise<any> => ipcRenderer.invoke('auth:status'),
+  forsionLogin: (cloudUrl?: string): Promise<any> => ipcRenderer.invoke('auth:forsionLogin', cloudUrl),
+  forsionLogout: (): Promise<any> => ipcRenderer.invoke('auth:logout'),
+  authProviders: (): Promise<Array<{ id: string; loggedIn: boolean }>> => ipcRenderer.invoke('auth:providers'),
+  providerLogin: (id: string): Promise<any> => ipcRenderer.invoke('auth:providerLogin', id),
+  onAuthDevice: (cb: (info: { url: string; userCode: string }) => void): (() => void) => {
+    const listener = (_e: unknown, info: { url: string; userCode: string }): void => cb(info)
+    ipcRenderer.on('auth:device', listener)
+    return () => ipcRenderer.removeListener('auth:device', listener)
+  },
 }
 
 contextBridge.exposeInMainWorld('tangu', api)
