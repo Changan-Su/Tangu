@@ -14,6 +14,12 @@ import { buildOpenAiCompatPayload, streamOpenAiCompat, DIRECT_MARK } from '../..
 export function createMultiBrain(httpBrain: CloudBrainServices, registry: ProviderRegistry): CloudBrainServices {
   return {
     ...httpBrain,
+    models: {
+      ...httpBrain.models,
+      // 直连 provider 目录(模型选择器用;剥掉 apiKey/baseUrl,只下发 id 与模型白名单)。
+      listDirectProviders: () =>
+        registry.list().map((p) => ({ providerId: p.providerId, modelIds: p.modelIds })),
+    },
     llm: {
       resolveModelAndKey: async (modelId: string) => {
         const local = registry.resolve(modelId);

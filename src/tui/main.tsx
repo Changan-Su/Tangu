@@ -11,9 +11,10 @@
 import { render } from 'ink';
 import { createTanguModule } from '../index.js';
 import { createNoopBilling } from '../adapters/standalone/noopBilling.js';
+import { createTanguProfile } from '../profiles/index.js';
 import { loadCreds } from '../standalone/credStore.js';
 import { validate } from '../standalone/config.js';
-import { resolveSandboxMode, setupHost, buildBrain } from '../standalone/assemble.js';
+import { resolveSandboxMode, setupHost, buildBrain, fixLegacyAppIds } from '../standalone/assemble.js';
 import { loginFlow } from '../cli/login.js';
 import { OAUTH_PROVIDERS, providerOAuthLogin, loadOAuthDirectProviders } from '../llm/providerOAuth.js';
 import { parseTuiConfig, TUI_HELP } from './config.js';
@@ -88,14 +89,10 @@ async function main(): Promise<void> {
     host,
     brain,
     billing: createNoopBilling(),
-    profile: {
-      appId: 'tangu',
-      defaultModelId: cfg.defaultModelId,
-      sandboxMode,
-      features: { sandbox: sandboxMode === 'docker', webSearch: true, historian: false, customTools: true },
-    },
+    profile: createTanguProfile({ sandboxMode, defaultModelId: cfg.defaultModelId || undefined }),
   });
   await mod.runMigration();
+  await fixLegacyAppIds(); // 修正 runs.ts 硬编码时期误标 'ai-studio' 的本地会话(仅 standalone 本地库)
   // 终端单会话：关 run 自愈（别把上次残留 run 自动跑起来）+ historian；保留本机沙箱 janitor。
   mod.startBackgroundTasks({ recoverRuns: false, historian: false });
 

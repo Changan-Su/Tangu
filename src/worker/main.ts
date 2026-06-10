@@ -18,6 +18,7 @@ import express from 'express';
 import { execFile } from 'node:child_process';
 import jwt from 'jsonwebtoken';
 import { createTanguModule } from '../index.js';
+import { createAiStudioProfile } from '../profiles/index.js';
 import { createCloudWorkerHost } from '../adapters/cloudWorkerHost.js';
 import { createHttpBrain } from '../adapters/standalone/httpBrain.js';
 import { createNoopBilling } from '../adapters/standalone/noopBilling.js';
@@ -132,12 +133,14 @@ async function main(): Promise<void> {
     host,
     brain: createHttpBrain({ cloudUrl: cfg.cloudUrl, token: mintToken }),
     billing: createNoopBilling(), // 计费收口在云端 brain-api,worker loop 不计费
-    profile: {
+    // 云端多租户 profile(hostExec 禁);worker 按 app 部署,appId 经 TANGU_APP_ID 覆盖。
+    // historian:false——共享云库下 historian 是全局任务,多 worker 会互扰(与 startBackgroundTasks 一致)。
+    profile: createAiStudioProfile({
       appId: cfg.appId,
-      defaultModelId: cfg.defaultModelId || undefined,
       sandboxMode,
-      features: { sandbox: sandboxMode === 'docker', webSearch: true, historian: false, customTools: true },
-    },
+      defaultModelId: cfg.defaultModelId || undefined,
+      historian: false,
+    }),
   });
 
   // 云库已由 Forsion migrate-all 建表;此处幂等(CREATE/ALTER IF NOT EXISTS),容错跑一遍。
@@ -148,7 +151,8 @@ async function main(): Promise<void> {
   const app = express();
   app.use(express.json({ limit: '25mb' }));
   app.get('/health', (_req, res) => res.json({ ok: true, mode: 'worker', appId: cfg.appId, sandbox: sandboxMode }));
-  app.use('/', mod.userRouter); // /agent/runs、/agent/runs/:id/events …
+  app.use('/', mod.userRouter); // /agent/runs、/agent/runs/:id/events、/agent/workspace/*、审批
+  app.use('/', mod.dataRouter); // 数据路由(fleet 下通常由调度进程直服;worker 同挂无害,直连 worker 调试可用)
 
   app.listen(cfg.port, cfg.host, () => {
     console.log(`[tangu-worker] 已启动 http://${cfg.host}:${cfg.port} app=${cfg.appId} sandbox=${sandboxMode}`);

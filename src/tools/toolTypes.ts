@@ -1,0 +1,41 @@
+/**
+ * 工具系统共享类型(从 registry.ts 抽出,供 toolRegistry/builtin providers/hostExec 共用,
+ * 避免值模块间的循环依赖——本文件零运行时依赖)。
+ */
+import type { Tool } from '../core/types.js';
+import type { LoadedCustomTool } from './customTools.js';
+import type { AppProfile } from '../seams/appProfile.js';
+
+export interface ToolContext {
+  userId: string;
+  sessionId: string;
+  appId: string;
+  runId?: string;
+  signal?: AbortSignal;
+  /** 本次 run 的自定义工具（HTTP/JS），按工具名索引。 */
+  customTools?: Map<string, LoadedCustomTool>;
+  /** 本次 run 启用的技能 id（use_skill 的 allowlist）。 */
+  enabledSkillIds?: string[];
+  /** 执行形态：'host'=本地直连真实 FS/shell（TUI），缺省/'sandbox'=云沙箱 + 云工作区。 */
+  execMode?: 'sandbox' | 'host';
+  /** host 模式的工作目录（文件/命令相对此解析）。 */
+  cwd?: string;
+  /** host 模式的审批档（loop 据此决定哪些破坏性工具执行前需用户批准）。 */
+  approvalMode?: 'readonly' | 'auto-edit' | 'full-auto';
+  /** 本次 run 的 AppProfile(接缝①):工具门禁 isEnabledFor 据此过滤。缺省回退 deps().profile。 */
+  profile?: AppProfile;
+}
+
+export interface ToolResult {
+  toolCallId: string;
+  name: string;
+  result: string;
+  isError: boolean;
+}
+
+export interface ToolImpl {
+  definition: Tool;
+  execute: (args: Record<string, any>, ctx: ToolContext) => Promise<string> | string;
+  /** 工具可见性域：'sandbox'=仅云沙箱模式，'host'=仅本地直连模式，缺省='both'=两者皆可。 */
+  mode?: 'sandbox' | 'host' | 'both';
+}

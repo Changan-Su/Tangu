@@ -14,8 +14,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "framer-motion": "^12.40.0",
+    "highlight.js": "^11.11.1",
+    "lucide-react": "^1.17.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
@@ -30,9 +36,22 @@
   "build": {
     "appId": "com.forsion.tangu-desktop",
     "productName": "Tangu Agent",
-    "files": ["out/**/*"],
-    "linux": { "target": "AppImage" },
-    "mac": { "target": "dmg" },
-    "win": { "target": "nsis" }
+    "files": [
+      "out/**/*"
+    ],
+    "extraResources": [
+      { "from": "../dist", "to": "tangu-server/dist" },
+      { "from": "../node_modules", "to": "tangu-server/node_modules" },
+      { "from": "../package.json", "to": "tangu-server/package.json" }
+    ],
+    "linux": {
+      "target": "AppImage"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "win": {
+      "target": "nsis"
+    }
   }
 }

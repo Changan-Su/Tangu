@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { query } from '../core/db.js';
 import type { HostServices } from '../seams/hostServices.js';
 import type { CloudBrainServices } from '../seams/cloudBrain.js';
 import { createLocalHost } from '../adapters/standalone/localHost.js';
@@ -70,4 +71,19 @@ export function buildBrain(cfg: StandaloneConfig): { brain: CloudBrainServices; 
   const providers = loadProviders(cfg);
   const brain = providers.length ? createMultiBrain(httpBrain, createProviderRegistry(providers)) : httpBrain;
   return { brain, providers };
+}
+
+/**
+ * 修复历史 mis-tag:runs.ts 曾硬编码 app_id='ai-studio',standalone 本地库经它自动建的会话/run
+ * 被错误标记,TUI 的 /sessions(按 app_id='tangu' 过滤)看不见。幂等,一次跑完即静默。
+ * ⚠️ 仅 standalone 本地库(PGlite / 用户自带 PG)调用——绝不可在共享云库(microserver/worker)上跑。
+ * 须在 configureTangu + runMigration 之后调用(query 经 deps().host)。
+ */
+export async function fixLegacyAppIds(): Promise<void> {
+  try {
+    await query(`UPDATE chat_sessions SET app_id = 'tangu' WHERE app_id = 'ai-studio'`);
+    await query(`UPDATE agent_runs SET app_id = 'tangu' WHERE app_id = 'ai-studio'`);
+  } catch (e: any) {
+    console.warn('[tangu] legacy app_id 修正失败(忽略):', e?.message || e);
+  }
 }

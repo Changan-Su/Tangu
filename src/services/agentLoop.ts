@@ -6,6 +6,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { query } from '../core/db.js';
 import { deps } from '../seams/runtime.js';
+import { resolveProfile } from '../seams/appProfile.js';
 import type { StreamOpts, BuildPayloadOpts } from '../seams/cloudBrain.js';
 import { LlmError, type ThinkingLevel, type ChatMessage, type ToolCall } from '../core/types.js';
 import { publish, drain, cleanup } from './eventBus.js';
@@ -13,7 +14,7 @@ import { gateToolCall } from './approvals.js';
 import { enterRunContext } from '../seams/runContext.js';
 import { getRun, updateRunStatus, appendStep, listPendingRunsForRecovery } from './runStore.js';
 import { getToolDefinitions, executeTool, type ToolContext } from '../tools/registry.js';
-import { materializeSkill } from '../tools/fileWorkspace.js';
+import { loadSkillLoadout } from './skillLoadout.js';
 import { loadCustomTools, type LoadedCustomTool } from '../tools/customTools.js';
 import { snapshotSession } from '../sandbox/sessionSandbox.js';
 
@@ -27,10 +28,7 @@ const calculateCost = (modelId: string, tin: number, tout: number, model?: any) 
 const logApiUsage = (...args: any[]) => (deps().billing.logApiUsage as any)(...args);
 const getUserById = (id: string) => deps().brain.users.getUserById(id);
 const getMemory = (userId: string) => deps().brain.memory.getMemory(userId);
-const getSkill = (id: string) => deps().brain.assets.getSkill(id);
 
-// appId 来自 AppProfile(接缝①):microserver='ai-studio',standalone='tangu'。lazy 取(装配后)。
-const appId = () => deps().profile.appId;
 const abortControllers = new Map<string, AbortController>();
 
 // 同会话 run 串行化：每个 session 同一时刻至多一个活跃 run，其余 FIFO 排队，活跃 run 跑完
@@ -181,6 +179,9 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
 
   const sessionId = run.session_id;
   const userId = run.user_id;
+  // 接缝①(G1):本 run 的 profile 按行内 app_id 解析;不匹配(如升级前遗留行)回退本进程 profile。
+  const profile = resolveProfile((run as any).app_id) ?? deps().profile;
+  const appId = profile.appId;
   // 多租户接缝:把本 run 的 userId 注入异步子树,供 worker 的 brain 适配器铸 per-user token。
   // microserver/standalone 的 brain 不读此上下文,无副作用。
   enterRunContext(userId);
@@ -190,9 +191,11 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
   const maxIterations = Math.min(Math.max(1, agentConfig.maxIterations || 10), 30);
   const thinkingLevel: ThinkingLevel = agentConfig.thinkingLevel || 'off';
   const attachments = input.attachments || [];
-  // host-exec（TUI）注入：execMode/cwd/approvalMode 只经 per-run agentConfig 传入。
+  // host-exec（TUI/桌面本机模式）注入：execMode/cwd/approvalMode 只经 per-run agentConfig 传入。
   // 缺省 sandbox + full-auto → microserver/standalone-server/worker 行为零变化（审批仅 host 激活）。
-  const execMode: 'sandbox' | 'host' = agentConfig.execMode === 'host' ? 'host' : 'sandbox';
+  // 能力闸门(红线②/④):未声明 hostExec 的 profile(云端形态)一律强制回 sandbox,杜绝云端拿到真实 FS/shell。
+  const execMode: 'sandbox' | 'host' =
+    agentConfig.execMode === 'host' && profile.capabilities.hostExec ? 'host' : 'sandbox';
   const cwd: string | undefined =
     typeof agentConfig.cwd === 'string' && agentConfig.cwd ? agentConfig.cwd : undefined;
   const approvalMode: 'readonly' | 'auto-edit' | 'full-auto' =
@@ -201,7 +204,7 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
   // 会话级沙箱：工作区/容器/kernel 按 (user, session) 跨消息常驻（懒 hydrate、空闲 TTL 回收）。
   // 文件工具与 run_python 都在本地操作（首次触发懒 hydrate），run 末按 sha256 diff 选择性回写 Penzor，
   // 沙箱保持温——避免每条消息全量 hydrate/snapshot 打远程 OSS（cn-beijing 单次往返 ~1-2s）。
-  const sessKey = { userId, appId: appId(), sessionId };
+  const sessKey = { userId, appId, sessionId };
   let flushed = false;
   const flush = async () => {
     if (flushed) return;
@@ -240,37 +243,9 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
 
     const history = await hydrateHistory(sessionId, run.assistant_message_id || '');
 
-    // 启用的技能（渐进式披露，对齐客户端 use_skill 机制）：
-    //   ① system prompt 只放「名称 + 描述（触发契约）」目录——绝不全量注入 SKILL.md。
-    //      大体量技能（pptx/docx 各 10 万+字）若每轮全量注入，单次调用就 10 万+ tokens，
-    //      正是云端 token 暴涨的根因。
-    //   ② 全文物化到 <appId>/.agent/skills/<id>/SKILL.md（云空间规范 + run_python 可读）。
-    //   ③ 模型按需用 use_skill 工具加载某技能完整说明，只在相关时付费、且只付一次。
-    const enabledSkillIds: string[] = Array.isArray(agentConfig.enabledSkillIds)
-      ? agentConfig.enabledSkillIds
-      : [];
-    // 小体量技能(行为指令)直接内联进 prompt（始终生效）；大体量技能(参考文档，如 pptx/docx
-    // 各 10 万+字)只放目录、经 use_skill 按需加载——避免每轮全量注入导致 token 暴涨。
-    const INLINE_SKILL_MAX_CHARS = 8000;
-    let inlineSkills: Array<{ name: string; body: string }> = [];
-    let deferredSkills: Array<{ id: string; name: string; description: string }> = [];
-    if (enabledSkillIds.length) {
-      const skills = (
-        await Promise.all(enabledSkillIds.map((id: string) => getSkill(id).catch(() => null)))
-      ).filter(Boolean) as any[];
-      for (const s of skills) {
-        const body = String(s.content || '').trim();
-        if (body && body.length <= INLINE_SKILL_MAX_CHARS) {
-          inlineSkills.push({ name: s.name, body });
-        } else if (body) {
-          deferredSkills.push({ id: s.id, name: s.name, description: String(s.description || '').trim() });
-        } else if (String(s.description || '').trim()) {
-          // 无正文、仅描述：当作小指令内联
-          inlineSkills.push({ name: s.name, body: String(s.description).trim() });
-        }
-        if (s.content) void materializeSkill(userId, appId(), s.id, s.content).catch(() => {});
-      }
-    }
+    // 启用技能的装载（渐进式披露:目录进 prompt、全文按需 use_skill）——见 services/skillLoadout.ts。
+    const skillLoadout = await loadSkillLoadout(userId, appId, agentConfig);
+    const enabledSkillIds = skillLoadout.enabledSkillIds;
 
     const systemParts: string[] = [];
     if (agentConfig.systemPrompt) systemParts.push(String(agentConfig.systemPrompt));
@@ -287,58 +262,13 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
     } catch (e) {
       console.warn('[agent-core] load user memory failed:', e);
     }
-    systemParts.push(
-      '## 记忆与日志\n' +
-        '- 遇到值得长期保留的用户事实/偏好，用 `remember` 工具记入长期记忆（跨会话保留，勿记一次性细节）。\n' +
-        '- 完成的事/结论/产出可用 `log_event` 记入当天日志；需回顾历史用 `read_log` 查看某天。',
-    );
-    if (inlineSkills.length) {
-      systemParts.push(
-        '## Skill Instructions\n\n' +
-          inlineSkills.map((s) => `### ${s.name}\n${s.body}`).join('\n\n---\n\n'),
-      );
-    }
-    if (deferredSkills.length) {
-      const lines = deferredSkills
-        .map((s) => `- ${s.name} (id: \`${s.id}\`)${s.description ? ` — ${s.description}` : ''}`)
-        .join('\n');
-      systemParts.push(
-        '## Available Skills (按需加载)\n' +
-          '以下技能体量较大，未展开。当任务匹配某技能时，**先调用 `use_skill` 工具（传其 id）拿到完整说明书再执行**，' +
-          '不要凭空假设其细节。无关的简单问题不必调用。\n\n' +
-          lines,
-      );
-    }
-
-    if (execMode === 'host') {
-      // 本地直连形态（TUI）：真实文件系统 + shell，路径相对工作目录。沙箱/云工作区那套指引在此不适用。
-      systemParts.push(
-        '## 本地执行环境（重要）\n' +
-          `你运行在**用户本机**，当前工作目录是 \`${cwd || process.cwd()}\`。\n` +
-          '- 用 `run_bash` 执行 shell 命令；`list_dir`/`read_file` 查看；`edit_file` 做精确局部修改、`write_file` 写新文件——全部作用于真实文件系统（相对路径相对当前工作目录解析）。\n' +
-          '- 优先用 `edit_file`（唯一匹配的 old_string→new_string）做小改，不要整文件重写。\n' +
-          '- 破坏性操作（写文件 / 跑命令）可能需要用户审批；被拒绝时换方案或询问用户，不要反复重试同一操作。',
-      );
-    } else {
-      // 文件输出位置（最常见的"产物丢失"原因：模型把文件写到工作区之外）。
-      systemParts.push(
-        '## 文件输出位置（重要）\n' +
-          '本会话有一个**工作区**，是唯一会被保留并回流给用户的地方。' +
-          '用 `write_file` 或在 `run_python` 里写文件时，一律用**相对路径**（如 `report.docx`、`out/data.csv`）——' +
-          '它就落在工作区里（run_python 的当前目录 /workspace，等价 /mnt/data）。\n' +
-          '**不要**把要交付的产物写到 `/tmp`、`~/`(HOME) 或其他绝对路径——那些不在工作区、不会保留，文件会丢失。',
-      );
-
-      // 效率约束（最影响耗时的是模型「生成量」：慢模型 ~50 tok/s，写 8000 token 要 ~160s）。
-      // 引导：一步直接产出目标文件、不要重复生成内容、按需篇幅、别手搓 OOXML。
-      systemParts.push(
-        '## 执行效率（重要）\n' +
-          '- 生成文档直接用 python-docx / openpyxl / python-pptx **一步写出目标文件**；' +
-          '不要先写中间 md/txt 再转换、不要把同一份内容生成两遍、不要手搓 OOXML/XML、不用 docx-js/pandoc/node。\n' +
-          '- 严格按用户要求的篇幅产出，不要无谓加长（生成越多越慢）。\n' +
-          '- run_python 尽量一次写完整脚本，减少往返轮次。',
-      );
-    }
+    // 静态指引/环境段按 profile 装载（G4，见 profiles/promptSections.ts）：
+    // guidance（记忆与日志）在技能段前，environment（host 本地环境 / sandbox 输出位置+效率）在技能段后,
+    // 段落顺序与改造前逐字节一致。
+    const promptSections = profile.promptSections({ execMode, cwd });
+    systemParts.push(...promptSections.guidance);
+    systemParts.push(...skillLoadout.sections);
+    systemParts.push(...promptSections.environment);
 
     const workingMessages: ChatMessage[] = [];
     if (systemParts.length) {
@@ -349,7 +279,7 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
     // 自定义工具（HTTP/JS）：从 custom_tools 表 + 启用技能自带工具加载，喂给 LLM 并在云端执行。
     let customTools: Map<string, LoadedCustomTool> | undefined;
     try {
-      const loaded = await loadCustomTools(appId(), agentConfig);
+      const loaded = await loadCustomTools(appId, agentConfig);
       if (loaded.length) {
         customTools = new Map(loaded.map((t) => [t.name, t]));
         console.log(`[agent-core] run=${runId} custom tools: ${loaded.map((t) => `${t.name}(${t.executor})`).join(', ')}`);
@@ -359,8 +289,8 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
     }
 
     const toolCtx: ToolContext = {
-      userId, sessionId, appId: appId(), runId, signal: ac.signal, customTools,
-      enabledSkillIds, execMode, cwd, approvalMode,
+      userId, sessionId, appId, runId, signal: ac.signal, customTools,
+      enabledSkillIds, execMode, cwd, approvalMode, profile,
     };
     const toolDefs = getToolDefinitions(toolCtx);
 
@@ -405,7 +335,7 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
         model,
         apiModelId,
         messages: workingMessages,
-        projectSource: appId(),
+        projectSource: appId,
         temperature: 0.7,
         tools: toolDefs,
         toolChoice: lastIter ? 'none' : 'auto',
@@ -449,7 +379,7 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
       const consumed = await consumeTokenPoints(user.id, cost).catch(() => ({ ok: true } as any));
       await logApiUsage(
         user.username, modelId, model.name, model.provider,
-        res.usage.prompt_tokens, res.usage.completion_tokens, true, undefined, appId(), cost,
+        res.usage.prompt_tokens, res.usage.completion_tokens, true, undefined, appId, cost,
       ).catch(() => {});
 
       if (!res.toolCalls || res.toolCalls.length === 0 || lastIter) {

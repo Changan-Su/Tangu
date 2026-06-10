@@ -1,0 +1,177 @@
+/**
+ * 会话 CRUD + 历史消息 + 会话级 agent 配置(桌面/多端客户端用;handler 自带 authMiddleware)。
+ *   GET    /agent/sessions?archived=&limit=        列出本人本 app 的会话(updated_at 降序)
+ *   POST   /agent/sessions { title?, model_id?, emoji? }
+ *   PATCH  /agent/sessions/:id { title?, archived?, model_id?, emoji? }
+ *   DELETE /agent/sessions/:id                     显式级联(messages/runs/steps/events——standalone 无 FK CASCADE)
+ *   GET    /agent/sessions/:id/messages?limit=&before=
+ *   GET    /agent/sessions/:id/config              读 agent_config(enabledSkillIds/execMode/approvalMode/…)
+ *   PUT    /agent/sessions/:id/config              整体替换 agent_config
+ */
+import { Router } from 'express';
+import { v4 as uuidv4 } from 'uuid';
+import { authMiddleware, AuthRequest } from '../core/http.js';
+import { query, getNowSql } from '../core/db.js';
+import { resolveProfile } from '../seams/appProfile.js';
+
+const router = Router();
+
+const SESSION_COLS = 'id, title, model_id, archived, emoji, agent_config, created_at, updated_at';
+
+function parseMaybeJson(v: any): any {
+  if (v == null) return null;
+  if (typeof v !== 'string') return v;
+  try { return JSON.parse(v); } catch { return null; }
+}
+
+function rowToSession(r: any): any {
+  return { ...r, agent_config: parseMaybeJson(r.agent_config) };
+}
+
+/** 取本人会话行(含 app 归属校验);不存在/非本人 → null。 */
+async function getOwnSession(sessionId: string, userId: string): Promise<any | null> {
+  const rows = await query<any[]>(
+    `SELECT ${SESSION_COLS}, user_id, app_id FROM chat_sessions WHERE id = ? LIMIT 1`,
+    [sessionId],
+  );
+  const s = rows[0];
+  if (!s || s.user_id !== userId) return null;
+  return s;
+}
+
+router.get('/agent/sessions', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.user!.userId;
+    const profile = resolveProfile(req.query.app_id ? String(req.query.app_id) : undefined);
+    if (!profile) return res.status(400).json({ detail: `unknown app_id: ${req.query.app_id}` });
+    const archived = req.query.archived === 'true';
+    const limit = Math.floor(Math.min(Math.max(1, Number(req.query.limit) || 200), 500)); // floor:非整数插进 LIMIT 会成非法 SQL
+    const rows = await query<any[]>(
+      `SELECT ${SESSION_COLS} FROM chat_sessions
+       WHERE user_id = ? AND app_id = ? AND archived = ?
+       ORDER BY updated_at DESC LIMIT ${limit}`,
+      [userId, profile.appId, archived],
+    );
+    res.json({ sessions: rows.map(rowToSession) });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'list sessions failed' });
+  }
+});
+
+router.post('/agent/sessions', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.user!.userId;
+    const { title, model_id, emoji, app_id } = req.body || {};
+    const profile = resolveProfile(app_id);
+    if (!profile) return res.status(400).json({ detail: `unknown app_id: ${app_id}` });
+    const id = uuidv4();
+    await query(
+      `INSERT INTO chat_sessions (id, user_id, app_id, title, model_id, emoji)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [id, userId, profile.appId,
+       typeof title === 'string' && title.trim() ? title.trim().slice(0, 200) : 'New Chat',
+       typeof model_id === 'string' && model_id ? model_id : profile.defaultModelId || null,
+       typeof emoji === 'string' && emoji ? emoji.slice(0, 16) : null],
+    );
+    const rows = await query<any[]>(`SELECT ${SESSION_COLS} FROM chat_sessions WHERE id = ?`, [id]);
+    res.json({ session: rowToSession(rows[0]) });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'create session failed' });
+  }
+});
+
+router.patch('/agent/sessions/:id', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.user!.userId;
+    const s = await getOwnSession(req.params.id, userId);
+    if (!s) return res.status(404).json({ detail: 'Session not found' });
+    const { title, archived, model_id, emoji } = req.body || {};
+    const sets: string[] = [];
+    const params: any[] = [];
+    if (typeof title === 'string') { sets.push('title = ?'); params.push(title.trim().slice(0, 200)); }
+    if (typeof archived === 'boolean') { sets.push('archived = ?'); params.push(archived); }
+    if (typeof model_id === 'string') { sets.push('model_id = ?'); params.push(model_id || null); }
+    if (typeof emoji === 'string' || emoji === null) { sets.push('emoji = ?'); params.push(emoji ? String(emoji).slice(0, 16) : null); }
+    if (!sets.length) return res.status(400).json({ detail: 'nothing to update' });
+    sets.push(`updated_at = ${getNowSql()}`);
+    params.push(req.params.id);
+    await query(`UPDATE chat_sessions SET ${sets.join(', ')} WHERE id = ?`, params);
+    const rows = await query<any[]>(`SELECT ${SESSION_COLS} FROM chat_sessions WHERE id = ?`, [req.params.id]);
+    res.json({ session: rowToSession(rows[0]) });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'update session failed' });
+  }
+});
+
+router.delete('/agent/sessions/:id', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.user!.userId;
+    const s = await getOwnSession(req.params.id, userId);
+    if (!s) return res.status(404).json({ detail: 'Session not found' });
+    const sid = req.params.id;
+    // 显式级联(standalone schema 无外键 CASCADE;顺序:叶 → 根)。
+    await query(`DELETE FROM agent_run_events WHERE run_id IN (SELECT id FROM agent_runs WHERE session_id = ?)`, [sid]);
+    await query(`DELETE FROM agent_steps WHERE run_id IN (SELECT id FROM agent_runs WHERE session_id = ?)`, [sid]);
+    await query(`DELETE FROM agent_runs WHERE session_id = ?`, [sid]);
+    await query(`DELETE FROM chat_messages WHERE session_id = ?`, [sid]);
+    await query(`DELETE FROM chat_sessions WHERE id = ?`, [sid]);
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'delete session failed' });
+  }
+});
+
+router.get('/agent/sessions/:id/messages', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.user!.userId;
+    const s = await getOwnSession(req.params.id, userId);
+    if (!s) return res.status(404).json({ detail: 'Session not found' });
+    const limit = Math.floor(Math.min(Math.max(1, Number(req.query.limit) || 200), 500)); // floor:非整数插进 LIMIT 会成非法 SQL
+    const before = Number(req.query.before) || 0;
+    const rows = await query<any[]>(
+      `SELECT id, role, content, reasoning, tool_calls, tool_results, attachments, timestamp, model_id, is_error
+       FROM chat_messages WHERE session_id = ?${before ? ' AND timestamp < ?' : ''}
+       ORDER BY timestamp DESC LIMIT ${limit}`,
+      before ? [req.params.id, before] : [req.params.id],
+    );
+    rows.reverse(); // 时间正序
+    res.json({
+      messages: rows.map((r) => ({
+        ...r,
+        tool_calls: parseMaybeJson(r.tool_calls),
+        tool_results: parseMaybeJson(r.tool_results),
+        attachments: parseMaybeJson(r.attachments),
+      })),
+    });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'list messages failed' });
+  }
+});
+
+router.get('/agent/sessions/:id/config', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.user!.userId;
+    const s = await getOwnSession(req.params.id, userId);
+    if (!s) return res.status(404).json({ detail: 'Session not found' });
+    res.json({ agent_config: parseMaybeJson(s.agent_config) || {} });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'get config failed' });
+  }
+});
+
+router.put('/agent/sessions/:id/config', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.user!.userId;
+    const s = await getOwnSession(req.params.id, userId);
+    if (!s) return res.status(404).json({ detail: 'Session not found' });
+    const cfg = req.body && typeof req.body === 'object' ? req.body : {};
+    await query(`UPDATE chat_sessions SET agent_config = ?, updated_at = ${getNowSql()} WHERE id = ?`, [
+      JSON.stringify(cfg), req.params.id,
+    ]);
+    res.json({ agent_config: cfg });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'put config failed' });
+  }
+});
+
+export default router;

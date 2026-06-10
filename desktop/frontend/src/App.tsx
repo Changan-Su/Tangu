@@ -1,138 +1,578 @@
-import { useEffect, useRef, useState } from 'react'
-import type { AgentRunEvent, TanguDesktopConfig } from './types'
-import { startRun, subscribeRunEvents, abortRun, testConnection } from './services/agentRunService'
+/**
+ * Tangu Desktop 应用壳:侧栏(多会话)+ 聊天流 + 输入区 + 设置 + 右侧面板。
+ * run 流式:startRun → SSE 归约进对应 assistant 消息(后台会话照常跑,完成标未读)。
+ */
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type {
+  AgentConfig, AgentRunEvent, Attachment, SessionRecord, TanguDesktopConfig, UiMessage,
+} from './types'
+import * as api from './services/backendService'
+import { abortRun, listActiveRuns, resolveApproval, startRun, subscribeRunEvents, testConnection } from './services/agentRunService'
+import { Sidebar } from './components/Sidebar'
+import { ChatHeader } from './components/ChatHeader'
+import { ChatArea } from './components/ChatArea'
+import { MessageInput } from './components/MessageInput'
+import { SettingsModal } from './components/SettingsModal'
+import { RightPanel } from './components/RightPanel'
+import { resolveInitialMode, resolveInitialPreset } from './theme/registry'
 
-const DEFAULT_CONFIG: TanguDesktopConfig = { backendUrl: 'http://localhost:8787', token: '', modelId: '' }
+const UNREAD_KEY = 'forsion_tangu_unread_sessions'
 
-interface ToolEntry { id: string; name: string; result?: string; isError?: boolean }
-interface Msg { role: 'user' | 'assistant'; content: string; tools?: ToolEntry[] }
+function loadUnread(): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(UNREAD_KEY) || '[]')) } catch { return new Set() }
+}
+function saveUnread(s: Set<string>): void {
+  try { localStorage.setItem(UNREAD_KEY, JSON.stringify([...s])) } catch { /* ignore */ }
+}
 
-export function App() {
-  const [cfg, setCfg] = useState<TanguDesktopConfig>(DEFAULT_CONFIG)
-  const [status, setStatus] = useState<{ kind: 'idle' | 'ok' | 'err'; text: string }>({ kind: 'idle', text: '未连接' })
-  const [messages, setMessages] = useState<Msg[]>([])
-  const [draft, setDraft] = useState('')
-  const [running, setRunning] = useState(false)
-  const abortRef = useRef<AbortController | null>(null)
-  const sessionId = useRef<string>(cryptoRandomId())
-  const streamRef = useRef<HTMLDivElement | null>(null)
-
-  // 启动:从主进程读本地配置
-  useEffect(() => {
-    window.tangu?.getConfig().then((c) => c && setCfg((p) => ({ ...p, ...c }))).catch(() => {})
-  }, [])
-
-  useEffect(() => {
-    streamRef.current?.scrollTo({ top: streamRef.current.scrollHeight })
-  }, [messages])
-
-  const persist = (patch: Partial<TanguDesktopConfig>) => {
-    const next = { ...cfg, ...patch }
-    setCfg(next)
-    window.tangu?.setConfig(patch).catch(() => {})
+/** 历史行 → UI 消息(tool_calls/tool_results 配对成 toolEvents)。 */
+function recordToUi(r: any): UiMessage {
+  const role = r.role === 'model' || r.role === 'assistant' ? 'assistant' : 'user'
+  const msg: UiMessage = {
+    id: r.id,
+    role,
+    content: r.content || '',
+    reasoning: r.reasoning || undefined,
+    attachments: r.attachments || undefined,
+    status: 'done',
+    timestamp: Number(r.timestamp) || 0,
   }
-
-  const onConnect = async () => {
-    setStatus({ kind: 'idle', text: '连接中…' })
-    const r = await testConnection(cfg)
-    setStatus({ kind: r.ok ? 'ok' : 'err', text: r.message })
-  }
-
-  const setAssistant = (mutate: (m: Msg) => void) => {
-    setMessages((prev) => {
-      const next = [...prev]
-      const last = next[next.length - 1]
-      if (last && last.role === 'assistant') mutate(last)
-      return next
+  if (role === 'assistant' && Array.isArray(r.tool_calls) && r.tool_calls.length) {
+    const results = new Map<string, any>(
+      (Array.isArray(r.tool_results) ? r.tool_results : []).map((t: any) => [t.tool_call_id, t]),
+    )
+    msg.toolEvents = r.tool_calls.map((c: any) => {
+      const res = results.get(c.id)
+      return {
+        id: c.id,
+        name: c.function?.name || c.name || 'tool',
+        arguments: c.function?.arguments,
+        result: res ? String(res.content ?? '') : undefined,
+        isError: res?.isError || false,
+        done: true,
+      }
     })
   }
+  if (r.is_error) msg.status = 'error'
+  return msg
+}
 
-  const onEvent = (ev: AgentRunEvent) => {
-    const p = ev.payload || {}
+export function App(): React.JSX.Element {
+  const [cfg, setCfg] = useState<TanguDesktopConfig>({ backendUrl: 'http://localhost:8787', token: '', modelId: '' })
+  const [cfgLoaded, setCfgLoaded] = useState(false)
+  const [connState, setConnState] = useState<'idle' | 'ok' | 'err'>('idle')
+  const [connMessage, setConnMessage] = useState('')
+
+  const [sessions, setSessions] = useState<SessionRecord[]>([])
+  const [archivedSessions, setArchivedSessions] = useState<SessionRecord[]>([])
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [messagesBySession, setMessagesBySession] = useState<Record<string, UiMessage[]>>({})
+  const [configBySession, setConfigBySession] = useState<Record<string, AgentConfig>>({})
+  const [runningBySession, setRunningBySession] = useState<Record<string, string>>({})
+  const [unread, setUnread] = useState<Set<string>>(loadUnread)
+
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [rightOpen, setRightOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [themePreset, setThemePreset] = useState(resolveInitialPreset)
+  const [themeMode, setThemeMode] = useState<'light' | 'dark'>(resolveInitialMode)
+  const [glassOn, setGlassOn] = useState(() => {
+    try { return localStorage.getItem('forsion_glass') !== 'off' } catch { return true }
+  })
+  const [toasts, setToasts] = useState<Array<{ id: number; text: string; error?: boolean }>>([])
+
+  const cfgRef = useRef(cfg)
+  cfgRef.current = cfg
+  const activeIdRef = useRef(activeId)
+  activeIdRef.current = activeId
+  const runAborts = useRef(new Map<string, AbortController>())
+  const subscribedRuns = useRef(new Set<string>())
+  const loadedHistory = useRef(new Set<string>())
+
+  const toast = useCallback((text: string, error = false) => {
+    const id = Date.now() + Math.random()
+    setToasts((t) => [...t, { id, text, error }])
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200)
+  }, [])
+
+  // ── 消息更新助手 ──
+  const patchMessage = useCallback((sessionId: string, messageId: string, fn: (m: UiMessage) => UiMessage) => {
+    setMessagesBySession((prev) => {
+      const list = prev[sessionId]
+      if (!list) return prev
+      const i = list.findIndex((m) => m.id === messageId)
+      if (i < 0) return prev
+      const next = list.slice()
+      next[i] = fn(next[i])
+      return { ...prev, [sessionId]: next }
+    })
+  }, [])
+
+  const endRun = useCallback((sessionId: string, runId: string) => {
+    runAborts.current.delete(runId)
+    subscribedRuns.current.delete(runId)
+    setRunningBySession((prev) => {
+      if (prev[sessionId] !== runId) return prev
+      const next = { ...prev }
+      delete next[sessionId]
+      return next
+    })
+    if (activeIdRef.current !== sessionId) {
+      setUnread((prev) => {
+        const next = new Set(prev)
+        next.add(sessionId)
+        saveUnread(next)
+        return next
+      })
+    }
+  }, [])
+
+  // ── SSE 事件归约 ──
+  const reduceEvent = useCallback((sessionId: string, runId: string, assistantId: string, ev: AgentRunEvent) => {
+    const pl = ev.payload || {}
     switch (ev.type) {
       case 'token':
-        if (p.delta) setAssistant((m) => { m.content += p.delta })
+        patchMessage(sessionId, assistantId, (m) => ({ ...m, content: m.content + (pl.delta || '') }))
         break
-      case 'tool_call':
-        setAssistant((m) => { (m.tools ||= []).push({ id: p.id, name: p.name }) })
+      case 'reasoning':
+        patchMessage(sessionId, assistantId, (m) => ({ ...m, reasoning: (m.reasoning || '') + (pl.delta || '') }))
         break
-      case 'tool_result':
-        setAssistant((m) => {
-          const t = (m.tools ||= []).find((x) => x.id === p.id)
-          if (t) { t.result = String(p.result ?? '').slice(0, 600); t.isError = !!p.isError }
+      case 'tool_stream':
+        patchMessage(sessionId, assistantId, (m) => {
+          const evs = (m.toolEvents || []).slice()
+          const i = evs.findIndex((t) => t.id === pl.id)
+          if (i >= 0) evs[i] = { ...evs[i], arguments: (evs[i].arguments || '') + (pl.delta || '') }
+          else evs.push({ id: pl.id, name: pl.name || 'tool', arguments: pl.delta || '', done: false })
+          return { ...m, toolEvents: evs }
         })
         break
+      case 'tool_call':
+        patchMessage(sessionId, assistantId, (m) => {
+          const evs = (m.toolEvents || []).slice()
+          const i = evs.findIndex((t) => t.id === pl.id)
+          const item = { id: pl.id, name: pl.name, arguments: pl.arguments, done: false }
+          if (i >= 0) evs[i] = { ...evs[i], ...item }
+          else evs.push(item)
+          return { ...m, toolEvents: evs }
+        })
+        break
+      case 'tool_result':
+        patchMessage(sessionId, assistantId, (m) => {
+          const evs = (m.toolEvents || []).slice()
+          const i = evs.findIndex((t) => t.id === pl.id)
+          if (i >= 0) evs[i] = { ...evs[i], result: String(pl.result ?? ''), isError: !!pl.isError, done: true }
+          return { ...m, toolEvents: evs }
+        })
+        break
+      case 'approval_request':
+        patchMessage(sessionId, assistantId, (m) => ({
+          ...m,
+          approvals: [
+            ...(m.approvals || []),
+            {
+              approvalId: pl.approvalId, runId, name: pl.name,
+              arguments: pl.arguments, preview: pl.preview || '', status: 'pending' as const,
+            },
+          ],
+        }))
+        break
+      case 'approval_result':
+        patchMessage(sessionId, assistantId, (m) => ({
+          ...m,
+          approvals: (m.approvals || []).map((a) =>
+            a.approvalId === pl.approvalId
+              ? { ...a, status: pl.action === 'reject' ? ('rejected' as const) : ('approved' as const) }
+              : a,
+          ),
+        }))
+        break
       case 'done':
-        if (p.content) setAssistant((m) => { if (!m.content) m.content = p.content })
-        setRunning(false)
+        patchMessage(sessionId, assistantId, (m) => ({
+          ...m,
+          content: pl.content || m.content,
+          status: 'done' as const,
+          approvals: (m.approvals || []).map((a) => (a.status === 'pending' ? { ...a, status: 'expired' as const } : a)),
+        }))
+        endRun(sessionId, runId)
         break
       case 'error':
-        setAssistant((m) => { m.content += `\n\n[错误] ${p.error || ''}` })
-        setRunning(false)
+        patchMessage(sessionId, assistantId, (m) => ({
+          ...m,
+          status: 'error' as const,
+          error: pl.error || 'error',
+          approvals: (m.approvals || []).map((a) => (a.status === 'pending' ? { ...a, status: 'expired' as const } : a)),
+        }))
+        endRun(sessionId, runId)
+        break
+      default:
         break
     }
-  }
+  }, [patchMessage, endRun])
 
-  const onSend = async () => {
-    const text = draft.trim()
-    if (!text || running) return
-    setDraft('')
-    setMessages((prev) => [...prev, { role: 'user', content: text }, { role: 'assistant', content: '', tools: [] }])
-    setRunning(true)
+  const subscribeRun = useCallback(
+    (sessionId: string, runId: string, assistantId: string) => {
+      if (subscribedRuns.current.has(runId)) return
+      subscribedRuns.current.add(runId)
+      const ac = new AbortController()
+      runAborts.current.set(runId, ac)
+      setRunningBySession((prev) => ({ ...prev, [sessionId]: runId }))
+      void subscribeRunEvents(cfgRef.current, runId, (ev) => reduceEvent(sessionId, runId, assistantId, ev), ac.signal)
+        .catch((e) => {
+          patchMessage(sessionId, assistantId, (m) => ({ ...m, status: 'error', error: e?.message || '事件流中断' }))
+          endRun(sessionId, runId)
+        })
+    },
+    [reduceEvent, endRun, patchMessage],
+  )
+
+  // ── 启动:配置 → 连接 → 会话列表 ──
+  const refreshSessions = useCallback(async (c: TanguDesktopConfig) => {
+    const [act, arch] = await Promise.all([api.listSessions(c, false), api.listSessions(c, true)])
+    setSessions(act)
+    setArchivedSessions(arch)
+    return act
+  }, [])
+
+  const connect = useCallback(async (c: TanguDesktopConfig) => {
+    const r = await testConnection(c)
+    setConnState(r.ok ? 'ok' : 'err')
+    setConnMessage(r.message)
+    if (!r.ok) return
     try {
-      const { runId } = await startRun(cfg, { sessionId: sessionId.current, message: text })
-      abortRef.current = new AbortController()
-      await subscribeRunEvents(cfg, runId, onEvent, abortRef.current.signal)
+      const act = await refreshSessions(c)
+      setActiveId((cur) => (cur && act.some((s) => s.id === cur) ? cur : (act[0]?.id ?? null)))
     } catch (e: any) {
-      setAssistant((m) => { m.content += `\n\n[发起失败] ${e?.message || e}` })
-      setStatus({ kind: 'err', text: e?.message || '发起失败' })
-    } finally {
-      setRunning(false)
+      toast(`会话列表加载失败:${e?.message || e}`, true)
     }
-  }
+  }, [refreshSessions, toast])
 
-  const onStop = () => { abortRef.current?.abort(); setRunning(false) }
+  useEffect(() => {
+    void (async () => {
+      const stored = await window.tangu?.getConfig()
+      const merged = {
+        backendUrl: stored?.backendUrl || cfgRef.current.backendUrl,
+        token: stored?.token ?? cfgRef.current.token,
+        modelId: stored?.modelId ?? cfgRef.current.modelId,
+      }
+      setCfg(merged)
+      setCfgLoaded(true)
+      if (merged.token || stored?.mode === 'managed') void connect(merged)
+    })()
+    // managed 后端状态推送:就绪 → 取折算配置重连;崩溃 → 标离线。
+    const off = window.tangu?.onBackendStatus?.((st) => {
+      if (st.state === 'ready') {
+        void window.tangu!.getConfig().then((c) => {
+          const eff = { backendUrl: c.backendUrl, token: c.token, modelId: c.modelId }
+          setCfg(eff)
+          void connect(eff)
+        })
+      } else if (st.state === 'crashed') {
+        setConnState('err')
+        setConnMessage(st.lastError || '托管后端已退出')
+      }
+    })
+    return () => off?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── 选中会话:懒加载历史 + 恢复在飞 run + 清未读 ──
+  useEffect(() => {
+    if (!activeId || connState !== 'ok') return
+    setUnread((prev) => {
+      if (!prev.has(activeId)) return prev
+      const next = new Set(prev)
+      next.delete(activeId)
+      saveUnread(next)
+      return next
+    })
+    if (loadedHistory.current.has(activeId)) return
+    loadedHistory.current.add(activeId)
+    void (async () => {
+      try {
+        const [records, config, active] = await Promise.all([
+          api.listMessages(cfgRef.current, activeId),
+          api.getSessionConfig(cfgRef.current, activeId).catch(() => ({} as AgentConfig)),
+          listActiveRuns(cfgRef.current, activeId),
+        ])
+        setConfigBySession((prev) => ({ ...prev, [activeId]: config }))
+        setMessagesBySession((prev) => {
+          // SSE 已在写的消息(本地比远端新)保留
+          const existing = prev[activeId] || []
+          const ui = records.map(recordToUi)
+          const byId = new Map(ui.map((m) => [m.id, m] as const))
+          for (const m of existing) byId.set(m.id, m)
+          return { ...prev, [activeId]: [...byId.values()].sort((a, b) => a.timestamp - b.timestamp) }
+        })
+        // 恢复订阅在飞 run(刷新/重启后)
+        for (const run of active) {
+          if ((run.status === 'running' || run.status === 'queued') && run.assistant_message_id) {
+            const amid = run.assistant_message_id
+            setMessagesBySession((prev) => {
+              const list = prev[activeId] || []
+              if (list.some((m) => m.id === amid)) return prev
+              return {
+                ...prev,
+                [activeId]: [...list, { id: amid, role: 'assistant', content: '', status: 'streaming', timestamp: Date.now() }],
+              }
+            })
+            subscribeRun(activeId, run.id, amid)
+          }
+        }
+      } catch (e: any) {
+        loadedHistory.current.delete(activeId)
+        toast(`历史加载失败:${e?.message || e}`, true)
+      }
+    })()
+  }, [activeId, connState, subscribeRun, toast])
+
+  // ── 会话操作 ──
+  const newSession = useCallback(async () => {
+    try {
+      const s = await api.createSession(cfgRef.current)
+      setSessions((prev) => [s, ...prev])
+      setActiveId(s.id)
+      loadedHistory.current.add(s.id)
+      setMessagesBySession((prev) => ({ ...prev, [s.id]: [] }))
+    } catch (e: any) {
+      toast(`新建失败:${e?.message || e}`, true)
+    }
+  }, [toast])
+
+  const renameSession = useCallback(async (id: string, title: string) => {
+    setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title } : s)))
+    setArchivedSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title } : s)))
+    try {
+      await api.updateSession(cfgRef.current, id, { title })
+    } catch (e: any) {
+      toast(`重命名失败:${e?.message || e}`, true)
+    }
+  }, [toast])
+
+  const archiveSession = useCallback(async (id: string, archived: boolean) => {
+    try {
+      await api.updateSession(cfgRef.current, id, { archived })
+      await refreshSessions(cfgRef.current)
+      if (archived && activeIdRef.current === id) setActiveId(null)
+    } catch (e: any) {
+      toast(`操作失败:${e?.message || e}`, true)
+    }
+  }, [refreshSessions, toast])
+
+  const deleteSession = useCallback(async (id: string) => {
+    try {
+      await api.deleteSession(cfgRef.current, id)
+      setSessions((prev) => prev.filter((s) => s.id !== id))
+      setArchivedSessions((prev) => prev.filter((s) => s.id !== id))
+      loadedHistory.current.delete(id)
+      if (activeIdRef.current === id) setActiveId(null)
+    } catch (e: any) {
+      toast(`删除失败:${e?.message || e}`, true)
+    }
+  }, [toast])
+
+  // ── 发送 / 停止 / 审批 ──
+  const send = useCallback(async (text: string, attachments: Attachment[]): Promise<boolean> => {
+    let sid = activeIdRef.current
+    if (!sid) {
+      const s = await api.createSession(cfgRef.current).catch(() => null)
+      if (!s) {
+        toast('无法创建会话', true)
+        return false
+      }
+      setSessions((prev) => [s, ...prev])
+      setActiveId(s.id)
+      loadedHistory.current.add(s.id)
+      sid = s.id
+    }
+    const sessionId = sid
+    const agentConfig = { ...(configBySession[sessionId] || {}) }
+    try {
+      const r = await startRun(cfgRef.current, { sessionId, message: text, attachments, agentConfig })
+      setMessagesBySession((prev) => ({
+        ...prev,
+        [sessionId]: [
+          ...(prev[sessionId] || []),
+          { id: r.userMessageId, role: 'user', content: text, attachments, status: 'done', timestamp: Date.now() },
+          { id: r.assistantMessageId, role: 'assistant', content: '', status: 'streaming', timestamp: Date.now() + 1 },
+        ],
+      }))
+      subscribeRun(sessionId, r.runId, r.assistantMessageId)
+      // 自动命名:首条消息给 New Chat 改名
+      const sess = sessions.find((s) => s.id === sessionId)
+      if (sess && (!sess.title || sess.title === 'New Chat')) {
+        void renameSession(sessionId, text.slice(0, 30))
+      }
+      return true
+    } catch (e: any) {
+      toast(`发送失败:${e?.message || e}`, true)
+      return false
+    }
+  }, [configBySession, sessions, subscribeRun, renameSession, toast])
+
+  const stop = useCallback(() => {
+    const sid = activeIdRef.current
+    if (!sid) return
+    const runId = runningBySession[sid]
+    if (runId) void abortRun(cfgRef.current, runId)
+  }, [runningBySession])
+
+  const decideApproval = useCallback(
+    async (messageId: string, approvalId: string, action: 'approve' | 'approve_always' | 'reject', argsOverride?: Record<string, any>) => {
+      const sid = activeIdRef.current
+      if (!sid) return
+      // runId 取自审批对象本身(approval_request 事件已带),不依赖易失的 runningBySession
+      // (run 结束/切会话后仍可兑现,服务端对过期审批回 410)。
+      const approval = (messagesBySession[sid] || [])
+        .find((m) => m.id === messageId)
+        ?.approvals?.find((a) => a.approvalId === approvalId)
+      if (!approval?.runId) return
+      const r = await resolveApproval(cfgRef.current, approval.runId, approvalId, action, argsOverride)
+      if (r.gone) {
+        patchMessage(sid, messageId, (m) => ({
+          ...m,
+          approvals: (m.approvals || []).map((a) => (a.approvalId === approvalId ? { ...a, status: 'expired' as const } : a)),
+        }))
+      }
+    },
+    [messagesBySession, patchMessage],
+  )
+
+  const setExecConfig = useCallback((patch: Pick<AgentConfig, 'execMode' | 'approvalMode'>) => {
+    const sid = activeIdRef.current
+    if (!sid) return
+    setConfigBySession((prev) => {
+      const next = { ...(prev[sid] || {}), ...patch }
+      void api.putSessionConfig(cfgRef.current, sid, next).catch(() => {})
+      return { ...prev, [sid]: next }
+    })
+  }, [])
+
+  // ── 设置 ──
+  const patchConfig = useCallback((patch: Partial<TanguDesktopConfig>) => {
+    setCfg((prev) => {
+      const merged = { ...prev, ...patch }
+      void window.tangu?.setConfig(patch)
+      return merged
+    })
+  }, [])
+
+  const onGlassChange = useCallback((on: boolean) => {
+    setGlassOn(on)
+    document.documentElement.dataset.glass = on ? 'on' : 'off'
+    try { localStorage.setItem('forsion_glass', on ? 'on' : 'off') } catch { /* ignore */ }
+  }, [])
+
+  // 快捷键:Cmd/Ctrl+N 新会话,Cmd/Ctrl+, 设置
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey
+      if (!mod) return
+      if (e.key === 'n') {
+        e.preventDefault()
+        void newSession()
+      }
+      if (e.key === ',') {
+        e.preventDefault()
+        setSettingsOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [newSession])
+
+  const activeSession = useMemo(
+    () => sessions.find((s) => s.id === activeId) || archivedSessions.find((s) => s.id === activeId) || null,
+    [sessions, archivedSessions, activeId],
+  )
+  const activeMessages = (activeId && messagesBySession[activeId]) || []
+  const running = !!(activeId && runningBySession[activeId])
+  const runningIds = useMemo(() => new Set(Object.keys(runningBySession)), [runningBySession])
+  const execConfig = (activeId && configBySession[activeId]) || {}
+
+  if (!cfgLoaded) return <div className="app" />
 
   return (
     <div className="app">
-      <div className="titlebar">
-        <span className="brand">扶桑 · Tangu</span>
-        <input className="field field-url" placeholder="后端地址" value={cfg.backendUrl}
-          onChange={(e) => persist({ backendUrl: e.target.value })} />
-        <input className="field field-token" placeholder="token" type="password" value={cfg.token}
-          onChange={(e) => persist({ token: e.target.value })} />
-        <input className="field field-model" placeholder="模型 id" value={cfg.modelId}
-          onChange={(e) => persist({ modelId: e.target.value })} />
-        <button className="btn ghost" onClick={onConnect}>连接</button>
-        <span className={`status ${status.kind}`}>{status.text}</span>
-      </div>
+      <Sidebar
+        collapsed={sidebarCollapsed}
+        sessions={sessions}
+        archivedSessions={archivedSessions}
+        activeId={activeId}
+        runningIds={runningIds}
+        unreadIds={unread}
+        onSelect={setActiveId}
+        onNew={() => void newSession()}
+        onRename={(id, t) => void renameSession(id, t)}
+        onArchive={(id, a) => void archiveSession(id, a)}
+        onDelete={(id) => void deleteSession(id)}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
+      <main className="main">
+        <ChatHeader
+          title={activeSession?.title || 'Tangu Agent'}
+          modelId={cfg.modelId}
+          connState={connState}
+          connMessage={connMessage}
+          sidebarCollapsed={sidebarCollapsed}
+          rightOpen={rightOpen}
+          onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
+          onToggleRight={() => setRightOpen(!rightOpen)}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
+        <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <ChatArea
+              messages={activeMessages}
+              onApproval={(mid, aid, action, args) => void decideApproval(mid, aid, action, args)}
+            />
+            <MessageInput
+              disabled={connState !== 'ok'}
+              running={running}
+              execConfig={execConfig}
+              onExecConfigChange={setExecConfig}
+              onSend={send}
+              onStop={stop}
+            />
+          </div>
+          {rightOpen && activeId && (
+            <RightPanel
+              cfg={cfg}
+              sessionId={activeId}
+              sessionConfig={execConfig}
+              running={running}
+              onConfigChange={(c) => {
+                setConfigBySession((prev) => ({ ...prev, [activeId]: c }))
+                void api.putSessionConfig(cfgRef.current, activeId, c).catch(() => {})
+              }}
+              onToast={toast}
+            />
+          )}
+        </div>
+      </main>
 
-      <div className="stream" ref={streamRef}>
-        {messages.map((m, i) => (
-          <div key={i} className={`msg ${m.role}`}>
-            <div className="role">{m.role === 'user' ? '我' : 'Tangu'}</div>
-            {m.tools?.map((t) => (
-              <div key={t.id} className={`tool ${t.isError ? 'err' : ''}`}>
-                ⚙ {t.name}{t.result != null ? `\n${t.result}` : ' …'}
-              </div>
-            ))}
-            <div className="bubble">{m.content || (m.role === 'assistant' && running ? '…' : '')}</div>
+      <SettingsModal
+        open={settingsOpen}
+        cfg={cfg}
+        themePreset={themePreset}
+        themeMode={themeMode}
+        glassOn={glassOn}
+        onClose={() => setSettingsOpen(false)}
+        onConfigChange={patchConfig}
+        onThemeChange={(preset, mode) => {
+          setThemePreset(preset)
+          setThemeMode(mode)
+        }}
+        onGlassChange={onGlassChange}
+        onReconnect={(patch) => void connect({ ...cfgRef.current, ...(patch || {}) })}
+      />
+
+      <div className="toast-wrap">
+        {toasts.map((t) => (
+          <div key={t.id} className={`toast${t.error ? ' error' : ''}`}>
+            {t.text}
           </div>
         ))}
       </div>
-
-      <div className="composer">
-        <textarea className="input" placeholder="给 Tangu 发消息…(Ctrl/⌘+Enter 发送)" value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') onSend() }} />
-        {running
-          ? <button className="btn danger" onClick={onStop}>停止</button>
-          : <button className="btn" onClick={onSend} disabled={!draft.trim()}>发送</button>}
-      </div>
     </div>
   )
-}
-
-function cryptoRandomId(): string {
-  try { return crypto.randomUUID() } catch { return 'sess-' + Math.floor(Date.now()).toString(36) }
 }

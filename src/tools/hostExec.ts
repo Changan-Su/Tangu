@@ -12,7 +12,8 @@ import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { Tool } from '../core/types.js';
-import type { ToolContext, ToolImpl } from './registry.js';
+import type { ToolContext, ToolImpl } from './toolTypes.js';
+import type { ToolProvider } from './toolRegistry.js';
 
 const READ_MAX_CHARS = 100_000;
 const READ_MAX_LINES = 2000;
@@ -277,4 +278,19 @@ export const HOST_TOOLS: Record<string, ToolImpl> = {
       return lines.join('\n');
     },
   },
+};
+
+/**
+ * host-exec 工具的 ToolProvider 包装(G3)。三重门禁:工具自身 mode:'host'(非 host 模式被滤)、
+ * profile.capabilities.hostExec(云端 profile 永不暴露)、loop 的 execMode 能力闸门(agentLoop)。
+ * 注册在所有内置 provider 之后——host 模式下按注册序追加在末尾,对齐原「HOST_TOOLS 末尾叠加」行为。
+ */
+export const hostExecProvider: ToolProvider = {
+  id: 'builtin:host-exec',
+  tools: () =>
+    Object.entries(HOST_TOOLS).map(([name, t]) => ({
+      name,
+      ...t,
+      isEnabledFor: (profile) => profile.capabilities.hostExec,
+    })),
 };

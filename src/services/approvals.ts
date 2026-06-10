@@ -23,6 +23,7 @@ export interface ApprovalDecision {
 }
 
 interface Pending {
+  runId: string;
   resolve: (d: ApprovalDecision) => void;
 }
 
@@ -81,6 +82,7 @@ export function requestApproval(
     };
     if (signal) signal.addEventListener('abort', onAbort, { once: true });
     pending.set(approvalId, {
+      runId,
       resolve: (d) => {
         if (signal) signal.removeEventListener('abort', onAbort);
         resolve(d);
@@ -95,12 +97,14 @@ export function requestApproval(
   });
 }
 
-/** TUI 按键时调用：兑现某审批。返回 false 表示该 id 已不在等待（重复/过期）。 */
+/** TUI 按键 / HTTP 审批端点调用：兑现某审批。返回 false 表示该 id 已不在等待（重复/过期）。 */
 export function resolveApproval(approvalId: string, decision: ApprovalDecision): boolean {
   const p = pending.get(approvalId);
   if (!p) return false;
   pending.delete(approvalId);
   p.resolve(decision);
+  // 广播审批结果:SSE 回放/多端订阅者据此知道该审批已被消化(TUI 忽略未知事件类型,零影响)。
+  void publish(p.runId, 'approval_result', { approvalId, action: decision.action });
   return true;
 }
 

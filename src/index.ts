@@ -12,6 +12,11 @@ import { Router } from 'express';
 import { configureTangu, type TanguDeps } from './seams/runtime.js';
 import runsRouter from './routes/runs.js';
 import workspaceRouter from './routes/workspace.js';
+import approvalsRouter from './routes/approvals.js';
+import sessionsRouter from './routes/sessions.js';
+import modelsRouter from './routes/models.js';
+import memoryRouter from './routes/memory.js';
+import assetsRouter from './routes/assets.js';
 import adminRouter from './routes/admin.js';
 import { runMigration } from './db/migrate.js';
 import { failStaleRuns } from './services/runStore.js';
@@ -23,7 +28,10 @@ import { loadHistorianConfig } from './services/historianConfig.js';
 import { startHistorian, stopHistorian } from './services/historian.js';
 
 export interface TanguModule {
+  /** session 亲和路由(runs/SSE/workspace/approvals):fleet 模式按 session 哈希转发到 worker。 */
   userRouter: Router;
+  /** 无亲和数据路由(sessions/models/memory/skills/tools):读写共享库/brain,fleet 模式由调度进程直服。 */
+  dataRouter: Router;
   adminRouter: Router;
   runMigration: () => Promise<void>;
   /**
@@ -49,6 +57,13 @@ export function createTanguModule(d: TanguDeps): TanguModule {
   const userRouter = Router();
   userRouter.use(runsRouter);
   userRouter.use(workspaceRouter);
+  userRouter.use(approvalsRouter);
+
+  const dataRouter = Router();
+  dataRouter.use(sessionsRouter);
+  dataRouter.use(modelsRouter);
+  dataRouter.use(memoryRouter);
+  dataRouter.use(assetsRouter);
 
   const startBackgroundTasks = (opts?: { recoverRuns?: boolean; historian?: boolean }): void => {
     // 进程重启自愈:遗留 running 标 failed → 重新入队仍在飞的 run(顺序不可颠倒)。
@@ -84,7 +99,7 @@ export function createTanguModule(d: TanguDeps): TanguModule {
     abortAllRuns();
   };
 
-  return { userRouter, adminRouter, runMigration, startBackgroundTasks, dispose };
+  return { userRouter, dataRouter, adminRouter, runMigration, startBackgroundTasks, dispose };
 }
 
 // ── 接缝类型导出(宿主/适配器 import 自包名 @forsion/tangu-agent)──
@@ -105,5 +120,9 @@ export type {
   StreamResult,
 } from './seams/cloudBrain.js';
 export type { BillingServices } from './seams/billing.js';
-export type { AppProfile } from './seams/appProfile.js';
+export type { AppProfile, PromptSectionCtx, PromptSections } from './seams/appProfile.js';
+export { resolveProfile } from './seams/appProfile.js';
+export { createAiStudioProfile, createTanguProfile } from './profiles/index.js';
+export type { ToolDef, ToolProvider } from './tools/toolRegistry.js';
+export type { ToolContext, ToolResult, ToolImpl } from './tools/toolTypes.js';
 export * from './core/types.js';

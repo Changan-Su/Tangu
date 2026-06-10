@@ -88,5 +88,13 @@ export async function runMigration(): Promise<void> {
     console.warn('[agent-core] historian 列迁移失败：', e?.message || e);
   }
 
+  // 会话级 agent 配置 + emoji（桌面端会话设置;幂等,云端已有同名列时为 no-op）。
+  try {
+    await query(`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS agent_config JSONB`);
+    await query(`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS emoji VARCHAR(32)`);
+  } catch (e: any) {
+    console.warn('[agent-core] agent_config/emoji 列迁移失败：', e?.message || e);
+  }
+
   console.log('✅ [agent-core] migrations done (agent_runs/agent_steps/agent_run_events)');
 }

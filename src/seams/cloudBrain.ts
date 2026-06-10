@@ -90,6 +90,8 @@ export interface AssetsBrain {
   getSkill(id: string): Promise<SkillRecord | null>;
   listCustomTools(filter?: ListFilter): Promise<CustomToolRecord[]>;
   listForcedCustomTools(appId?: string): Promise<CustomToolRecord[]>;
+  /** 技能目录(桌面/TUI 的技能面板用)。可选:旧版云端未实现时调用方降级空列表。 */
+  listSkills?(filter?: ListFilter): Promise<SkillRecord[]>;
 }
 
 export interface SearchBrain {
@@ -100,6 +102,11 @@ export interface SearchBrain {
 /** 模型目录(admin 列表用)。 */
 export interface ModelsBrain {
   listGlobalModels(...args: any[]): Promise<any[]>;
+  /**
+   * 本地直连 provider 列表(BYO-key,桌面/TUI 模型选择器用;绝不含 apiKey)。
+   * 可选:仅 standalone 的 multiBrain 实现;forsionSeams/httpBrain 不实现 → 调用方跳过。
+   */
+  listDirectProviders?(): Array<{ providerId: string; modelIds?: string[] }>;
 }
 
 /**

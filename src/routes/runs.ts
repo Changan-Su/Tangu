@@ -9,6 +9,7 @@ import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { authMiddleware, AuthRequest } from '../core/http.js';
 import { query } from '../core/db.js';
+import { resolveProfile } from '../seams/appProfile.js';
 import { createRun, getRunForUser, listActiveRunsBySession, listEventsFrom } from '../services/runStore.js';
 import { enqueueRun, abortRun } from '../services/agentLoop.js';
 import { subscribe, type AgentEvent } from '../services/eventBus.js';
@@ -19,8 +20,14 @@ const router = Router();
 router.post('/agent/runs', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.userId;
-    const { session_id, model_id, message, attachments, agent_config } = req.body || {};
-    if (!session_id || !model_id) {
+    const { session_id, model_id, app_id, message, attachments, agent_config } = req.body || {};
+    // 接缝①(G1):app_id 经请求流入(缺省=本进程装配的 profile);未知 app_id 拒绝。
+    const profile = resolveProfile(app_id);
+    if (!profile) {
+      return res.status(400).json({ detail: `unknown app_id: ${app_id}` });
+    }
+    const modelId = model_id || profile.defaultModelId || '';
+    if (!session_id || !modelId) {
       return res.status(400).json({ detail: 'session_id and model_id are required' });
     }
 
@@ -38,9 +45,9 @@ router.post('/agent/runs', authMiddleware, async (req: AuthRequest, res) => {
         typeof message === 'string' && message.trim() ? message.trim().slice(0, 60) : 'New Chat';
       await query(
         `INSERT INTO chat_sessions (id, user_id, app_id, title, model_id)
-         VALUES (?, ?, 'ai-studio', ?, ?)
+         VALUES (?, ?, ?, ?, ?)
          ON CONFLICT (id) DO NOTHING`,
-        [session_id, userId, title, model_id],
+        [session_id, userId, profile.appId, title, modelId],
       );
     }
 
@@ -54,8 +61,8 @@ router.post('/agent/runs', authMiddleware, async (req: AuthRequest, res) => {
       id: runId,
       sessionId: session_id,
       userId,
-      appId: 'ai-studio',
-      modelId: model_id,
+      appId: profile.appId,
+      modelId,
       assistantMessageId,
       input: { message, userMessageId, attachments: attachments || [], agentConfig: agent_config || {} },
     });

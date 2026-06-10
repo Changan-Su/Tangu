@@ -3,7 +3,7 @@
  * SSE 用 fetch + ReadableStream(EventSource 不能带 Bearer);seq 去重 + 断线重连 + fromSeq 续传。
  * 复刻 apps/Forsion-AI-Studio/client/services/cloudAgentService.ts 的成熟模式。
  */
-import type { AgentRunEvent, StartRunResult, TanguDesktopConfig } from '../types'
+import type { AgentConfig, AgentRunEvent, Attachment, StartRunResult, TanguDesktopConfig } from '../types'
 
 function headers(token: string): Record<string, string> {
   return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
@@ -24,16 +24,24 @@ export async function testConnection(cfg: TanguDesktopConfig): Promise<{ ok: boo
 
 export async function startRun(
   cfg: TanguDesktopConfig,
-  params: { sessionId: string; message: string; modelId?: string },
+  params: {
+    sessionId: string
+    message: string
+    modelId?: string
+    attachments?: Attachment[]
+    agentConfig?: AgentConfig
+  },
 ): Promise<StartRunResult> {
   const r = await fetch(`${cfg.backendUrl}/agent/runs`, {
     method: 'POST',
     headers: headers(cfg.token),
     body: JSON.stringify({
       session_id: params.sessionId,
-      model_id: params.modelId || cfg.modelId,
+      model_id: params.modelId || cfg.modelId || undefined,
+      app_id: 'tangu',
       message: params.message,
-      agent_config: {},
+      attachments: params.attachments || [],
+      agent_config: params.agentConfig || {},
     }),
   })
   if (!r.ok) throw new Error((await r.text().catch(() => '')) || `HTTP ${r.status}`)
@@ -45,6 +53,34 @@ export async function abortRun(cfg: TanguDesktopConfig, runId: string): Promise<
     method: 'POST',
     headers: headers(cfg.token),
   }).catch(() => {})
+}
+
+/** 列出某会话的在飞/最近 run(刷新恢复:重新挂 SSE)。 */
+export async function listActiveRuns(
+  cfg: TanguDesktopConfig,
+  sessionId: string,
+): Promise<Array<{ id: string; status: string; assistant_message_id: string | null }>> {
+  const r = await fetch(`${cfg.backendUrl}/agent/runs?session_id=${encodeURIComponent(sessionId)}`, {
+    headers: headers(cfg.token),
+  })
+  if (!r.ok) return []
+  const j = await r.json().catch(() => ({ runs: [] }))
+  return j.runs || []
+}
+
+/** 兑现一次 host-exec 审批。410 = 已不在等待(过期/他端已处理)。 */
+export async function resolveApproval(
+  cfg: TanguDesktopConfig,
+  runId: string,
+  approvalId: string,
+  action: 'approve' | 'approve_always' | 'reject',
+  argsOverride?: Record<string, any>,
+): Promise<{ ok: boolean; gone: boolean }> {
+  const r = await fetch(
+    `${cfg.backendUrl}/agent/runs/${encodeURIComponent(runId)}/approvals/${encodeURIComponent(approvalId)}`,
+    { method: 'POST', headers: headers(cfg.token), body: JSON.stringify({ action, argsOverride }) },
+  )
+  return { ok: r.ok, gone: r.status === 410 }
 }
 
 /** 订阅 run 的 SSE 事件流;onEvent 收到每条 {seq,type,payload}。done/error 时返回。 */

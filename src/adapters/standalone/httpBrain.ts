@@ -135,6 +135,15 @@ export function createHttpBrain(cfg: HttpBrainConfig): CloudBrainServices {
         getJson<any[]>(`/api/brain/custom-tools?appId=${encodeURIComponent(filter?.appId || '')}&visibleOnly=${filter?.visibleOnly ? 'true' : 'false'}`),
       listForcedCustomTools: async (appId?: string) =>
         getJson<any[]>(`/api/brain/custom-tools/forced?appId=${encodeURIComponent(appId || '')}`),
+      // 技能目录(桌面技能面板)。旧版云端无此端点 → getJson 对 404 返 null / 其余错误降级空列表。
+      listSkills: async (filter) => {
+        try {
+          const r = await getJson<any[]>(`/api/brain/skills?visibleOnly=${filter?.visibleOnly ? 'true' : 'false'}`);
+          return Array.isArray(r) ? r : [];
+        } catch {
+          return [];
+        }
+      },
     },
     search: {
       runSearch: async (query: string, maxResults: number) =>

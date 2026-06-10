@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
   title TEXT,
   model_id VARCHAR(128),
   archived BOOLEAN NOT NULL DEFAULT FALSE,
+  emoji VARCHAR(32),
+  agent_config JSONB,
   historian_last_summary_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
