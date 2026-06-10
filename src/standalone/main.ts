@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 /**
  * Tangu standalone 入口(**server 前端**:headless HTTP/SSE 服务)。
+ * /health 带 version/startedAt:桌面端/运维据此识别「dist 已重建但旧进程还在跑」。
  *   parseConfig → setupHost(嵌入式 PGlite / 外部 PG)+ base schema + runMigration
  *   → 装配 deps(host/brain/noopBilling)→ createTanguModule → mount(/agent/*) → listen。
  * run 接口与 microserver 同契约:POST /agent/runs、SSE GET /agent/runs/:id/events。
  * 终端交互前端见 cli/main.ts(`tangu chat`);二者共用 standalone/assemble.ts 的装配。
  */
 import express from 'express';
+import { readFileSync } from 'node:fs';
 import { createTanguModule } from '../index.js';
 import { createNoopBilling } from '../adapters/standalone/noopBilling.js';
 import { createTanguProfile } from '../profiles/index.js';
@@ -62,7 +64,13 @@ async function main(): Promise<void> {
     if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
   });
-  app.get('/health', (_req, res) => res.json({ ok: true, mode: 'standalone', sandbox: sandboxMode }));
+  let version = '';
+  try {
+    version = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version || '';
+  } catch { /* dist 布局异常时留空 */ }
+  const startedAt = new Date().toISOString();
+  app.get('/health', (_req, res) =>
+    res.json({ ok: true, mode: 'standalone', sandbox: sandboxMode, version, startedAt }));
   app.use('/', mod.userRouter); // /agent/runs、/agent/runs/:id/events、/agent/workspace/*、审批
   app.use('/', mod.dataRouter); // /agent/sessions、/agent/models、/agent/memory、/agent/skills、/agent/tools
 

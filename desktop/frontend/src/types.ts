@@ -67,6 +67,8 @@ export interface ModelsResponse {
   models: ModelInfo[]
   directProviders: Array<{ providerId: string; modelIds?: string[] }>
   defaultModelId: string | null
+  /** 云端托管面诊断:empty=可达但 admin 没配模型;error=不可达/未授权/未部署 brain-api。 */
+  forsion?: { status: 'ok' | 'empty' | 'error'; detail: string | null }
 }
 
 export interface SkillInfo {
@@ -137,6 +139,8 @@ export interface BackendStatusInfo {
   url: string | null
   pid: number | null
   lastError: string | null
+  /** dev:dist 重建于子进程启动之后 → 跑的是旧代码,需重启后端。 */
+  staleDist?: boolean
 }
 
 /** 主进程持久化的完整配置;getConfig 返回时 backendUrl/token 已折算为有效值(managed 就绪=托管子进程的)。 */

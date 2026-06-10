@@ -12,7 +12,7 @@
 import { app } from 'electron'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createServer } from 'node:net'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -30,6 +30,8 @@ export interface BackendStatus {
   url: string | null
   pid: number | null
   lastError: string | null
+  /** dev 专用:dist 入口在子进程启动后被重建(tsc 重跑)→ 跑的是旧代码,提示重启。 */
+  staleDist: boolean
 }
 
 const LOG_CAP = 200
@@ -46,10 +48,22 @@ export class BackendManager {
   private restartTimer: ReturnType<typeof setTimeout> | null = null
   private settings: ManagedBackendSettings | null = null
   private listeners = new Set<(st: BackendStatus) => void>()
+  private spawnedEntry: string | null = null
+  private spawnedAt = 0
 
   onStatus(cb: (st: BackendStatus) => void): () => void {
     this.listeners.add(cb)
     return () => this.listeners.delete(cb)
+  }
+
+  /** dev:dist 入口 mtime 晚于子进程启动 → 包根重新 build 过,跑的是旧代码。 */
+  private isDistStale(): boolean {
+    if (app.isPackaged || !this.spawnedEntry || this.state !== 'ready') return false
+    try {
+      return statSync(this.spawnedEntry).mtimeMs > this.spawnedAt
+    } catch {
+      return false
+    }
   }
 
   getStatus(): BackendStatus {
@@ -58,6 +72,7 @@ export class BackendManager {
       url: this.state === 'ready' ? `http://127.0.0.1:${this.port}` : null,
       pid: this.child?.pid ?? null,
       lastError: this.lastError,
+      staleDist: this.isDistStale(),
     }
   }
 
@@ -123,6 +138,8 @@ export class BackendManager {
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
+      this.spawnedEntry = entry
+      this.spawnedAt = Date.now()
       this.child = child
       child.stdout?.on('data', (d) => this.pushLog(String(d)))
       child.stderr?.on('data', (d) => this.pushLog(String(d)))

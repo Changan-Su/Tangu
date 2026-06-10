@@ -290,6 +290,11 @@ export const SettingsModal: React.FC<{
                         {backendSt?.lastError && (
                           <div className="hint" style={{ color: 'var(--danger)' }}>{backendSt.lastError}</div>
                         )}
+                        {backendSt?.staleDist && (
+                          <div className="hint" style={{ color: 'var(--danger)' }}>
+                            ⚠ 服务端代码已重新构建,当前后端仍在跑旧版本 —— 点上方「重启」加载新代码。
+                          </div>
+                        )}
                         <div className="field">
                           <button
                             className="btn ghost sm"
@@ -391,7 +396,13 @@ export const SettingsModal: React.FC<{
                           ))}
                         </div>
                       ) : (
-                        <div className="hint">{modelsLoading ? '加载中…' : '暂无(检查连接,或云端未配置模型)'}</div>
+                        <div className="hint">{modelsLoading ? '加载中…' : '暂无模型'}</div>
+                      )}
+                      {models?.forsion && models.forsion.status !== 'ok' && (
+                        <div className="hint" style={{ color: models.forsion.status === 'error' ? 'var(--danger)' : undefined, marginTop: 6 }}>
+                          {models.forsion.status === 'error' ? '⚠ 云端托管模型获取失败:' : 'ℹ '}
+                          {models.forsion.detail}
+                        </div>
                       )}
                       {models?.directProviders.length ? (
                         <div className="hint">
