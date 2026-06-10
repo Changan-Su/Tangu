@@ -150,6 +150,8 @@ export interface StoredDesktopConfig extends TanguDesktopConfig {
   cloudToken: string
   sandbox: 'auto' | 'docker' | 'none'
   backendState?: BackendStatusInfo
+  /** 主进程附带的用户主目录(本机模式 cwd 兜底)。 */
+  homeDir?: string
 }
 
 export interface AuthStatusInfo {
@@ -175,6 +177,7 @@ declare global {
       authProviders?(): Promise<Array<{ id: string; loggedIn: boolean }>>
       providerLogin?(id: string): Promise<{ ok: boolean; id: string }>
       onAuthDevice?(cb: (info: { url: string; userCode: string }) => void): () => void
+      pickDirectory?(): Promise<string | null>
     }
   }
 }

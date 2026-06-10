@@ -33,6 +33,8 @@ const api = {
     ipcRenderer.on('auth:device', listener)
     return () => ipcRenderer.removeListener('auth:device', listener)
   },
+  /** 本机模式工作目录选择;取消返回 null。 */
+  pickDirectory: (): Promise<string | null> => ipcRenderer.invoke('dialog:pickDirectory'),
 }
 
 contextBridge.exposeInMainWorld('tangu', api)

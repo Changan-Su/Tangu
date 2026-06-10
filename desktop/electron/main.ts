@@ -3,7 +3,7 @@
  * 负责:建窗 + 配置持久化(IPC)+ 托管内置 tangu-server(managed 模式,backendManager)。
  * agent 调用由 renderer 直连 HTTP/SSE(localhost),不经主进程代理。
  */
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { dirname, join } from 'path'
 import { pathToFileURL } from 'url'
 import { readFile, writeFile, mkdir } from 'fs/promises'
@@ -65,13 +65,14 @@ const backend = new BackendManager()
 let mainWindow: BrowserWindow | null = null
 
 /** renderer 视角的有效配置:managed 就绪时 backendUrl/token 来自托管子进程。 */
-async function effectiveConfig(): Promise<TanguStoredConfig & { backendState: BackendStatus }> {
+async function effectiveConfig(): Promise<TanguStoredConfig & { backendState: BackendStatus; homeDir: string }> {
   const stored = await loadConfig()
   const st = backend.getStatus()
+  const homeDir = app.getPath('home')
   if (stored.mode === 'managed' && st.state === 'ready' && st.url) {
-    return { ...stored, backendUrl: st.url, token: backend.getToken(), backendState: st }
+    return { ...stored, backendUrl: st.url, token: backend.getToken(), backendState: st, homeDir }
   }
-  return { ...stored, backendState: st }
+  return { ...stored, backendState: st, homeDir }
 }
 
 // 串行化:连续 config:set(如先改 cloudUrl 再改 sandbox)触发的多次 ensureBackend
@@ -138,6 +139,15 @@ app.whenReady().then(() => {
     }
     return effectiveConfig()
   })
+  // 本机模式的工作目录选择(host-exec 的 cwd)。
+  ipcMain.handle('dialog:pickDirectory', async () => {
+    const win = BrowserWindow.getFocusedWindow() ?? mainWindow
+    const r = win
+      ? await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'], title: '选择 Agent 工作目录' })
+      : await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'], title: '选择 Agent 工作目录' })
+    return r.canceled || !r.filePaths.length ? null : r.filePaths[0]
+  })
+
   ipcMain.handle('backend:getStatus', () => backend.getStatus())
   ipcMain.handle('backend:getLogs', () => backend.getLogs())
   ipcMain.handle('backend:restart', async () => {

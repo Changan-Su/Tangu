@@ -62,6 +62,9 @@ export function App(): React.JSX.Element {
   const [cfgLoaded, setCfgLoaded] = useState(false)
   const [connState, setConnState] = useState<'idle' | 'ok' | 'err'>('idle')
   const [connMessage, setConnMessage] = useState('')
+  // managed(本机托管)后端 → 新会话默认本机执行(与 TUI 对齐);homeDir 作 cwd 兜底。
+  const desktopMode = useRef<'managed' | 'external' | null>(null)
+  const homeDirRef = useRef<string | undefined>(undefined)
 
   const [sessions, setSessions] = useState<SessionRecord[]>([])
   const [archivedSessions, setArchivedSessions] = useState<SessionRecord[]>([])
@@ -249,6 +252,8 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     void (async () => {
       const stored = await window.tangu?.getConfig()
+      desktopMode.current = stored?.mode ?? null
+      homeDirRef.current = stored?.homeDir
       const merged = {
         backendUrl: stored?.backendUrl || cfgRef.current.backendUrl,
         token: stored?.token ?? cfgRef.current.token,
@@ -326,6 +331,14 @@ export function App(): React.JSX.Element {
   }, [activeId, connState, subscribeRun, toast])
 
   // ── 会话操作 ──
+  /** managed(本机托管)后端的新会话默认本机执行,cwd=主目录——与 TUI host 模式对齐。 */
+  const defaultSessionConfig = useCallback((): AgentConfig => {
+    if (desktopMode.current === 'managed' && homeDirRef.current) {
+      return { execMode: 'host', approvalMode: 'auto-edit', cwd: homeDirRef.current }
+    }
+    return {}
+  }, [])
+
   const newSession = useCallback(async () => {
     try {
       const s = await api.createSession(cfgRef.current)
@@ -333,10 +346,15 @@ export function App(): React.JSX.Element {
       setActiveId(s.id)
       loadedHistory.current.add(s.id)
       setMessagesBySession((prev) => ({ ...prev, [s.id]: [] }))
+      const init = defaultSessionConfig()
+      if (Object.keys(init).length) {
+        setConfigBySession((prev) => ({ ...prev, [s.id]: init }))
+        void api.putSessionConfig(cfgRef.current, s.id, init).catch(() => {})
+      }
     } catch (e: any) {
       toast(`新建失败:${e?.message || e}`, true)
     }
-  }, [toast])
+  }, [toast, defaultSessionConfig])
 
   const renameSession = useCallback(async (id: string, title: string) => {
     setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title } : s)))
@@ -373,6 +391,7 @@ export function App(): React.JSX.Element {
   // ── 发送 / 停止 / 审批 ──
   const send = useCallback(async (text: string, attachments: Attachment[]): Promise<boolean> => {
     let sid = activeIdRef.current
+    let implicitInit: AgentConfig | null = null
     if (!sid) {
       const s = await api.createSession(cfgRef.current).catch(() => null)
       if (!s) {
@@ -383,9 +402,14 @@ export function App(): React.JSX.Element {
       setActiveId(s.id)
       loadedHistory.current.add(s.id)
       sid = s.id
+      implicitInit = defaultSessionConfig()
+      if (Object.keys(implicitInit).length) {
+        setConfigBySession((prev) => ({ ...prev, [s.id]: implicitInit! }))
+        void api.putSessionConfig(cfgRef.current, s.id, implicitInit).catch(() => {})
+      }
     }
     const sessionId = sid
-    const agentConfig = { ...(configBySession[sessionId] || {}) }
+    const agentConfig = { ...(implicitInit || configBySession[sessionId] || {}) }
     try {
       const r = await startRun(cfgRef.current, { sessionId, message: text, attachments, agentConfig })
       setMessagesBySession((prev) => ({
@@ -437,7 +461,7 @@ export function App(): React.JSX.Element {
     [messagesBySession, patchMessage],
   )
 
-  const setExecConfig = useCallback((patch: Pick<AgentConfig, 'execMode' | 'approvalMode'>) => {
+  const setExecConfig = useCallback((patch: Pick<AgentConfig, 'execMode' | 'approvalMode' | 'cwd'>) => {
     const sid = activeIdRef.current
     if (!sid) return
     setConfigBySession((prev) => {
@@ -529,6 +553,7 @@ export function App(): React.JSX.Element {
               disabled={connState !== 'ok'}
               running={running}
               execConfig={execConfig}
+              homeDir={homeDirRef.current}
               onExecConfigChange={setExecConfig}
               onSend={send}
               onStop={stop}

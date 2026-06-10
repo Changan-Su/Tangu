@@ -3,20 +3,31 @@
  * auto-grow 模式对齐 AI Studio MessageInput(scrollHeight 撑高,max-height 截断)。
  */
 import React, { useRef, useState } from 'react'
-import { Send, Square, Paperclip, X, Monitor, Cloud } from 'lucide-react'
+import { Send, Square, Paperclip, X, Monitor, Cloud, FolderOpen } from 'lucide-react'
 import type { AgentConfig, Attachment } from '../types'
 
 const MAX_ATTACH_BYTES = 5 * 1024 * 1024
 
+/** 选本机工作目录:Electron 用系统目录对话框,浏览器调试回退手输。 */
+async function pickCwd(current?: string, fallback?: string): Promise<string | null> {
+  if (window.tangu?.pickDirectory) {
+    const dir = await window.tangu.pickDirectory()
+    return dir || current || fallback || null
+  }
+  const v = window.prompt('输入工作目录绝对路径', current || fallback || '')
+  return v?.trim() || null
+}
+
 export const MessageInput: React.FC<{
   disabled: boolean
   running: boolean
-  execConfig: Pick<AgentConfig, 'execMode' | 'approvalMode'>
-  onExecConfigChange: (patch: Pick<AgentConfig, 'execMode' | 'approvalMode'>) => void
+  execConfig: Pick<AgentConfig, 'execMode' | 'approvalMode' | 'cwd'>
+  homeDir?: string
+  onExecConfigChange: (patch: Pick<AgentConfig, 'execMode' | 'approvalMode' | 'cwd'>) => void
   /** 返回是否已受理:失败(连接/参数错)返回 false,草稿保留不清空。 */
   onSend: (text: string, attachments: Attachment[]) => Promise<boolean>
   onStop: () => void
-}> = ({ disabled, running, execConfig, onExecConfigChange, onSend, onStop }) => {
+}> = ({ disabled, running, execConfig, homeDir, onExecConfigChange, onSend, onStop }) => {
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -108,30 +119,49 @@ export const MessageInput: React.FC<{
             />
             <button
               className="mode-select"
-              title="执行环境:云沙箱(隔离)/ 本机(真实文件系统,需审批)"
-              onClick={() =>
-                onExecConfigChange(
-                  isHost
-                    ? { execMode: 'sandbox', approvalMode: execConfig.approvalMode }
-                    : { execMode: 'host', approvalMode: execConfig.approvalMode || 'auto-edit' },
-                )
-              }
+              title="执行环境:云沙箱(隔离工作区)/ 本机(后端所在机器的真实文件系统,需审批)——与 TUI 的 host 模式一致"
+              onClick={() => {
+                if (isHost) {
+                  onExecConfigChange({ execMode: 'sandbox', approvalMode: execConfig.approvalMode, cwd: execConfig.cwd })
+                  return
+                }
+                // 切到本机:必须有工作目录(没有则弹目录选择,取消回退主目录)。
+                void (async () => {
+                  const cwd = execConfig.cwd || (await pickCwd(undefined, homeDir)) || homeDir
+                  if (!cwd) return // 实在拿不到目录就不切换
+                  onExecConfigChange({ execMode: 'host', approvalMode: execConfig.approvalMode || 'auto-edit', cwd })
+                })()
+              }}
             >
               {isHost ? <Monitor size={13} /> : <Cloud size={13} />}
               {isHost ? '本机' : '云沙箱'}
             </button>
             {isHost && (
-              <button
-                className="mode-select"
-                title="审批档:只读(写文件/跑命令都审)/ 自动编辑(只审命令)/ 全自动"
-                onClick={() => {
-                  const order: AgentConfig['approvalMode'][] = ['readonly', 'auto-edit', 'full-auto']
-                  const cur = order.indexOf(execConfig.approvalMode || 'auto-edit')
-                  onExecConfigChange({ execMode: 'host', approvalMode: order[(cur + 1) % 3] })
-                }}
-              >
-                {approvalLabel[execConfig.approvalMode || 'auto-edit']}
-              </button>
+              <>
+                <button
+                  className="mode-select"
+                  title={`工作目录:${execConfig.cwd || '(未设置)'} —— 点击更换`}
+                  onClick={() => {
+                    void pickCwd(execConfig.cwd, homeDir).then((cwd) => {
+                      if (cwd) onExecConfigChange({ execMode: 'host', approvalMode: execConfig.approvalMode, cwd })
+                    })
+                  }}
+                >
+                  <FolderOpen size={13} />
+                  {execConfig.cwd ? (execConfig.cwd.split('/').filter(Boolean).pop() || execConfig.cwd) : '选择目录'}
+                </button>
+                <button
+                  className="mode-select"
+                  title="审批档:只读(写文件/跑命令都审)/ 自动编辑(只审命令)/ 全自动"
+                  onClick={() => {
+                    const order: AgentConfig['approvalMode'][] = ['readonly', 'auto-edit', 'full-auto']
+                    const cur = order.indexOf(execConfig.approvalMode || 'auto-edit')
+                    onExecConfigChange({ execMode: 'host', approvalMode: order[(cur + 1) % 3], cwd: execConfig.cwd })
+                  }}
+                >
+                  {approvalLabel[execConfig.approvalMode || 'auto-edit']}
+                </button>
+              </>
             )}
             <span className="grow" />
             {running ? (

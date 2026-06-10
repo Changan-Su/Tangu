@@ -47,9 +47,10 @@ export const RightPanel: React.FC<{
 const WorkspaceTab: React.FC<{
   cfg: TanguDesktopConfig
   sessionId: string
+  sessionConfig?: AgentConfig
   running: boolean
   onToast: (t: string, e?: boolean) => void
-}> = ({ cfg, sessionId, running, onToast }) => {
+}> = ({ cfg, sessionId, sessionConfig, running, onToast }) => {
   const [files, setFiles] = useState<WorkspaceFileMeta[]>([])
   const [loading, setLoading] = useState(false)
   const [preview, setPreview] = useState<{ path: string; mimeType: string; content: string } | null>(null)
@@ -144,6 +145,13 @@ const WorkspaceTab: React.FC<{
           {loading ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />}
         </button>
       </div>
+      {sessionConfig?.execMode === 'host' && (
+        <div className="panel-note" style={{ color: 'var(--accent-hover)' }}>
+          本机模式:agent 直接读写工作目录
+          <code style={{ wordBreak: 'break-all' }}> {sessionConfig.cwd || '(进程目录)'} </code>
+          的真实文件(用系统文件管理器查看);本面板仅显示云沙箱模式的会话文件。
+        </div>
+      )}
       {files.length === 0 && <div className="panel-note">暂无文件。agent 产出与拖入的文件都会出现在这里。</div>}
       {files.map((f) => (
         <div className="file-row" key={f.path} onClick={() => void open(f)} role="button" tabIndex={0}>
