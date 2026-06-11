@@ -48,6 +48,15 @@ export function createHttpBrain(cfg: HttpBrainConfig): CloudBrainServices {
     return (await r.json()) as T;
   }
 
+  async function deleteJson<T>(path: string): Promise<T> {
+    const r = await fetch(`${base}${path}`, { method: 'DELETE', headers: authHeaders() });
+    if (!r.ok) {
+      const detail = await r.text().catch(() => '');
+      throw new LlmError(r.status, detail || `brain ${path} ${r.status}`);
+    }
+    return (await r.json()) as T;
+  }
+
   // ── LLM 流式:读 SSE,逐条转回 onToken/onReasoning/onToolCallDelta,done 时返回累积结果 ──
   async function streamProviderCompletion(opts: StreamOpts): Promise<StreamResult> {
     const modelId = String((opts.payload as any)?.__forsion_model_id ?? '');
@@ -136,12 +145,30 @@ export function createHttpBrain(cfg: HttpBrainConfig): CloudBrainServices {
       listForcedCustomTools: async (appId?: string) =>
         getJson<any[]>(`/api/brain/custom-tools/forced?appId=${encodeURIComponent(appId || '')}`),
       // 技能目录(桌面技能面板)。旧版云端无此端点 → getJson 对 404 返 null / 其余错误降级空列表。
+      // forUser 由 token 隐含(brain-api 按请求者过滤),filter.forUser 在 http 面忽略。
       listSkills: async (filter) => {
         try {
           const r = await getJson<any[]>(`/api/brain/skills?visibleOnly=${filter?.visibleOnly ? 'true' : 'false'}`);
           return Array.isArray(r) ? r : [];
         } catch {
           return [];
+        }
+      },
+      // 本地技能上云(POST /brain/skills;owner=token 用户)。旧版云端无端点 → 明确报错。
+      upsertUserSkill: async (_userId, skill) => {
+        try {
+          return await postJson<{ id: string }>('/api/brain/skills', skill);
+        } catch (e: any) {
+          if (e?.status === 404) throw new Error('云端版本过旧,不支持用户技能上传(需更新 Forsion server)');
+          throw e;
+        }
+      },
+      deleteUserSkill: async (_userId, id) => {
+        try {
+          await deleteJson(`/api/brain/skills/${encodeURIComponent(id)}`);
+          return true;
+        } catch {
+          return false;
         }
       },
     },
@@ -156,6 +183,20 @@ export function createHttpBrain(cfg: HttpBrainConfig): CloudBrainServices {
           return await getJson<any[]>('/api/brain/models');
         } catch {
           return [];
+        }
+      },
+      // 按应用过滤(project_model_configs)。旧版云端忽略 ?projectId 返回数组 → 视作无过滤;
+      // 网络错误降级空列表(同 listGlobalModels,空/错的区分交给调用方探针)。
+      listModelsForProject: async (projectId: string) => {
+        try {
+          const r = await getJson<any>(`/api/brain/models?projectId=${encodeURIComponent(projectId)}`);
+          if (Array.isArray(r)) return { models: r, defaultModelId: null };
+          return {
+            models: Array.isArray(r?.models) ? r.models : [],
+            defaultModelId: r?.defaultModelId ?? null,
+          };
+        } catch {
+          return { models: [], defaultModelId: null };
         }
       },
     },

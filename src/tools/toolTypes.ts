@@ -4,6 +4,7 @@
  */
 import type { Tool } from '../core/types.js';
 import type { LoadedCustomTool } from './customTools.js';
+import type { LoadedMcpTool } from '../mcp/toolBridge.js';
 import type { AppProfile } from '../seams/appProfile.js';
 
 export interface ToolContext {
@@ -14,6 +15,8 @@ export interface ToolContext {
   signal?: AbortSignal;
   /** 本次 run 的自定义工具（HTTP/JS），按工具名索引。 */
   customTools?: Map<string, LoadedCustomTool>;
+  /** 本次 run 的 MCP 工具快照(run 开始取一次、run 内冻结——prompt 缓存纪律)。 */
+  mcpTools?: Map<string, LoadedMcpTool>;
   /** 本次 run 启用的技能 id（use_skill 的 allowlist）。 */
   enabledSkillIds?: string[];
   /** 执行形态：'host'=本地直连真实 FS/shell（TUI），缺省/'sandbox'=云沙箱 + 云工作区。 */
@@ -24,6 +27,10 @@ export interface ToolContext {
   approvalMode?: 'readonly' | 'auto-edit' | 'full-auto';
   /** 本次 run 的 AppProfile(接缝①):工具门禁 isEnabledFor 据此过滤。缺省回退 deps().profile。 */
   profile?: AppProfile;
+  /** delegate 子代理深度(0/缺省=主 loop,1=子代理内)。深度 ≥1 时 delegate 工具不可见,防递归裂变。 */
+  subAgentDepth?: number;
+  /** 本次 run 的模型 id(delegate 子代理沿用父模型)。 */
+  modelId?: string;
 }
 
 export interface ToolResult {

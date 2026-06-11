@@ -226,10 +226,32 @@ const AssetsTab: React.FC<{
       {skills?.map((s) => (
         <label className="check-row" key={s.id}>
           <input type="checkbox" checked={enabledSkills.has(s.id)} onChange={() => toggleSkill(s.id)} />
-          <span>
-            <div className="check-name">{s.icon ? `${s.icon} ` : ''}{s.name}</div>
+          <span style={{ flex: 1 }}>
+            <div className="check-name">
+              {s.icon ? `${s.icon} ` : ''}{s.name}
+              {s.source === 'local' && <span style={{ color: 'var(--accent)', fontSize: 10.5, marginLeft: 5 }}>本地</span>}
+              {s.source === 'user' && <span style={{ color: 'var(--text-ghost)', fontSize: 10.5, marginLeft: 5 }}>已上云</span>}
+            </div>
             {s.description && <div className="check-desc">{s.description}</div>}
           </span>
+          {s.source === 'local' && (
+            <button
+              className="icon-btn"
+              title="上传到 Forsion(云端 Tangu 会话可用)"
+              style={{ width: 22, height: 22, flexShrink: 0 }}
+              onClick={(e) => {
+                e.preventDefault()
+                void api.uploadSkillToCloud(cfg, s.id)
+                  .then((r) => {
+                    onToast(`技能「${r.name}」已上传云端(id: ${r.id})`)
+                    void api.listSkills(cfg).then(setSkills).catch(() => {})
+                  })
+                  .catch((err) => onToast(`上传失败:${err?.message || err}`, true))
+              }}
+            >
+              ↑
+            </button>
+          )}
         </label>
       ))}
 

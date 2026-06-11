@@ -125,4 +125,6 @@ export interface ListFilter {
   appId?: string;
   market?: boolean;
   visibleOnly?: boolean;
+  /** 用户视角(skills):全局技能 ∪ 该用户上传的技能。进程内实现用;httpBrain 由 token 隐含。 */
+  forUser?: string;
 }

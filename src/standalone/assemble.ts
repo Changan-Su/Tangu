@@ -4,32 +4,54 @@
  */
 import { execFile } from 'node:child_process';
 import { readFileSync, mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { query } from '../core/db.js';
+import { providersFile as homeProvidersFile, pgdataDir } from '../core/tanguHome.js';
 import type { HostServices } from '../seams/hostServices.js';
 import type { CloudBrainServices } from '../seams/cloudBrain.js';
 import { createLocalHost } from '../adapters/standalone/localHost.js';
 import { createEmbeddedHost } from '../adapters/standalone/embeddedHost.js';
 import { createHttpBrain } from '../adapters/standalone/httpBrain.js';
 import { createMultiBrain } from '../adapters/standalone/multiBrain.js';
+import { createLocalAssets } from '../adapters/standalone/localAssetsBrain.js';
 import { createProviderRegistry, type DirectProvider } from '../llm/providerRegistry.js';
 import { STANDALONE_SCHEMA } from '../db/schemaStandalone.js';
 import type { StandaloneConfig } from './config.js';
 
-/** 合并 inline provider 与 --providers-file 的 DirectProvider[](文件读失败仅告警,不阻断启动)。 */
-export function loadProviders(cfg: StandaloneConfig): DirectProvider[] {
-  const list = [...cfg.providers];
-  if (cfg.providersFile) {
-    try {
-      const parsed = JSON.parse(readFileSync(cfg.providersFile, 'utf8'));
-      if (Array.isArray(parsed)) list.push(...parsed);
-      else console.warn(`[tangu] providers-file 不是数组,已忽略: ${cfg.providersFile}`);
-    } catch (e: any) {
-      console.warn(`[tangu] 读取 providers-file 失败,已忽略: ${e?.message || e}`);
+/** 读一个 providers JSON(裸数组或 { providers: [...] } 包装);失败/缺失返回 []。 */
+function readProvidersJson(path: string, label: string, warnMissing: boolean): DirectProvider[] {
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8'));
+    const arr = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.providers) ? parsed.providers : null;
+    if (!arr) {
+      console.warn(`[tangu] ${label} 既不是数组也不是 { providers: [...] },已忽略: ${path}`);
+      return [];
     }
+    return arr;
+  } catch (e: any) {
+    if (warnMissing) console.warn(`[tangu] 读取 ${label} 失败,已忽略: ${e?.message || e}`);
+    return []; // home providers.json 不存在是常态,静默
   }
-  return list;
+}
+
+/**
+ * 合并直连 provider 各来源,优先级(同 providerId 先到先得):
+ *   CLI/env inline > --providers-file > ~/.tangu/providers.json(desktop Providers 页写入)> OAuth 登录派生。
+ * 显式配置永远压过订阅登录;文件读失败仅告警,不阻断启动。
+ */
+export function loadProviders(cfg: StandaloneConfig): DirectProvider[] {
+  const merged: DirectProvider[] = [
+    ...cfg.providers,
+    ...(cfg.providersFile ? readProvidersJson(cfg.providersFile, 'providers-file', true) : []),
+    ...readProvidersJson(homeProvidersFile(), '~/.tangu/providers.json', false),
+    ...(cfg.oauthProviders ?? []),
+  ];
+  const seen = new Set<string>();
+  return merged.filter((p) => {
+    if (!p?.providerId || !p?.baseUrl) return false;
+    if (seen.has(p.providerId)) return false;
+    seen.add(p.providerId);
+    return true;
+  });
 }
 
 function dockerAvailable(): Promise<boolean> {
@@ -59,17 +81,22 @@ export async function setupHost(
     return { host, runBaseSchema: async () => { await pool.query(STANDALONE_SCHEMA); }, storage: '外部 Postgres' };
   }
   const inMemory = cfg.dataDir === 'memory';
-  const dataDir = inMemory ? undefined : (cfg.dataDir || join(homedir(), '.tangu', 'pgdata'));
+  const dataDir = inMemory ? undefined : (cfg.dataDir || pgdataDir());
   if (dataDir) mkdirSync(dataDir, { recursive: true });
   const { host, db } = await createEmbeddedHost({ dataDir, localToken: cfg.token, userId: cfg.userId });
   return { host, runBaseSchema: async () => { await db.exec(STANDALONE_SCHEMA); }, storage: inMemory ? 'PGlite(内存)' : `PGlite(${dataDir})` };
 }
 
-/** brain:有直连 provider 则 multiBrain(本地命中走直连,其余委托 Forsion);否则纯 httpBrain。 */
+/**
+ * brain:有直连 provider 则 multiBrain(本地命中走直连,其余委托 Forsion);否则纯 httpBrain。
+ * assets 一律再叠 localAssets overlay(包内置 skills/ + ~/.tangu/skills/ 的磁盘技能,
+ * `local:` 前缀 id;skillLoadout/use_skill/技能面板自动可见)。
+ */
 export function buildBrain(cfg: StandaloneConfig): { brain: CloudBrainServices; providers: DirectProvider[] } {
   const httpBrain = createHttpBrain({ cloudUrl: cfg.cloudUrl, token: cfg.token });
   const providers = loadProviders(cfg);
-  const brain = providers.length ? createMultiBrain(httpBrain, createProviderRegistry(providers)) : httpBrain;
+  const base = providers.length ? createMultiBrain(httpBrain, createProviderRegistry(providers)) : httpBrain;
+  const brain = { ...base, assets: createLocalAssets(base.assets) };
   return { brain, providers };
 }
 

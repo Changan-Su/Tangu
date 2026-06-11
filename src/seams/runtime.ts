@@ -6,12 +6,15 @@ import type { HostServices } from './hostServices.js';
 import type { CloudBrainServices } from './cloudBrain.js';
 import type { BillingServices } from './billing.js';
 import type { AppProfile } from './appProfile.js';
+import type { McpManager } from '../mcp/manager.js';
 
 export interface TanguDeps {
   host: HostServices;
   brain: CloudBrainServices;
   billing: BillingServices;
   profile: AppProfile;
+  /** MCP 管理器(可选):仅 standalone/TUI 装配(~/.tangu/mcp.json);microserver/worker 不传 → 云端零影响。 */
+  mcp?: McpManager;
 }
 
 let _deps: TanguDeps | null = null;

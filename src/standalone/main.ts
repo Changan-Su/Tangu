@@ -16,6 +16,7 @@ import { parseConfig, validate, HELP } from './config.js';
 import { loadCreds } from './credStore.js';
 import { loadOAuthDirectProviders } from '../llm/providerOAuth.js';
 import { resolveSandboxMode, setupHost, buildBrain, fixLegacyAppIds } from './assemble.js';
+import { createMcpManager } from '../mcp/manager.js';
 
 async function main(): Promise<void> {
   const cfg = parseConfig(process.argv.slice(2));
@@ -26,8 +27,9 @@ async function main(): Promise<void> {
   if (!cfg.cloudUrl) cfg.cloudUrl = creds.cloudUrl || '';
   // `tangu login <provider>`(xAI 等 OAuth 直连)的凭证同样接进 registry——与 TUI 对齐,
   // 桌面端 managed 后端登录 provider 后即可用 <providerId>/<model>。
+  // 走 oauthProviders 字段(loadProviders 合并时优先级最低,显式配置覆盖订阅登录)。
   try {
-    cfg.providers.push(...(await loadOAuthDirectProviders()));
+    cfg.oauthProviders = await loadOAuthDirectProviders();
   } catch {
     /* ignore */
   }
@@ -42,11 +44,16 @@ async function main(): Promise<void> {
   await runBaseSchema(); // base schema 先于 runMigration(后者对 chat_sessions 做 ALTER)
   const { brain, providers } = buildBrain(cfg);
 
+  // MCP(~/.tangu/mcp.json):启动时连一次,server 集进程级冻结(prompt 缓存纪律,配置变更须重启)。
+  const mcp = createMcpManager();
+  await mcp.start();
+
   const mod = createTanguModule({
     host,
     brain,
     billing: createNoopBilling(),
     profile: createTanguProfile({ sandboxMode, defaultModelId: cfg.defaultModelId || undefined }),
+    mcp,
   });
 
   await mod.runMigration();
@@ -80,7 +87,20 @@ async function main(): Promise<void> {
     if (providers.length) {
       console.log(`[tangu] 直连 provider: ${providers.map((p) => p.providerId).join(', ')}(其余 LLM 走 Forsion 托管面)`);
     }
+    const mcpStatus = mcp.listStatus();
+    if (mcpStatus.length) {
+      console.log(`[tangu] MCP: ${mcpStatus.map((s) => `${s.name}(${s.status},${s.toolCount}工具)`).join(', ')}`);
+    }
   });
+
+  // 优雅退出(桌面 backendManager 发 SIGTERM):停定时器/中止 run/杀 MCP stdio 子进程。
+  const shutdown = (): void => {
+    try { mod.dispose(); } catch { /* ignore */ }
+    void mcp.dispose().finally(() => process.exit(0));
+    setTimeout(() => process.exit(0), 2000).unref?.();
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }
 
 main().catch((e) => {

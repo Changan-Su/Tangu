@@ -28,6 +28,9 @@ export interface SessionRecord {
   archived: boolean
   emoji: string | null
   agent_config: AgentConfig | null
+  /** 项目工作区(本机模式;云端会话为 null → 侧栏归「未分组」)。 */
+  project_path?: string | null
+  project_name?: string | null
   created_at: string
   updated_at: string
 }
@@ -38,6 +41,8 @@ export interface AgentConfig {
   thinkingLevel?: 'off' | 'low' | 'medium' | 'high'
   enabledSkillIds?: string[]
   enabledToolIds?: string[]
+  /** 本会话启用的 MCP server 名单(缺省=全部已连接 server)。 */
+  enabledMcpServers?: string[]
   execMode?: 'sandbox' | 'host'
   cwd?: string
   approvalMode?: 'readonly' | 'auto-edit' | 'full-auto'
@@ -65,10 +70,18 @@ export interface ModelInfo {
 
 export interface ModelsResponse {
   models: ModelInfo[]
-  directProviders: Array<{ providerId: string; modelIds?: string[] }>
+  directProviders: Array<{ providerId: string; baseUrl?: string; modelIds?: string[] }>
   defaultModelId: string | null
   /** 云端托管面诊断:empty=可达但 admin 没配模型;error=不可达/未授权/未部署 brain-api。 */
   forsion?: { status: 'ok' | 'empty' | 'error'; detail: string | null }
+}
+
+/** ~/.tangu/providers.json 一项(desktop Providers 页编辑;apiKey 只在本机文件,不进 renderer 之外)。 */
+export interface DirectProviderConfig {
+  providerId: string
+  baseUrl: string
+  apiKey?: string
+  modelIds?: string[]
 }
 
 export interface SkillInfo {
@@ -77,11 +90,65 @@ export interface SkillInfo {
   description: string
   icon: string | null
   category: string | null
+  /** local=本机磁盘技能;user=本人上传的云端技能;cloud/缺省=全局云端技能。 */
+  source?: 'local' | 'user' | 'cloud'
 }
 
 export interface ToolsResponse {
   builtins: Array<{ name: string; description: string; mode: 'sandbox' | 'host' | 'both' }>
   custom: Array<{ id: string; name: string; description: string; executor: string }>
+  /** MCP 分区(仅本地后端;云端恒 [] / 旧后端缺省)。 */
+  mcp?: Array<{
+    server: string
+    transport: 'stdio' | 'http' | 'sse'
+    status: 'connected' | 'connecting' | 'error' | 'disabled'
+    error: string | null
+    tools: Array<{ name: string; description: string }>
+  }>
+}
+
+// ── 跨生态 agent 资产发现(desktop discovery:scan;~/.claude、~/.codex、~/.hermes)──
+
+export type DiscoveryEcosystem = 'claude-code' | 'codex' | 'hermes'
+
+export interface DiscoveredSkill {
+  ecosystem: DiscoveryEcosystem
+  id: string
+  name: string
+  description: string
+  sourceDir: string
+}
+
+export interface DiscoveredMcp {
+  ecosystem: DiscoveryEcosystem
+  name: string
+  config: McpServerConfigEntry
+}
+
+export interface DiscoveryResult {
+  skills: DiscoveredSkill[]
+  mcpServers: DiscoveredMcp[]
+}
+
+/** 环境检测一项(首启向导;installId 为 env:run 的 opaque 凭据)。 */
+export interface EnvProbeResult {
+  tool: string
+  found: boolean
+  version: string | null
+  installId: string | null
+  installCommand: string | null
+}
+
+/** ~/.tangu/mcp.json 一项。 */
+export interface McpServerConfigEntry {
+  command?: string
+  args?: string[]
+  env?: Record<string, string>
+  url?: string
+  transport?: 'stdio' | 'http' | 'sse'
+  headers?: Record<string, string>
+  timeoutMs?: number
+  enabled?: boolean
 }
 
 export interface WorkspaceFileMeta {
@@ -178,6 +245,17 @@ declare global {
       providerLogin?(id: string): Promise<{ ok: boolean; id: string }>
       onAuthDevice?(cb: (info: { url: string; userCode: string }) => void): () => void
       pickDirectory?(): Promise<string | null>
+      listProviders?(): Promise<DirectProviderConfig[]>
+      saveProvider?(provider: DirectProviderConfig): Promise<DirectProviderConfig[]>
+      deleteProvider?(providerId: string): Promise<DirectProviderConfig[]>
+      readMcpConfig?(): Promise<{ mcpServers: Record<string, McpServerConfigEntry> }>
+      writeMcpConfig?(cfg: { mcpServers: Record<string, McpServerConfigEntry> }): Promise<{ mcpServers: Record<string, McpServerConfigEntry> }>
+      discoveryScan?(): Promise<DiscoveryResult>
+      discoveryImportSkills?(ids: string[]): Promise<{ imported: string[] }>
+      discoveryImportMcp?(names: string[]): Promise<{ imported: string[] }>
+      envCheck?(): Promise<EnvProbeResult[]>
+      envRun?(installId: string): Promise<{ exitCode: number }>
+      onEnvOutput?(cb: (ev: { installId: string; line: string }) => void): () => void
     }
   }
 }

@@ -96,6 +96,21 @@ export async function runMigration(): Promise<void> {
     console.warn('[agent-core] agent_config/emoji 列迁移失败：', e?.message || e);
   }
 
+  // todo 工具(builtin:todo)的会话级任务清单(幂等)。
+  try {
+    await query(`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS todos JSONB`);
+  } catch (e: any) {
+    console.warn('[agent-core] chat_sessions.todos 列迁移失败：', e?.message || e);
+  }
+
+  // 项目工作区(桌面本机模式会话按项目分组;云端会话恒 NULL,零影响)。幂等。
+  try {
+    await query(`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS project_path TEXT`);
+    await query(`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS project_name VARCHAR(255)`);
+  } catch (e: any) {
+    console.warn('[agent-core] chat_sessions.project_* 列迁移失败：', e?.message || e);
+  }
+
   // 图片附件链路:hydrateHistory 读 chat_messages.attachments(新基础 schema 已内联;
   // 老库补列,幂等)。
   try {

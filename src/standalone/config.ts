@@ -17,6 +17,8 @@ export interface StandaloneConfig {
   // LLM 多 provider:直连用户自有 provider(OpenAI/Ollama/…);为空则全部 LLM 走 Forsion 托管面。
   providers: DirectProvider[];
   providersFile?: string; // 可选:JSON 文件含 DirectProvider[](与 inline provider 合并)
+  /** OAuth 登录派生的 provider(main 启动时注入;合并优先级最低——显式配置覆盖订阅登录)。 */
+  oauthProviders?: DirectProvider[];
   showHelp: boolean;
 }
 

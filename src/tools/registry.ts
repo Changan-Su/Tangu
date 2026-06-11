@@ -14,6 +14,11 @@ import { workspaceFilesProvider } from './builtin/workspaceFiles.js';
 import { skillsProvider } from './builtin/skills.js';
 import { sandboxPythonProvider } from './builtin/sandboxPython.js';
 import { hostExecProvider } from './hostExec.js';
+import { fileSearchProvider } from './builtin/fileSearch.js';
+import { webFetchProvider } from './builtin/webFetch.js';
+import { todoProvider } from './builtin/todo.js';
+import { hostProcessProvider } from './builtin/hostProcess.js';
+import { delegateProvider } from './builtin/delegate.js';
 import type { ToolContext, ToolResult, ToolImpl } from './toolTypes.js';
 
 // 类型 re-export:保持既有 `from './registry.js'` 的 import 路径不变。
@@ -31,13 +36,21 @@ registerToolProvider(workspaceFilesProvider);
 registerToolProvider(skillsProvider);
 registerToolProvider(sandboxPythonProvider);
 registerToolProvider(hostExecProvider);
+// ── 2026-06 扩充的核心开发工具:一律注册在 hostExecProvider 之后 ——
+//    这样无论 sandbox 还是 host 模式,新工具都**追加在既有 defs 末尾**(严格 append-only,
+//    旧会话的 prompt 前缀缓存只在部署边界失效一次)。后续新增 provider 继续往这里追加。──
+registerToolProvider(fileSearchProvider);
+registerToolProvider(webFetchProvider);
+registerToolProvider(todoProvider);
+registerToolProvider(hostProcessProvider);
+registerToolProvider(delegateProvider);
 
 /** ctx 自带 profile(loop 按 run.app_id 解析)优先;缺省回退本进程装配的 profile。 */
 function currentProfile(ctx: ToolContext) {
   return ctx.profile ?? deps().profile;
 }
 
-/** 返回喂给 LLM 的工具定义（OpenAI function 格式）：按模式/profile 过滤的内置 + 本 run 的自定义工具（按名去重，内置优先）。 */
+/** 返回喂给 LLM 的工具定义（OpenAI function 格式）：按模式/profile 过滤的内置 + 本 run 的自定义工具 + MCP 工具（按名去重，内置 > 自定义 > MCP）。 */
 export function getToolDefinitions(ctx: ToolContext): Tool[] {
   const hasSkills = !!(ctx.enabledSkillIds && ctx.enabledSkillIds.length);
   const tools = resolveTools(currentProfile(ctx), ctx);
@@ -46,9 +59,19 @@ export function getToolDefinitions(ctx: ToolContext): Tool[] {
     if (name === 'use_skill' && !hasSkills) continue; // 无启用技能时不暴露 use_skill
     defs.push(t.definition);
   }
+  const taken = new Set<string>(tools.keys());
   if (ctx.customTools && ctx.customTools.size) {
     for (const t of ctx.customTools.values()) {
-      if (tools.has(t.name)) continue; // 内置同名优先
+      if (taken.has(t.name)) continue; // 内置同名优先
+      taken.add(t.name);
+      defs.push(t.definition);
+    }
+  }
+  // MCP 工具(ctx 运行时注入,manager 已按 (server, tool) 排序 → defs 字节级稳定)
+  if (ctx.mcpTools && ctx.mcpTools.size) {
+    for (const t of ctx.mcpTools.values()) {
+      if (taken.has(t.name)) continue; // mcp__ 前缀理论上不冲突,保险跳过
+      taken.add(t.name);
       defs.push(t.definition);
     }
   }
@@ -84,6 +107,13 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
     } catch (e: any) {
       return { toolCallId: call.id, name, result: `Error: ${e?.message || e}`, isError: true };
     }
+  }
+
+  // 第三级 fallback:MCP 工具(经 deps().mcp 调远端;仅 standalone/TUI 装配了 mcp)。
+  const mcpTool = ctx.mcpTools?.get(name);
+  if (mcpTool && deps().mcp) {
+    const r = await deps().mcp!.callTool(mcpTool, args, ctx.signal);
+    return { toolCallId: call.id, name, result: r.text, isError: r.isError };
   }
 
   return { toolCallId: call.id, name, result: `Tool "${name}" is not available.`, isError: true };

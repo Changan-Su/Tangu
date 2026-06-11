@@ -25,7 +25,10 @@ async function request<T>(cfg: TanguDesktopConfig, path: string, init?: RequestI
 export const listSessions = (cfg: TanguDesktopConfig, archived = false) =>
   request<{ sessions: SessionRecord[] }>(cfg, `/agent/sessions?archived=${archived}`).then((r) => r.sessions)
 
-export const createSession = (cfg: TanguDesktopConfig, init?: { title?: string; model_id?: string; emoji?: string }) =>
+export const createSession = (
+  cfg: TanguDesktopConfig,
+  init?: { title?: string; model_id?: string; emoji?: string; project_path?: string; project_name?: string },
+) =>
   request<{ session: SessionRecord }>(cfg, '/agent/sessions', {
     method: 'POST',
     body: JSON.stringify(init || {}),
@@ -34,7 +37,10 @@ export const createSession = (cfg: TanguDesktopConfig, init?: { title?: string; 
 export const updateSession = (
   cfg: TanguDesktopConfig,
   id: string,
-  patch: { title?: string; archived?: boolean; model_id?: string; emoji?: string | null },
+  patch: {
+    title?: string; archived?: boolean; model_id?: string; emoji?: string | null
+    project_path?: string | null; project_name?: string | null
+  },
 ) =>
   request<{ session: SessionRecord }>(cfg, `/agent/sessions/${encodeURIComponent(id)}`, {
     method: 'PATCH',
@@ -63,8 +69,29 @@ export const putSessionConfig = (cfg: TanguDesktopConfig, sessionId: string, con
 // ── 模型 / 技能 / 工具 ──
 export const listModels = (cfg: TanguDesktopConfig) => request<ModelsResponse>(cfg, '/agent/models')
 
+/** 探测一个 OpenAI 兼容端点(后端代理,避免 CORS):GET /models → 1-token chat。 */
+export const testProviderConnection = (
+  cfg: TanguDesktopConfig,
+  probe: { baseUrl: string; apiKey?: string; modelId?: string },
+) =>
+  request<{ success: boolean; message: string }>(cfg, '/agent/providers/test', {
+    method: 'POST',
+    body: JSON.stringify(probe),
+  })
+
 export const listSkills = (cfg: TanguDesktopConfig) =>
   request<{ skills: SkillInfo[] }>(cfg, '/agent/skills').then((r) => r.skills)
+
+/** 本地技能上云(owner=当前用户,云端 Tangu 会话即可启用)。 */
+export const uploadSkillToCloud = (cfg: TanguDesktopConfig, localId: string) =>
+  request<{ id: string; name: string }>(cfg, '/agent/skills/upload', {
+    method: 'POST',
+    body: JSON.stringify({ localId }),
+  })
+
+/** 删除本人上传的云端技能。 */
+export const deleteUserCloudSkill = (cfg: TanguDesktopConfig, id: string) =>
+  request<{ ok: boolean }>(cfg, `/agent/skills/user/${encodeURIComponent(id)}`, { method: 'DELETE' })
 
 export const listTools = (cfg: TanguDesktopConfig) => request<ToolsResponse>(cfg, '/agent/tools')
 

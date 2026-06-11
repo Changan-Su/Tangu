@@ -278,6 +278,68 @@ export const HOST_TOOLS: Record<string, ToolImpl> = {
       return lines.join('\n');
     },
   },
+  multi_edit: {
+    mode: 'host',
+    definition: {
+      type: 'function',
+      function: {
+        name: 'multi_edit',
+        description:
+          '对本机一个文件做多处精确替换(原子:全部匹配才写入,任一失败整体不动)。' +
+          '每个 edit 的 old_string 须在「前序 edit 依次应用后的文本」中恰好出现一次。' +
+          '同文件多处修改用此工具,比连发多次 edit_file 更安全省轮次。',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: '文件路径(相对 cwd 或绝对路径)' },
+            edits: {
+              type: 'array',
+              description: '按序应用的替换列表',
+              items: {
+                type: 'object',
+                properties: {
+                  old_string: { type: 'string', description: '要替换的原文(须唯一匹配)' },
+                  new_string: { type: 'string', description: '替换后的新文本' },
+                },
+                required: ['old_string', 'new_string'],
+              },
+            },
+          },
+          required: ['path', 'edits'],
+        },
+      },
+    },
+    execute: async (args, ctx): Promise<string> => {
+      const abs = resolvePath(ctx, String(args.path ?? ''));
+      const edits = Array.isArray(args.edits) ? args.edits : null;
+      if (!edits?.length) return 'Error: edits 必须是非空数组';
+      let text: string;
+      try {
+        text = await fs.readFile(abs, 'utf-8');
+      } catch {
+        return `Error: file not found: ${args.path}`;
+      }
+      // 先在内存里全部应用,任一失败整体放弃(原子性)
+      let next = text;
+      for (let i = 0; i < edits.length; i++) {
+        const oldStr = String(edits[i]?.old_string ?? '');
+        const newStr = String(edits[i]?.new_string ?? '');
+        if (!oldStr) return `Error: edits[${i}].old_string 为空`;
+        const first = next.indexOf(oldStr);
+        if (first === -1) return `Error: edits[${i}].old_string 未找到(注意前序 edit 已生效;空白/缩进须完全一致),整文件未改动`;
+        if (next.indexOf(oldStr, first + oldStr.length) !== -1) {
+          return `Error: edits[${i}].old_string 出现多次,请补足上下文使其唯一,整文件未改动`;
+        }
+        next = next.slice(0, first) + newStr + next.slice(first + oldStr.length);
+      }
+      try {
+        await fs.writeFile(abs, next, 'utf-8');
+      } catch (e: any) {
+        return `Error: ${e?.message || e}`;
+      }
+      return `applied ${edits.length} edit(s) to ${relDisplay(ctx, abs)}`;
+    },
+  },
 };
 
 /**

@@ -3,8 +3,8 @@
  * auto-grow 模式对齐 AI Studio MessageInput(scrollHeight 撑高,max-height 截断)。
  */
 import React, { useRef, useState } from 'react'
-import { Send, Square, Paperclip, X, Monitor, Cloud, FolderOpen } from 'lucide-react'
-import type { AgentConfig, Attachment } from '../types'
+import { Send, Square, Paperclip, X, Monitor, Cloud, FolderOpen, Brain } from 'lucide-react'
+import type { AgentConfig, Attachment, ModelInfo } from '../types'
 
 const MAX_ATTACH_BYTES = 5 * 1024 * 1024
 // 客户端输入帽(服务端 runs.ts 还有一道):大段材料整体粘贴会让 agent 每轮迭代全量重发,
@@ -26,11 +26,21 @@ export const MessageInput: React.FC<{
   running: boolean
   execConfig: Pick<AgentConfig, 'execMode' | 'approvalMode' | 'cwd'>
   homeDir?: string
+  /** 会话内模型/思考深度切换器(models 为 null=未加载,隐藏选择器)。 */
+  models?: ModelInfo[] | null
+  modelId?: string
+  onModelChange?: (modelId: string) => void
+  thinkingLevel?: AgentConfig['thinkingLevel']
+  onThinkingChange?: (level: NonNullable<AgentConfig['thinkingLevel']>) => void
   onExecConfigChange: (patch: Pick<AgentConfig, 'execMode' | 'approvalMode' | 'cwd'>) => void
   /** 返回是否已受理:失败(连接/参数错)返回 false,草稿保留不清空。 */
   onSend: (text: string, attachments: Attachment[]) => Promise<boolean>
   onStop: () => void
-}> = ({ disabled, running, execConfig, homeDir, onExecConfigChange, onSend, onStop }) => {
+}> = ({
+  disabled, running, execConfig, homeDir,
+  models, modelId, onModelChange, thinkingLevel, onThinkingChange,
+  onExecConfigChange, onSend, onStop,
+}) => {
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [hint, setHint] = useState<string | null>(null)
@@ -88,6 +98,12 @@ export const MessageInput: React.FC<{
 
   const isHost = execConfig.execMode === 'host'
   const approvalLabel = { readonly: '只读·全审批', 'auto-edit': '自动编辑', 'full-auto': '全自动' } as const
+  const thinkingLabel = { off: '思考·关', low: '思考·浅', medium: '思考·中', high: '思考·深' } as const
+
+  // 模型分组:Forsion 托管 / 各直连 provider
+  const forsionModels = (models || []).filter((m) => m.source === 'forsion')
+  const directModels = (models || []).filter((m) => m.source === 'direct')
+  const selectedKnown = !modelId || (models || []).some((m) => m.id === modelId)
 
   return (
     <div className="composer">
@@ -142,6 +158,46 @@ export const MessageInput: React.FC<{
                 e.target.value = ''
               }}
             />
+            {onModelChange && models && models.length > 0 && (
+              <select
+                className="mode-select"
+                style={{ maxWidth: 180, cursor: 'pointer' }}
+                title="本会话使用的模型(持久化到会话;切换自然会重建模型侧前缀缓存)"
+                value={modelId || ''}
+                onChange={(e) => e.target.value && onModelChange(e.target.value)}
+              >
+                {!modelId && <option value="">选择模型…</option>}
+                {!selectedKnown && <option value={modelId}>{modelId}(手填)</option>}
+                {forsionModels.length > 0 && (
+                  <optgroup label="Forsion 托管">
+                    {forsionModels.map((m) => (
+                      <option key={`f-${m.id}`} value={m.id}>{m.name}</option>
+                    ))}
+                  </optgroup>
+                )}
+                {directModels.length > 0 && (
+                  <optgroup label="直连 Provider">
+                    {directModels.map((m) => (
+                      <option key={`d-${m.id}`} value={m.id}>{m.name}({m.provider})</option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            )}
+            {onThinkingChange && (
+              <button
+                className="mode-select"
+                title="思考深度:模型推理预算 off/low/medium/high(持久化到会话配置)"
+                onClick={() => {
+                  const order: Array<NonNullable<AgentConfig['thinkingLevel']>> = ['off', 'low', 'medium', 'high']
+                  const cur = order.indexOf(thinkingLevel || 'off')
+                  onThinkingChange(order[(cur + 1) % order.length])
+                }}
+              >
+                <Brain size={13} />
+                {thinkingLabel[thinkingLevel || 'off']}
+              </button>
+            )}
             <button
               className="mode-select"
               title="执行环境:云沙箱(隔离工作区)/ 本机(后端所在机器的真实文件系统,需审批)——与 TUI 的 host 模式一致"

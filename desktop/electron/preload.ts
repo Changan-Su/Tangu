@@ -35,6 +35,28 @@ const api = {
   },
   /** 本机模式工作目录选择;取消返回 null。 */
   pickDirectory: (): Promise<string | null> => ipcRenderer.invoke('dialog:pickDirectory'),
+  // ── 直连 provider 管理(~/.tangu/providers.json;managed 模式保存后自动重启后端加载)──
+  listProviders: (): Promise<any[]> => ipcRenderer.invoke('providers:list'),
+  saveProvider: (provider: Record<string, any>): Promise<any[]> => ipcRenderer.invoke('providers:save', provider),
+  deleteProvider: (providerId: string): Promise<any[]> => ipcRenderer.invoke('providers:delete', providerId),
+  // ── MCP server 管理(~/.tangu/mcp.json;保存后托管后端重启重连)──
+  readMcpConfig: (): Promise<{ mcpServers: Record<string, any> }> => ipcRenderer.invoke('mcp:read'),
+  writeMcpConfig: (cfg: { mcpServers: Record<string, any> }): Promise<{ mcpServers: Record<string, any> }> =>
+    ipcRenderer.invoke('mcp:write', cfg),
+  // ── 跨生态 agent 资产发现/导入(~/.claude、~/.codex、~/.hermes → ~/.tangu)──
+  discoveryScan: (): Promise<any> => ipcRenderer.invoke('discovery:scan'),
+  discoveryImportSkills: (ids: string[]): Promise<{ imported: string[] }> =>
+    ipcRenderer.invoke('discovery:importSkills', ids),
+  discoveryImportMcp: (names: string[]): Promise<{ imported: string[] }> =>
+    ipcRenderer.invoke('discovery:importMcp', names),
+  // ── 环境检测 + 引导安装(首启向导;run 仅认 check 登记的 opaque id)──
+  envCheck: (): Promise<any[]> => ipcRenderer.invoke('env:check'),
+  envRun: (installId: string): Promise<{ exitCode: number }> => ipcRenderer.invoke('env:run', installId),
+  onEnvOutput: (cb: (ev: { installId: string; line: string }) => void): (() => void) => {
+    const listener = (_e: unknown, ev: { installId: string; line: string }): void => cb(ev)
+    ipcRenderer.on('env:output', listener)
+    return () => ipcRenderer.removeListener('env:output', listener)
+  },
 }
 
 contextBridge.exposeInMainWorld('tangu', api)

@@ -1,0 +1,4604 @@
+{
+  "ai-studio:sandbox": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_datetime",
+        "description": "获取当前日期与时间（服务器时区）。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "remember",
+        "description": "把一条关于用户的稳定、长期有用的事实/偏好写入长期记忆（跨会话保留，会注入到后续对话）。仅用于持久信息（如长期偏好、背景设定、称呼），不要记录一次性任务细节或临时上下文。重复内容会被自动忽略。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "fact": {
+              "type": "string",
+              "description": "要长期记住的一句话事实/偏好"
+            }
+          },
+          "required": [
+            "fact"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "log_event",
+        "description": "把本次交互中值得留痕的事件/进展追加到用户「今天」的活动日志（按日期归档，用户可在账户中心查看）。用于记录已完成的事、得出的结论、产出的文件等；不要记录琐碎闲聊。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "要记入今天日志的一句话事件/进展"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_log",
+        "description": "读取用户某一天的活动日志（markdown）。日期格式 YYYY-MM-DD，缺省读今天。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "date": {
+              "type": "string",
+              "description": "日期 YYYY-MM-DD，缺省今天"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calculator",
+        "description": "计算一个算术表达式，支持 + - * / % ( ) 与小数。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "算术表达式，如 (3+4)*2"
+            }
+          },
+          "required": [
+            "expression"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_search",
+        "description": "联网搜索，返回相关网页摘要。用于查实时/外部信息。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "搜索关键词"
+            },
+            "max_results": {
+              "type": "number",
+              "description": "返回结果数，默认 5"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_files",
+        "description": "列出 agent 工作区某目录下的文件与子目录。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "目录路径，根为 '/'"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "读取 agent 工作区某文件的文本内容。大文件可用 offset/limit 按行分页读取。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径，如 /notes/a.txt"
+            },
+            "offset": {
+              "type": "number",
+              "description": "起始行（从 0 计），默认 0"
+            },
+            "limit": {
+              "type": "number",
+              "description": "最多返回的行数（默认读尽，受上限封顶）"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "write_file",
+        "description": "在 agent 工作区写入/覆盖一个文本文件（中间目录自动创建）。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径，如 /out/result.py"
+            },
+            "content": {
+              "type": "string",
+              "description": "文件文本内容"
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "pip_install",
+        "description": "为云端沙箱按需安装缺失的 Python 包（仅二进制 wheel）。装好后 run_python 即可 import；常用库（python-docx/openpyxl/python-pptx/reportlab/pandas/numpy/matplotlib/Pillow 等）已预装，无需安装。安装是全局缓存的，同一个包只需装一次。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "packages": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "包名列表，可带版本，如 [\"openpyxl\", \"tqdm==4.66.5\"]"
+            }
+          },
+          "required": [
+            "packages"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "run_python",
+        "description": "在隔离的云端沙箱里执行 Python 3.12 代码（无网络），返回 stdout/stderr。执行前把本会话工作区同步进 /workspace（当前目录），执行后新增/修改的文件自动回写工作区——可直接读写已有文件。\n⚠️ 文件只有保存在工作区里才会被保留：用**相对路径**（即当前目录 /workspace，等价 /mnt/data）保存产物。不要写到 /tmp、HOME(~/...) 或其他绝对路径——那些目录不会回流，文件会丢失。\n沙箱是纯 Python（没有 node / pandoc / libreoffice），生成文档请直接用预装库：Word→python-docx，Excel→openpyxl/XlsxWriter，PPT→python-pptx，PDF→reportlab/pypdf/pdfplumber，数据→pandas/numpy，绘图→matplotlib，图片→Pillow。若 import 报 ModuleNotFoundError，先调用 pip_install 安装缺失的包再重试。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "description": "要执行的 Python 代码"
+            }
+          },
+          "required": [
+            "code"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_files",
+        "description": "在工作目录下按正则搜索文件内容(grep 式),返回 文件:行号:内容。支持 include 通配符限定文件(如 *.ts、src/**/*.py)。自动跳过 .git/node_modules/二进制文件。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "搜索的正则表达式(JS 语法;按行匹配)"
+            },
+            "include": {
+              "type": "string",
+              "description": "可选:文件名通配符过滤,如 *.ts 或 src/**/*.py"
+            },
+            "case_sensitive": {
+              "type": "boolean",
+              "description": "区分大小写(默认 false)"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "glob_files",
+        "description": "按通配符模式列出工作目录下匹配的文件路径(如 **/*.test.ts、src/*.py)。找文件用这个;搜内容用 search_files。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "通配符模式:** 跨目录,* 段内,? 单字符,{a,b} 多选"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_fetch",
+        "description": "抓取一个公网网页/文本/JSON 的内容并转为可读文本(HTML 自动去标签,链接保留)。适合读取 web_search 找到的链接、文档页、API 响应。仅 http/https 公网地址。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "要抓取的完整 URL(http/https)"
+            },
+            "max_chars": {
+              "type": "number",
+              "description": "返回文本上限字符数(默认 20000,封顶 60000)"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_write",
+        "description": "维护本会话的任务清单(整单替换)。规划多步任务时先写清单;每完成一步就更新状态再继续。status ∈ pending | in_progress | completed;同一时刻至多一项 in_progress。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "todos": {
+              "type": "array",
+              "description": "完整的任务清单(整单替换旧清单)",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "description": "任务描述(祈使句)"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "in_progress",
+                      "completed"
+                    ],
+                    "description": "任务状态"
+                  }
+                },
+                "required": [
+                  "content",
+                  "status"
+                ]
+              }
+            }
+          },
+          "required": [
+            "todos"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_read",
+        "description": "读取本会话当前的任务清单(恢复上下文/检查剩余步骤时用)。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    }
+  ],
+  "ai-studio:sandbox+skills": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_datetime",
+        "description": "获取当前日期与时间（服务器时区）。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "remember",
+        "description": "把一条关于用户的稳定、长期有用的事实/偏好写入长期记忆（跨会话保留，会注入到后续对话）。仅用于持久信息（如长期偏好、背景设定、称呼），不要记录一次性任务细节或临时上下文。重复内容会被自动忽略。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "fact": {
+              "type": "string",
+              "description": "要长期记住的一句话事实/偏好"
+            }
+          },
+          "required": [
+            "fact"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "log_event",
+        "description": "把本次交互中值得留痕的事件/进展追加到用户「今天」的活动日志（按日期归档，用户可在账户中心查看）。用于记录已完成的事、得出的结论、产出的文件等；不要记录琐碎闲聊。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "要记入今天日志的一句话事件/进展"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_log",
+        "description": "读取用户某一天的活动日志（markdown）。日期格式 YYYY-MM-DD，缺省读今天。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "date": {
+              "type": "string",
+              "description": "日期 YYYY-MM-DD，缺省今天"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calculator",
+        "description": "计算一个算术表达式，支持 + - * / % ( ) 与小数。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "算术表达式，如 (3+4)*2"
+            }
+          },
+          "required": [
+            "expression"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_search",
+        "description": "联网搜索，返回相关网页摘要。用于查实时/外部信息。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "搜索关键词"
+            },
+            "max_results": {
+              "type": "number",
+              "description": "返回结果数，默认 5"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_files",
+        "description": "列出 agent 工作区某目录下的文件与子目录。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "目录路径，根为 '/'"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "读取 agent 工作区某文件的文本内容。大文件可用 offset/limit 按行分页读取。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径，如 /notes/a.txt"
+            },
+            "offset": {
+              "type": "number",
+              "description": "起始行（从 0 计），默认 0"
+            },
+            "limit": {
+              "type": "number",
+              "description": "最多返回的行数（默认读尽，受上限封顶）"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "write_file",
+        "description": "在 agent 工作区写入/覆盖一个文本文件（中间目录自动创建）。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径，如 /out/result.py"
+            },
+            "content": {
+              "type": "string",
+              "description": "文件文本内容"
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "use_skill",
+        "description": "按需加载某个可用技能的完整说明书（SKILL.md）。当任务匹配 system prompt 列出的某技能时，先用它的 id 调用本工具拿到完整指令，再据此执行。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "skill_id": {
+              "type": "string",
+              "description": "技能 id（见 Available Skills 列表）"
+            }
+          },
+          "required": [
+            "skill_id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "pip_install",
+        "description": "为云端沙箱按需安装缺失的 Python 包（仅二进制 wheel）。装好后 run_python 即可 import；常用库（python-docx/openpyxl/python-pptx/reportlab/pandas/numpy/matplotlib/Pillow 等）已预装，无需安装。安装是全局缓存的，同一个包只需装一次。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "packages": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "包名列表，可带版本，如 [\"openpyxl\", \"tqdm==4.66.5\"]"
+            }
+          },
+          "required": [
+            "packages"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "run_python",
+        "description": "在隔离的云端沙箱里执行 Python 3.12 代码（无网络），返回 stdout/stderr。执行前把本会话工作区同步进 /workspace（当前目录），执行后新增/修改的文件自动回写工作区——可直接读写已有文件。\n⚠️ 文件只有保存在工作区里才会被保留：用**相对路径**（即当前目录 /workspace，等价 /mnt/data）保存产物。不要写到 /tmp、HOME(~/...) 或其他绝对路径——那些目录不会回流，文件会丢失。\n沙箱是纯 Python（没有 node / pandoc / libreoffice），生成文档请直接用预装库：Word→python-docx，Excel→openpyxl/XlsxWriter，PPT→python-pptx，PDF→reportlab/pypdf/pdfplumber，数据→pandas/numpy，绘图→matplotlib，图片→Pillow。若 import 报 ModuleNotFoundError，先调用 pip_install 安装缺失的包再重试。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "description": "要执行的 Python 代码"
+            }
+          },
+          "required": [
+            "code"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_files",
+        "description": "在工作目录下按正则搜索文件内容(grep 式),返回 文件:行号:内容。支持 include 通配符限定文件(如 *.ts、src/**/*.py)。自动跳过 .git/node_modules/二进制文件。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "搜索的正则表达式(JS 语法;按行匹配)"
+            },
+            "include": {
+              "type": "string",
+              "description": "可选:文件名通配符过滤,如 *.ts 或 src/**/*.py"
+            },
+            "case_sensitive": {
+              "type": "boolean",
+              "description": "区分大小写(默认 false)"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "glob_files",
+        "description": "按通配符模式列出工作目录下匹配的文件路径(如 **/*.test.ts、src/*.py)。找文件用这个;搜内容用 search_files。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "通配符模式:** 跨目录,* 段内,? 单字符,{a,b} 多选"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_fetch",
+        "description": "抓取一个公网网页/文本/JSON 的内容并转为可读文本(HTML 自动去标签,链接保留)。适合读取 web_search 找到的链接、文档页、API 响应。仅 http/https 公网地址。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "要抓取的完整 URL(http/https)"
+            },
+            "max_chars": {
+              "type": "number",
+              "description": "返回文本上限字符数(默认 20000,封顶 60000)"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_write",
+        "description": "维护本会话的任务清单(整单替换)。规划多步任务时先写清单;每完成一步就更新状态再继续。status ∈ pending | in_progress | completed;同一时刻至多一项 in_progress。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "todos": {
+              "type": "array",
+              "description": "完整的任务清单(整单替换旧清单)",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "description": "任务描述(祈使句)"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "in_progress",
+                      "completed"
+                    ],
+                    "description": "任务状态"
+                  }
+                },
+                "required": [
+                  "content",
+                  "status"
+                ]
+              }
+            }
+          },
+          "required": [
+            "todos"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_read",
+        "description": "读取本会话当前的任务清单(恢复上下文/检查剩余步骤时用)。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    }
+  ],
+  "ai-studio:host": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_datetime",
+        "description": "获取当前日期与时间（服务器时区）。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "remember",
+        "description": "把一条关于用户的稳定、长期有用的事实/偏好写入长期记忆（跨会话保留，会注入到后续对话）。仅用于持久信息（如长期偏好、背景设定、称呼），不要记录一次性任务细节或临时上下文。重复内容会被自动忽略。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "fact": {
+              "type": "string",
+              "description": "要长期记住的一句话事实/偏好"
+            }
+          },
+          "required": [
+            "fact"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "log_event",
+        "description": "把本次交互中值得留痕的事件/进展追加到用户「今天」的活动日志（按日期归档，用户可在账户中心查看）。用于记录已完成的事、得出的结论、产出的文件等；不要记录琐碎闲聊。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "要记入今天日志的一句话事件/进展"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_log",
+        "description": "读取用户某一天的活动日志（markdown）。日期格式 YYYY-MM-DD，缺省读今天。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "date": {
+              "type": "string",
+              "description": "日期 YYYY-MM-DD，缺省今天"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calculator",
+        "description": "计算一个算术表达式，支持 + - * / % ( ) 与小数。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "算术表达式，如 (3+4)*2"
+            }
+          },
+          "required": [
+            "expression"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_search",
+        "description": "联网搜索，返回相关网页摘要。用于查实时/外部信息。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "搜索关键词"
+            },
+            "max_results": {
+              "type": "number",
+              "description": "返回结果数，默认 5"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_files",
+        "description": "在工作目录下按正则搜索文件内容(grep 式),返回 文件:行号:内容。支持 include 通配符限定文件(如 *.ts、src/**/*.py)。自动跳过 .git/node_modules/二进制文件。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "搜索的正则表达式(JS 语法;按行匹配)"
+            },
+            "include": {
+              "type": "string",
+              "description": "可选:文件名通配符过滤,如 *.ts 或 src/**/*.py"
+            },
+            "case_sensitive": {
+              "type": "boolean",
+              "description": "区分大小写(默认 false)"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "glob_files",
+        "description": "按通配符模式列出工作目录下匹配的文件路径(如 **/*.test.ts、src/*.py)。找文件用这个;搜内容用 search_files。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "通配符模式:** 跨目录,* 段内,? 单字符,{a,b} 多选"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_fetch",
+        "description": "抓取一个公网网页/文本/JSON 的内容并转为可读文本(HTML 自动去标签,链接保留)。适合读取 web_search 找到的链接、文档页、API 响应。仅 http/https 公网地址。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "要抓取的完整 URL(http/https)"
+            },
+            "max_chars": {
+              "type": "number",
+              "description": "返回文本上限字符数(默认 20000,封顶 60000)"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_write",
+        "description": "维护本会话的任务清单(整单替换)。规划多步任务时先写清单;每完成一步就更新状态再继续。status ∈ pending | in_progress | completed;同一时刻至多一项 in_progress。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "todos": {
+              "type": "array",
+              "description": "完整的任务清单(整单替换旧清单)",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "description": "任务描述(祈使句)"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "in_progress",
+                      "completed"
+                    ],
+                    "description": "任务状态"
+                  }
+                },
+                "required": [
+                  "content",
+                  "status"
+                ]
+              }
+            }
+          },
+          "required": [
+            "todos"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_read",
+        "description": "读取本会话当前的任务清单(恢复上下文/检查剩余步骤时用)。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    }
+  ],
+  "ai-studio:host+skills": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_datetime",
+        "description": "获取当前日期与时间（服务器时区）。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "remember",
+        "description": "把一条关于用户的稳定、长期有用的事实/偏好写入长期记忆（跨会话保留，会注入到后续对话）。仅用于持久信息（如长期偏好、背景设定、称呼），不要记录一次性任务细节或临时上下文。重复内容会被自动忽略。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "fact": {
+              "type": "string",
+              "description": "要长期记住的一句话事实/偏好"
+            }
+          },
+          "required": [
+            "fact"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "log_event",
+        "description": "把本次交互中值得留痕的事件/进展追加到用户「今天」的活动日志（按日期归档，用户可在账户中心查看）。用于记录已完成的事、得出的结论、产出的文件等；不要记录琐碎闲聊。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "要记入今天日志的一句话事件/进展"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_log",
+        "description": "读取用户某一天的活动日志（markdown）。日期格式 YYYY-MM-DD，缺省读今天。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "date": {
+              "type": "string",
+              "description": "日期 YYYY-MM-DD，缺省今天"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calculator",
+        "description": "计算一个算术表达式，支持 + - * / % ( ) 与小数。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "算术表达式，如 (3+4)*2"
+            }
+          },
+          "required": [
+            "expression"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_search",
+        "description": "联网搜索，返回相关网页摘要。用于查实时/外部信息。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "搜索关键词"
+            },
+            "max_results": {
+              "type": "number",
+              "description": "返回结果数，默认 5"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "use_skill",
+        "description": "按需加载某个可用技能的完整说明书（SKILL.md）。当任务匹配 system prompt 列出的某技能时，先用它的 id 调用本工具拿到完整指令，再据此执行。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "skill_id": {
+              "type": "string",
+              "description": "技能 id（见 Available Skills 列表）"
+            }
+          },
+          "required": [
+            "skill_id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_files",
+        "description": "在工作目录下按正则搜索文件内容(grep 式),返回 文件:行号:内容。支持 include 通配符限定文件(如 *.ts、src/**/*.py)。自动跳过 .git/node_modules/二进制文件。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "搜索的正则表达式(JS 语法;按行匹配)"
+            },
+            "include": {
+              "type": "string",
+              "description": "可选:文件名通配符过滤,如 *.ts 或 src/**/*.py"
+            },
+            "case_sensitive": {
+              "type": "boolean",
+              "description": "区分大小写(默认 false)"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "glob_files",
+        "description": "按通配符模式列出工作目录下匹配的文件路径(如 **/*.test.ts、src/*.py)。找文件用这个;搜内容用 search_files。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "通配符模式:** 跨目录,* 段内,? 单字符,{a,b} 多选"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_fetch",
+        "description": "抓取一个公网网页/文本/JSON 的内容并转为可读文本(HTML 自动去标签,链接保留)。适合读取 web_search 找到的链接、文档页、API 响应。仅 http/https 公网地址。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "要抓取的完整 URL(http/https)"
+            },
+            "max_chars": {
+              "type": "number",
+              "description": "返回文本上限字符数(默认 20000,封顶 60000)"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_write",
+        "description": "维护本会话的任务清单(整单替换)。规划多步任务时先写清单;每完成一步就更新状态再继续。status ∈ pending | in_progress | completed;同一时刻至多一项 in_progress。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "todos": {
+              "type": "array",
+              "description": "完整的任务清单(整单替换旧清单)",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "description": "任务描述(祈使句)"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "in_progress",
+                      "completed"
+                    ],
+                    "description": "任务状态"
+                  }
+                },
+                "required": [
+                  "content",
+                  "status"
+                ]
+              }
+            }
+          },
+          "required": [
+            "todos"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_read",
+        "description": "读取本会话当前的任务清单(恢复上下文/检查剩余步骤时用)。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    }
+  ],
+  "tangu-docker:sandbox": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_datetime",
+        "description": "获取当前日期与时间（服务器时区）。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "remember",
+        "description": "把一条关于用户的稳定、长期有用的事实/偏好写入长期记忆（跨会话保留，会注入到后续对话）。仅用于持久信息（如长期偏好、背景设定、称呼），不要记录一次性任务细节或临时上下文。重复内容会被自动忽略。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "fact": {
+              "type": "string",
+              "description": "要长期记住的一句话事实/偏好"
+            }
+          },
+          "required": [
+            "fact"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "log_event",
+        "description": "把本次交互中值得留痕的事件/进展追加到用户「今天」的活动日志（按日期归档，用户可在账户中心查看）。用于记录已完成的事、得出的结论、产出的文件等；不要记录琐碎闲聊。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "要记入今天日志的一句话事件/进展"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_log",
+        "description": "读取用户某一天的活动日志（markdown）。日期格式 YYYY-MM-DD，缺省读今天。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "date": {
+              "type": "string",
+              "description": "日期 YYYY-MM-DD，缺省今天"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calculator",
+        "description": "计算一个算术表达式，支持 + - * / % ( ) 与小数。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "算术表达式，如 (3+4)*2"
+            }
+          },
+          "required": [
+            "expression"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_search",
+        "description": "联网搜索，返回相关网页摘要。用于查实时/外部信息。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "搜索关键词"
+            },
+            "max_results": {
+              "type": "number",
+              "description": "返回结果数，默认 5"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_files",
+        "description": "列出 agent 工作区某目录下的文件与子目录。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "目录路径，根为 '/'"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "读取 agent 工作区某文件的文本内容。大文件可用 offset/limit 按行分页读取。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径，如 /notes/a.txt"
+            },
+            "offset": {
+              "type": "number",
+              "description": "起始行（从 0 计），默认 0"
+            },
+            "limit": {
+              "type": "number",
+              "description": "最多返回的行数（默认读尽，受上限封顶）"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "write_file",
+        "description": "在 agent 工作区写入/覆盖一个文本文件（中间目录自动创建）。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径，如 /out/result.py"
+            },
+            "content": {
+              "type": "string",
+              "description": "文件文本内容"
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "pip_install",
+        "description": "为云端沙箱按需安装缺失的 Python 包（仅二进制 wheel）。装好后 run_python 即可 import；常用库（python-docx/openpyxl/python-pptx/reportlab/pandas/numpy/matplotlib/Pillow 等）已预装，无需安装。安装是全局缓存的，同一个包只需装一次。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "packages": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "包名列表，可带版本，如 [\"openpyxl\", \"tqdm==4.66.5\"]"
+            }
+          },
+          "required": [
+            "packages"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "run_python",
+        "description": "在隔离的云端沙箱里执行 Python 3.12 代码（无网络），返回 stdout/stderr。执行前把本会话工作区同步进 /workspace（当前目录），执行后新增/修改的文件自动回写工作区——可直接读写已有文件。\n⚠️ 文件只有保存在工作区里才会被保留：用**相对路径**（即当前目录 /workspace，等价 /mnt/data）保存产物。不要写到 /tmp、HOME(~/...) 或其他绝对路径——那些目录不会回流，文件会丢失。\n沙箱是纯 Python（没有 node / pandoc / libreoffice），生成文档请直接用预装库：Word→python-docx，Excel→openpyxl/XlsxWriter，PPT→python-pptx，PDF→reportlab/pypdf/pdfplumber，数据→pandas/numpy，绘图→matplotlib，图片→Pillow。若 import 报 ModuleNotFoundError，先调用 pip_install 安装缺失的包再重试。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "description": "要执行的 Python 代码"
+            }
+          },
+          "required": [
+            "code"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_files",
+        "description": "在工作目录下按正则搜索文件内容(grep 式),返回 文件:行号:内容。支持 include 通配符限定文件(如 *.ts、src/**/*.py)。自动跳过 .git/node_modules/二进制文件。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "搜索的正则表达式(JS 语法;按行匹配)"
+            },
+            "include": {
+              "type": "string",
+              "description": "可选:文件名通配符过滤,如 *.ts 或 src/**/*.py"
+            },
+            "case_sensitive": {
+              "type": "boolean",
+              "description": "区分大小写(默认 false)"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "glob_files",
+        "description": "按通配符模式列出工作目录下匹配的文件路径(如 **/*.test.ts、src/*.py)。找文件用这个;搜内容用 search_files。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "通配符模式:** 跨目录,* 段内,? 单字符,{a,b} 多选"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_fetch",
+        "description": "抓取一个公网网页/文本/JSON 的内容并转为可读文本(HTML 自动去标签,链接保留)。适合读取 web_search 找到的链接、文档页、API 响应。仅 http/https 公网地址。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "要抓取的完整 URL(http/https)"
+            },
+            "max_chars": {
+              "type": "number",
+              "description": "返回文本上限字符数(默认 20000,封顶 60000)"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_write",
+        "description": "维护本会话的任务清单(整单替换)。规划多步任务时先写清单;每完成一步就更新状态再继续。status ∈ pending | in_progress | completed;同一时刻至多一项 in_progress。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "todos": {
+              "type": "array",
+              "description": "完整的任务清单(整单替换旧清单)",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "description": "任务描述(祈使句)"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "in_progress",
+                      "completed"
+                    ],
+                    "description": "任务状态"
+                  }
+                },
+                "required": [
+                  "content",
+                  "status"
+                ]
+              }
+            }
+          },
+          "required": [
+            "todos"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_read",
+        "description": "读取本会话当前的任务清单(恢复上下文/检查剩余步骤时用)。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "delegate",
+        "description": "把一个独立子任务外包给子代理执行(子代理有自己的上下文和同套工具,最多 8 轮),返回其最终报告。适合大范围搜索、批量文件分析等中间过程冗长的任务——过程不占用你的上下文,你只拿结论。子任务描述必须自包含(子代理看不到当前对话)。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "type": "string",
+              "description": "子任务描述(自包含、目标明确,说清要返回什么)"
+            },
+            "context": {
+              "type": "string",
+              "description": "可选:子代理需要的背景信息(相关路径、已知结论等)"
+            }
+          },
+          "required": [
+            "task"
+          ]
+        }
+      }
+    }
+  ],
+  "tangu-docker:sandbox+skills": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_datetime",
+        "description": "获取当前日期与时间（服务器时区）。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "remember",
+        "description": "把一条关于用户的稳定、长期有用的事实/偏好写入长期记忆（跨会话保留，会注入到后续对话）。仅用于持久信息（如长期偏好、背景设定、称呼），不要记录一次性任务细节或临时上下文。重复内容会被自动忽略。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "fact": {
+              "type": "string",
+              "description": "要长期记住的一句话事实/偏好"
+            }
+          },
+          "required": [
+            "fact"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "log_event",
+        "description": "把本次交互中值得留痕的事件/进展追加到用户「今天」的活动日志（按日期归档，用户可在账户中心查看）。用于记录已完成的事、得出的结论、产出的文件等；不要记录琐碎闲聊。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "要记入今天日志的一句话事件/进展"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_log",
+        "description": "读取用户某一天的活动日志（markdown）。日期格式 YYYY-MM-DD，缺省读今天。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "date": {
+              "type": "string",
+              "description": "日期 YYYY-MM-DD，缺省今天"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calculator",
+        "description": "计算一个算术表达式，支持 + - * / % ( ) 与小数。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "算术表达式，如 (3+4)*2"
+            }
+          },
+          "required": [
+            "expression"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_search",
+        "description": "联网搜索，返回相关网页摘要。用于查实时/外部信息。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "搜索关键词"
+            },
+            "max_results": {
+              "type": "number",
+              "description": "返回结果数，默认 5"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_files",
+        "description": "列出 agent 工作区某目录下的文件与子目录。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "目录路径，根为 '/'"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "读取 agent 工作区某文件的文本内容。大文件可用 offset/limit 按行分页读取。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径，如 /notes/a.txt"
+            },
+            "offset": {
+              "type": "number",
+              "description": "起始行（从 0 计），默认 0"
+            },
+            "limit": {
+              "type": "number",
+              "description": "最多返回的行数（默认读尽，受上限封顶）"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "write_file",
+        "description": "在 agent 工作区写入/覆盖一个文本文件（中间目录自动创建）。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径，如 /out/result.py"
+            },
+            "content": {
+              "type": "string",
+              "description": "文件文本内容"
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "use_skill",
+        "description": "按需加载某个可用技能的完整说明书（SKILL.md）。当任务匹配 system prompt 列出的某技能时，先用它的 id 调用本工具拿到完整指令，再据此执行。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "skill_id": {
+              "type": "string",
+              "description": "技能 id（见 Available Skills 列表）"
+            }
+          },
+          "required": [
+            "skill_id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "pip_install",
+        "description": "为云端沙箱按需安装缺失的 Python 包（仅二进制 wheel）。装好后 run_python 即可 import；常用库（python-docx/openpyxl/python-pptx/reportlab/pandas/numpy/matplotlib/Pillow 等）已预装，无需安装。安装是全局缓存的，同一个包只需装一次。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "packages": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "包名列表，可带版本，如 [\"openpyxl\", \"tqdm==4.66.5\"]"
+            }
+          },
+          "required": [
+            "packages"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "run_python",
+        "description": "在隔离的云端沙箱里执行 Python 3.12 代码（无网络），返回 stdout/stderr。执行前把本会话工作区同步进 /workspace（当前目录），执行后新增/修改的文件自动回写工作区——可直接读写已有文件。\n⚠️ 文件只有保存在工作区里才会被保留：用**相对路径**（即当前目录 /workspace，等价 /mnt/data）保存产物。不要写到 /tmp、HOME(~/...) 或其他绝对路径——那些目录不会回流，文件会丢失。\n沙箱是纯 Python（没有 node / pandoc / libreoffice），生成文档请直接用预装库：Word→python-docx，Excel→openpyxl/XlsxWriter，PPT→python-pptx，PDF→reportlab/pypdf/pdfplumber，数据→pandas/numpy，绘图→matplotlib，图片→Pillow。若 import 报 ModuleNotFoundError，先调用 pip_install 安装缺失的包再重试。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "description": "要执行的 Python 代码"
+            }
+          },
+          "required": [
+            "code"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_files",
+        "description": "在工作目录下按正则搜索文件内容(grep 式),返回 文件:行号:内容。支持 include 通配符限定文件(如 *.ts、src/**/*.py)。自动跳过 .git/node_modules/二进制文件。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "搜索的正则表达式(JS 语法;按行匹配)"
+            },
+            "include": {
+              "type": "string",
+              "description": "可选:文件名通配符过滤,如 *.ts 或 src/**/*.py"
+            },
+            "case_sensitive": {
+              "type": "boolean",
+              "description": "区分大小写(默认 false)"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "glob_files",
+        "description": "按通配符模式列出工作目录下匹配的文件路径(如 **/*.test.ts、src/*.py)。找文件用这个;搜内容用 search_files。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "通配符模式:** 跨目录,* 段内,? 单字符,{a,b} 多选"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_fetch",
+        "description": "抓取一个公网网页/文本/JSON 的内容并转为可读文本(HTML 自动去标签,链接保留)。适合读取 web_search 找到的链接、文档页、API 响应。仅 http/https 公网地址。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "要抓取的完整 URL(http/https)"
+            },
+            "max_chars": {
+              "type": "number",
+              "description": "返回文本上限字符数(默认 20000,封顶 60000)"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_write",
+        "description": "维护本会话的任务清单(整单替换)。规划多步任务时先写清单;每完成一步就更新状态再继续。status ∈ pending | in_progress | completed;同一时刻至多一项 in_progress。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "todos": {
+              "type": "array",
+              "description": "完整的任务清单(整单替换旧清单)",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "description": "任务描述(祈使句)"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "in_progress",
+                      "completed"
+                    ],
+                    "description": "任务状态"
+                  }
+                },
+                "required": [
+                  "content",
+                  "status"
+                ]
+              }
+            }
+          },
+          "required": [
+            "todos"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_read",
+        "description": "读取本会话当前的任务清单(恢复上下文/检查剩余步骤时用)。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "delegate",
+        "description": "把一个独立子任务外包给子代理执行(子代理有自己的上下文和同套工具,最多 8 轮),返回其最终报告。适合大范围搜索、批量文件分析等中间过程冗长的任务——过程不占用你的上下文,你只拿结论。子任务描述必须自包含(子代理看不到当前对话)。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "type": "string",
+              "description": "子任务描述(自包含、目标明确,说清要返回什么)"
+            },
+            "context": {
+              "type": "string",
+              "description": "可选:子代理需要的背景信息(相关路径、已知结论等)"
+            }
+          },
+          "required": [
+            "task"
+          ]
+        }
+      }
+    }
+  ],
+  "tangu-docker:host": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_datetime",
+        "description": "获取当前日期与时间（服务器时区）。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "remember",
+        "description": "把一条关于用户的稳定、长期有用的事实/偏好写入长期记忆（跨会话保留，会注入到后续对话）。仅用于持久信息（如长期偏好、背景设定、称呼），不要记录一次性任务细节或临时上下文。重复内容会被自动忽略。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "fact": {
+              "type": "string",
+              "description": "要长期记住的一句话事实/偏好"
+            }
+          },
+          "required": [
+            "fact"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "log_event",
+        "description": "把本次交互中值得留痕的事件/进展追加到用户「今天」的活动日志（按日期归档，用户可在账户中心查看）。用于记录已完成的事、得出的结论、产出的文件等；不要记录琐碎闲聊。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "要记入今天日志的一句话事件/进展"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_log",
+        "description": "读取用户某一天的活动日志（markdown）。日期格式 YYYY-MM-DD，缺省读今天。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "date": {
+              "type": "string",
+              "description": "日期 YYYY-MM-DD，缺省今天"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calculator",
+        "description": "计算一个算术表达式，支持 + - * / % ( ) 与小数。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "算术表达式，如 (3+4)*2"
+            }
+          },
+          "required": [
+            "expression"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_search",
+        "description": "联网搜索，返回相关网页摘要。用于查实时/外部信息。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "搜索关键词"
+            },
+            "max_results": {
+              "type": "number",
+              "description": "返回结果数，默认 5"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "run_bash",
+        "description": "在用户本机执行一条 shell 命令（/bin/sh -c），工作目录为当前会话的 cwd，返回 stdout/stderr/exit_code。用于运行构建/测试、查看目录、git 操作等。破坏性命令可能需要用户审批。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "要执行的 shell 命令"
+            },
+            "timeout_ms": {
+              "type": "number",
+              "description": "超时毫秒（默认 120000）"
+            }
+          },
+          "required": [
+            "command"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "读取本机文件文本内容（路径相对当前工作目录解析）。大文件用 offset/limit 按行分页。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径（相对 cwd 或绝对路径）"
+            },
+            "offset": {
+              "type": "number",
+              "description": "起始行（从 0 计），默认 0"
+            },
+            "limit": {
+              "type": "number",
+              "description": "最多返回行数（默认读尽，受上限封顶）"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "write_file",
+        "description": "在本机写入/覆盖一个文本文件（中间目录自动创建，路径相对当前工作目录）。整文件覆盖请用此工具；局部修改优先 edit_file。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径（相对 cwd 或绝对路径）"
+            },
+            "content": {
+              "type": "string",
+              "description": "文件文本内容"
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "edit_file",
+        "description": "对本机文件做精确字符串替换：把唯一出现的 old_string 换成 new_string（含缩进/空白须完全一致）。old_string 必须在文件中**恰好出现一次**，否则报错——这样改动安全可控。新建文件请用 write_file。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径（相对 cwd 或绝对路径）"
+            },
+            "old_string": {
+              "type": "string",
+              "description": "要替换的原文（须唯一匹配）"
+            },
+            "new_string": {
+              "type": "string",
+              "description": "替换后的新文本"
+            }
+          },
+          "required": [
+            "path",
+            "old_string",
+            "new_string"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_dir",
+        "description": "列出本机某目录下的文件与子目录（路径相对当前工作目录，默认列 cwd 本身）。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "目录路径（相对 cwd 或绝对路径），默认当前目录"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "multi_edit",
+        "description": "对本机一个文件做多处精确替换(原子:全部匹配才写入,任一失败整体不动)。每个 edit 的 old_string 须在「前序 edit 依次应用后的文本」中恰好出现一次。同文件多处修改用此工具,比连发多次 edit_file 更安全省轮次。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径(相对 cwd 或绝对路径)"
+            },
+            "edits": {
+              "type": "array",
+              "description": "按序应用的替换列表",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "old_string": {
+                    "type": "string",
+                    "description": "要替换的原文(须唯一匹配)"
+                  },
+                  "new_string": {
+                    "type": "string",
+                    "description": "替换后的新文本"
+                  }
+                },
+                "required": [
+                  "old_string",
+                  "new_string"
+                ]
+              }
+            }
+          },
+          "required": [
+            "path",
+            "edits"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_files",
+        "description": "在工作目录下按正则搜索文件内容(grep 式),返回 文件:行号:内容。支持 include 通配符限定文件(如 *.ts、src/**/*.py)。自动跳过 .git/node_modules/二进制文件。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "搜索的正则表达式(JS 语法;按行匹配)"
+            },
+            "include": {
+              "type": "string",
+              "description": "可选:文件名通配符过滤,如 *.ts 或 src/**/*.py"
+            },
+            "case_sensitive": {
+              "type": "boolean",
+              "description": "区分大小写(默认 false)"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "glob_files",
+        "description": "按通配符模式列出工作目录下匹配的文件路径(如 **/*.test.ts、src/*.py)。找文件用这个;搜内容用 search_files。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "通配符模式:** 跨目录,* 段内,? 单字符,{a,b} 多选"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_fetch",
+        "description": "抓取一个公网网页/文本/JSON 的内容并转为可读文本(HTML 自动去标签,链接保留)。适合读取 web_search 找到的链接、文档页、API 响应。仅 http/https 公网地址。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "要抓取的完整 URL(http/https)"
+            },
+            "max_chars": {
+              "type": "number",
+              "description": "返回文本上限字符数(默认 20000,封顶 60000)"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_write",
+        "description": "维护本会话的任务清单(整单替换)。规划多步任务时先写清单;每完成一步就更新状态再继续。status ∈ pending | in_progress | completed;同一时刻至多一项 in_progress。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "todos": {
+              "type": "array",
+              "description": "完整的任务清单(整单替换旧清单)",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "description": "任务描述(祈使句)"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "in_progress",
+                      "completed"
+                    ],
+                    "description": "任务状态"
+                  }
+                },
+                "required": [
+                  "content",
+                  "status"
+                ]
+              }
+            }
+          },
+          "required": [
+            "todos"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_read",
+        "description": "读取本会话当前的任务清单(恢复上下文/检查剩余步骤时用)。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "run_background",
+        "description": "在本机后台启动一条长跑 shell 命令(dev server、watch、长测试等),立即返回 process_id。用 read_process_output 看输出、list_processes 看状态、kill_process 终止。一次性命令请用 run_bash;只有需要持续运行/不能阻塞后续步骤的才用这个。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "要后台执行的 shell 命令"
+            }
+          },
+          "required": [
+            "command"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_processes",
+        "description": "列出本会话启动的后台进程(id/命令/状态/运行时长)。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_process_output",
+        "description": "读取某后台进程的累计输出(stdout+stderr 合流)。offset 为字符偏移,省略则读尾部。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "process_id": {
+              "type": "string",
+              "description": "run_background 返回的进程 id"
+            },
+            "offset": {
+              "type": "number",
+              "description": "起始字符偏移(默认读最近 20000 字符)"
+            }
+          },
+          "required": [
+            "process_id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "kill_process",
+        "description": "终止某个后台进程(SIGTERM→3s→SIGKILL)。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "process_id": {
+              "type": "string",
+              "description": "要终止的进程 id"
+            }
+          },
+          "required": [
+            "process_id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "delegate",
+        "description": "把一个独立子任务外包给子代理执行(子代理有自己的上下文和同套工具,最多 8 轮),返回其最终报告。适合大范围搜索、批量文件分析等中间过程冗长的任务——过程不占用你的上下文,你只拿结论。子任务描述必须自包含(子代理看不到当前对话)。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "type": "string",
+              "description": "子任务描述(自包含、目标明确,说清要返回什么)"
+            },
+            "context": {
+              "type": "string",
+              "description": "可选:子代理需要的背景信息(相关路径、已知结论等)"
+            }
+          },
+          "required": [
+            "task"
+          ]
+        }
+      }
+    }
+  ],
+  "tangu-docker:host+skills": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_datetime",
+        "description": "获取当前日期与时间（服务器时区）。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "remember",
+        "description": "把一条关于用户的稳定、长期有用的事实/偏好写入长期记忆（跨会话保留，会注入到后续对话）。仅用于持久信息（如长期偏好、背景设定、称呼），不要记录一次性任务细节或临时上下文。重复内容会被自动忽略。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "fact": {
+              "type": "string",
+              "description": "要长期记住的一句话事实/偏好"
+            }
+          },
+          "required": [
+            "fact"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "log_event",
+        "description": "把本次交互中值得留痕的事件/进展追加到用户「今天」的活动日志（按日期归档，用户可在账户中心查看）。用于记录已完成的事、得出的结论、产出的文件等；不要记录琐碎闲聊。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "要记入今天日志的一句话事件/进展"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_log",
+        "description": "读取用户某一天的活动日志（markdown）。日期格式 YYYY-MM-DD，缺省读今天。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "date": {
+              "type": "string",
+              "description": "日期 YYYY-MM-DD，缺省今天"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calculator",
+        "description": "计算一个算术表达式，支持 + - * / % ( ) 与小数。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "算术表达式，如 (3+4)*2"
+            }
+          },
+          "required": [
+            "expression"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_search",
+        "description": "联网搜索，返回相关网页摘要。用于查实时/外部信息。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "搜索关键词"
+            },
+            "max_results": {
+              "type": "number",
+              "description": "返回结果数，默认 5"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "use_skill",
+        "description": "按需加载某个可用技能的完整说明书（SKILL.md）。当任务匹配 system prompt 列出的某技能时，先用它的 id 调用本工具拿到完整指令，再据此执行。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "skill_id": {
+              "type": "string",
+              "description": "技能 id（见 Available Skills 列表）"
+            }
+          },
+          "required": [
+            "skill_id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "run_bash",
+        "description": "在用户本机执行一条 shell 命令（/bin/sh -c），工作目录为当前会话的 cwd，返回 stdout/stderr/exit_code。用于运行构建/测试、查看目录、git 操作等。破坏性命令可能需要用户审批。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "要执行的 shell 命令"
+            },
+            "timeout_ms": {
+              "type": "number",
+              "description": "超时毫秒（默认 120000）"
+            }
+          },
+          "required": [
+            "command"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "读取本机文件文本内容（路径相对当前工作目录解析）。大文件用 offset/limit 按行分页。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径（相对 cwd 或绝对路径）"
+            },
+            "offset": {
+              "type": "number",
+              "description": "起始行（从 0 计），默认 0"
+            },
+            "limit": {
+              "type": "number",
+              "description": "最多返回行数（默认读尽，受上限封顶）"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "write_file",
+        "description": "在本机写入/覆盖一个文本文件（中间目录自动创建，路径相对当前工作目录）。整文件覆盖请用此工具；局部修改优先 edit_file。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径（相对 cwd 或绝对路径）"
+            },
+            "content": {
+              "type": "string",
+              "description": "文件文本内容"
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "edit_file",
+        "description": "对本机文件做精确字符串替换：把唯一出现的 old_string 换成 new_string（含缩进/空白须完全一致）。old_string 必须在文件中**恰好出现一次**，否则报错——这样改动安全可控。新建文件请用 write_file。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径（相对 cwd 或绝对路径）"
+            },
+            "old_string": {
+              "type": "string",
+              "description": "要替换的原文（须唯一匹配）"
+            },
+            "new_string": {
+              "type": "string",
+              "description": "替换后的新文本"
+            }
+          },
+          "required": [
+            "path",
+            "old_string",
+            "new_string"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_dir",
+        "description": "列出本机某目录下的文件与子目录（路径相对当前工作目录，默认列 cwd 本身）。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "目录路径（相对 cwd 或绝对路径），默认当前目录"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "multi_edit",
+        "description": "对本机一个文件做多处精确替换(原子:全部匹配才写入,任一失败整体不动)。每个 edit 的 old_string 须在「前序 edit 依次应用后的文本」中恰好出现一次。同文件多处修改用此工具,比连发多次 edit_file 更安全省轮次。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径(相对 cwd 或绝对路径)"
+            },
+            "edits": {
+              "type": "array",
+              "description": "按序应用的替换列表",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "old_string": {
+                    "type": "string",
+                    "description": "要替换的原文(须唯一匹配)"
+                  },
+                  "new_string": {
+                    "type": "string",
+                    "description": "替换后的新文本"
+                  }
+                },
+                "required": [
+                  "old_string",
+                  "new_string"
+                ]
+              }
+            }
+          },
+          "required": [
+            "path",
+            "edits"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_files",
+        "description": "在工作目录下按正则搜索文件内容(grep 式),返回 文件:行号:内容。支持 include 通配符限定文件(如 *.ts、src/**/*.py)。自动跳过 .git/node_modules/二进制文件。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "搜索的正则表达式(JS 语法;按行匹配)"
+            },
+            "include": {
+              "type": "string",
+              "description": "可选:文件名通配符过滤,如 *.ts 或 src/**/*.py"
+            },
+            "case_sensitive": {
+              "type": "boolean",
+              "description": "区分大小写(默认 false)"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "glob_files",
+        "description": "按通配符模式列出工作目录下匹配的文件路径(如 **/*.test.ts、src/*.py)。找文件用这个;搜内容用 search_files。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "通配符模式:** 跨目录,* 段内,? 单字符,{a,b} 多选"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_fetch",
+        "description": "抓取一个公网网页/文本/JSON 的内容并转为可读文本(HTML 自动去标签,链接保留)。适合读取 web_search 找到的链接、文档页、API 响应。仅 http/https 公网地址。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "要抓取的完整 URL(http/https)"
+            },
+            "max_chars": {
+              "type": "number",
+              "description": "返回文本上限字符数(默认 20000,封顶 60000)"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_write",
+        "description": "维护本会话的任务清单(整单替换)。规划多步任务时先写清单;每完成一步就更新状态再继续。status ∈ pending | in_progress | completed;同一时刻至多一项 in_progress。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "todos": {
+              "type": "array",
+              "description": "完整的任务清单(整单替换旧清单)",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "description": "任务描述(祈使句)"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "in_progress",
+                      "completed"
+                    ],
+                    "description": "任务状态"
+                  }
+                },
+                "required": [
+                  "content",
+                  "status"
+                ]
+              }
+            }
+          },
+          "required": [
+            "todos"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_read",
+        "description": "读取本会话当前的任务清单(恢复上下文/检查剩余步骤时用)。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "run_background",
+        "description": "在本机后台启动一条长跑 shell 命令(dev server、watch、长测试等),立即返回 process_id。用 read_process_output 看输出、list_processes 看状态、kill_process 终止。一次性命令请用 run_bash;只有需要持续运行/不能阻塞后续步骤的才用这个。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "要后台执行的 shell 命令"
+            }
+          },
+          "required": [
+            "command"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_processes",
+        "description": "列出本会话启动的后台进程(id/命令/状态/运行时长)。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_process_output",
+        "description": "读取某后台进程的累计输出(stdout+stderr 合流)。offset 为字符偏移,省略则读尾部。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "process_id": {
+              "type": "string",
+              "description": "run_background 返回的进程 id"
+            },
+            "offset": {
+              "type": "number",
+              "description": "起始字符偏移(默认读最近 20000 字符)"
+            }
+          },
+          "required": [
+            "process_id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "kill_process",
+        "description": "终止某个后台进程(SIGTERM→3s→SIGKILL)。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "process_id": {
+              "type": "string",
+              "description": "要终止的进程 id"
+            }
+          },
+          "required": [
+            "process_id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "delegate",
+        "description": "把一个独立子任务外包给子代理执行(子代理有自己的上下文和同套工具,最多 8 轮),返回其最终报告。适合大范围搜索、批量文件分析等中间过程冗长的任务——过程不占用你的上下文,你只拿结论。子任务描述必须自包含(子代理看不到当前对话)。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "type": "string",
+              "description": "子任务描述(自包含、目标明确,说清要返回什么)"
+            },
+            "context": {
+              "type": "string",
+              "description": "可选:子代理需要的背景信息(相关路径、已知结论等)"
+            }
+          },
+          "required": [
+            "task"
+          ]
+        }
+      }
+    }
+  ],
+  "tangu-none:sandbox": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_datetime",
+        "description": "获取当前日期与时间（服务器时区）。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "remember",
+        "description": "把一条关于用户的稳定、长期有用的事实/偏好写入长期记忆（跨会话保留，会注入到后续对话）。仅用于持久信息（如长期偏好、背景设定、称呼），不要记录一次性任务细节或临时上下文。重复内容会被自动忽略。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "fact": {
+              "type": "string",
+              "description": "要长期记住的一句话事实/偏好"
+            }
+          },
+          "required": [
+            "fact"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "log_event",
+        "description": "把本次交互中值得留痕的事件/进展追加到用户「今天」的活动日志（按日期归档，用户可在账户中心查看）。用于记录已完成的事、得出的结论、产出的文件等；不要记录琐碎闲聊。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "要记入今天日志的一句话事件/进展"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_log",
+        "description": "读取用户某一天的活动日志（markdown）。日期格式 YYYY-MM-DD，缺省读今天。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "date": {
+              "type": "string",
+              "description": "日期 YYYY-MM-DD，缺省今天"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calculator",
+        "description": "计算一个算术表达式，支持 + - * / % ( ) 与小数。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "算术表达式，如 (3+4)*2"
+            }
+          },
+          "required": [
+            "expression"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_search",
+        "description": "联网搜索，返回相关网页摘要。用于查实时/外部信息。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "搜索关键词"
+            },
+            "max_results": {
+              "type": "number",
+              "description": "返回结果数，默认 5"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_files",
+        "description": "列出 agent 工作区某目录下的文件与子目录。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "目录路径，根为 '/'"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "读取 agent 工作区某文件的文本内容。大文件可用 offset/limit 按行分页读取。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径，如 /notes/a.txt"
+            },
+            "offset": {
+              "type": "number",
+              "description": "起始行（从 0 计），默认 0"
+            },
+            "limit": {
+              "type": "number",
+              "description": "最多返回的行数（默认读尽，受上限封顶）"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "write_file",
+        "description": "在 agent 工作区写入/覆盖一个文本文件（中间目录自动创建）。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径，如 /out/result.py"
+            },
+            "content": {
+              "type": "string",
+              "description": "文件文本内容"
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_files",
+        "description": "在工作目录下按正则搜索文件内容(grep 式),返回 文件:行号:内容。支持 include 通配符限定文件(如 *.ts、src/**/*.py)。自动跳过 .git/node_modules/二进制文件。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "搜索的正则表达式(JS 语法;按行匹配)"
+            },
+            "include": {
+              "type": "string",
+              "description": "可选:文件名通配符过滤,如 *.ts 或 src/**/*.py"
+            },
+            "case_sensitive": {
+              "type": "boolean",
+              "description": "区分大小写(默认 false)"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "glob_files",
+        "description": "按通配符模式列出工作目录下匹配的文件路径(如 **/*.test.ts、src/*.py)。找文件用这个;搜内容用 search_files。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "通配符模式:** 跨目录,* 段内,? 单字符,{a,b} 多选"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_fetch",
+        "description": "抓取一个公网网页/文本/JSON 的内容并转为可读文本(HTML 自动去标签,链接保留)。适合读取 web_search 找到的链接、文档页、API 响应。仅 http/https 公网地址。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "要抓取的完整 URL(http/https)"
+            },
+            "max_chars": {
+              "type": "number",
+              "description": "返回文本上限字符数(默认 20000,封顶 60000)"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_write",
+        "description": "维护本会话的任务清单(整单替换)。规划多步任务时先写清单;每完成一步就更新状态再继续。status ∈ pending | in_progress | completed;同一时刻至多一项 in_progress。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "todos": {
+              "type": "array",
+              "description": "完整的任务清单(整单替换旧清单)",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "description": "任务描述(祈使句)"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "in_progress",
+                      "completed"
+                    ],
+                    "description": "任务状态"
+                  }
+                },
+                "required": [
+                  "content",
+                  "status"
+                ]
+              }
+            }
+          },
+          "required": [
+            "todos"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_read",
+        "description": "读取本会话当前的任务清单(恢复上下文/检查剩余步骤时用)。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "delegate",
+        "description": "把一个独立子任务外包给子代理执行(子代理有自己的上下文和同套工具,最多 8 轮),返回其最终报告。适合大范围搜索、批量文件分析等中间过程冗长的任务——过程不占用你的上下文,你只拿结论。子任务描述必须自包含(子代理看不到当前对话)。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "type": "string",
+              "description": "子任务描述(自包含、目标明确,说清要返回什么)"
+            },
+            "context": {
+              "type": "string",
+              "description": "可选:子代理需要的背景信息(相关路径、已知结论等)"
+            }
+          },
+          "required": [
+            "task"
+          ]
+        }
+      }
+    }
+  ],
+  "tangu-none:sandbox+skills": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_datetime",
+        "description": "获取当前日期与时间（服务器时区）。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "remember",
+        "description": "把一条关于用户的稳定、长期有用的事实/偏好写入长期记忆（跨会话保留，会注入到后续对话）。仅用于持久信息（如长期偏好、背景设定、称呼），不要记录一次性任务细节或临时上下文。重复内容会被自动忽略。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "fact": {
+              "type": "string",
+              "description": "要长期记住的一句话事实/偏好"
+            }
+          },
+          "required": [
+            "fact"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "log_event",
+        "description": "把本次交互中值得留痕的事件/进展追加到用户「今天」的活动日志（按日期归档，用户可在账户中心查看）。用于记录已完成的事、得出的结论、产出的文件等；不要记录琐碎闲聊。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "要记入今天日志的一句话事件/进展"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_log",
+        "description": "读取用户某一天的活动日志（markdown）。日期格式 YYYY-MM-DD，缺省读今天。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "date": {
+              "type": "string",
+              "description": "日期 YYYY-MM-DD，缺省今天"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calculator",
+        "description": "计算一个算术表达式，支持 + - * / % ( ) 与小数。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "算术表达式，如 (3+4)*2"
+            }
+          },
+          "required": [
+            "expression"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_search",
+        "description": "联网搜索，返回相关网页摘要。用于查实时/外部信息。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "搜索关键词"
+            },
+            "max_results": {
+              "type": "number",
+              "description": "返回结果数，默认 5"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_files",
+        "description": "列出 agent 工作区某目录下的文件与子目录。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "目录路径，根为 '/'"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "读取 agent 工作区某文件的文本内容。大文件可用 offset/limit 按行分页读取。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径，如 /notes/a.txt"
+            },
+            "offset": {
+              "type": "number",
+              "description": "起始行（从 0 计），默认 0"
+            },
+            "limit": {
+              "type": "number",
+              "description": "最多返回的行数（默认读尽，受上限封顶）"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "write_file",
+        "description": "在 agent 工作区写入/覆盖一个文本文件（中间目录自动创建）。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径，如 /out/result.py"
+            },
+            "content": {
+              "type": "string",
+              "description": "文件文本内容"
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "use_skill",
+        "description": "按需加载某个可用技能的完整说明书（SKILL.md）。当任务匹配 system prompt 列出的某技能时，先用它的 id 调用本工具拿到完整指令，再据此执行。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "skill_id": {
+              "type": "string",
+              "description": "技能 id（见 Available Skills 列表）"
+            }
+          },
+          "required": [
+            "skill_id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_files",
+        "description": "在工作目录下按正则搜索文件内容(grep 式),返回 文件:行号:内容。支持 include 通配符限定文件(如 *.ts、src/**/*.py)。自动跳过 .git/node_modules/二进制文件。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "搜索的正则表达式(JS 语法;按行匹配)"
+            },
+            "include": {
+              "type": "string",
+              "description": "可选:文件名通配符过滤,如 *.ts 或 src/**/*.py"
+            },
+            "case_sensitive": {
+              "type": "boolean",
+              "description": "区分大小写(默认 false)"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "glob_files",
+        "description": "按通配符模式列出工作目录下匹配的文件路径(如 **/*.test.ts、src/*.py)。找文件用这个;搜内容用 search_files。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "通配符模式:** 跨目录,* 段内,? 单字符,{a,b} 多选"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_fetch",
+        "description": "抓取一个公网网页/文本/JSON 的内容并转为可读文本(HTML 自动去标签,链接保留)。适合读取 web_search 找到的链接、文档页、API 响应。仅 http/https 公网地址。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "要抓取的完整 URL(http/https)"
+            },
+            "max_chars": {
+              "type": "number",
+              "description": "返回文本上限字符数(默认 20000,封顶 60000)"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_write",
+        "description": "维护本会话的任务清单(整单替换)。规划多步任务时先写清单;每完成一步就更新状态再继续。status ∈ pending | in_progress | completed;同一时刻至多一项 in_progress。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "todos": {
+              "type": "array",
+              "description": "完整的任务清单(整单替换旧清单)",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "description": "任务描述(祈使句)"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "in_progress",
+                      "completed"
+                    ],
+                    "description": "任务状态"
+                  }
+                },
+                "required": [
+                  "content",
+                  "status"
+                ]
+              }
+            }
+          },
+          "required": [
+            "todos"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_read",
+        "description": "读取本会话当前的任务清单(恢复上下文/检查剩余步骤时用)。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "delegate",
+        "description": "把一个独立子任务外包给子代理执行(子代理有自己的上下文和同套工具,最多 8 轮),返回其最终报告。适合大范围搜索、批量文件分析等中间过程冗长的任务——过程不占用你的上下文,你只拿结论。子任务描述必须自包含(子代理看不到当前对话)。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "type": "string",
+              "description": "子任务描述(自包含、目标明确,说清要返回什么)"
+            },
+            "context": {
+              "type": "string",
+              "description": "可选:子代理需要的背景信息(相关路径、已知结论等)"
+            }
+          },
+          "required": [
+            "task"
+          ]
+        }
+      }
+    }
+  ],
+  "tangu-none:host": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_datetime",
+        "description": "获取当前日期与时间（服务器时区）。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "remember",
+        "description": "把一条关于用户的稳定、长期有用的事实/偏好写入长期记忆（跨会话保留，会注入到后续对话）。仅用于持久信息（如长期偏好、背景设定、称呼），不要记录一次性任务细节或临时上下文。重复内容会被自动忽略。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "fact": {
+              "type": "string",
+              "description": "要长期记住的一句话事实/偏好"
+            }
+          },
+          "required": [
+            "fact"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "log_event",
+        "description": "把本次交互中值得留痕的事件/进展追加到用户「今天」的活动日志（按日期归档，用户可在账户中心查看）。用于记录已完成的事、得出的结论、产出的文件等；不要记录琐碎闲聊。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "要记入今天日志的一句话事件/进展"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_log",
+        "description": "读取用户某一天的活动日志（markdown）。日期格式 YYYY-MM-DD，缺省读今天。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "date": {
+              "type": "string",
+              "description": "日期 YYYY-MM-DD，缺省今天"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calculator",
+        "description": "计算一个算术表达式，支持 + - * / % ( ) 与小数。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "算术表达式，如 (3+4)*2"
+            }
+          },
+          "required": [
+            "expression"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_search",
+        "description": "联网搜索，返回相关网页摘要。用于查实时/外部信息。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "搜索关键词"
+            },
+            "max_results": {
+              "type": "number",
+              "description": "返回结果数，默认 5"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "run_bash",
+        "description": "在用户本机执行一条 shell 命令（/bin/sh -c），工作目录为当前会话的 cwd，返回 stdout/stderr/exit_code。用于运行构建/测试、查看目录、git 操作等。破坏性命令可能需要用户审批。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "要执行的 shell 命令"
+            },
+            "timeout_ms": {
+              "type": "number",
+              "description": "超时毫秒（默认 120000）"
+            }
+          },
+          "required": [
+            "command"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "读取本机文件文本内容（路径相对当前工作目录解析）。大文件用 offset/limit 按行分页。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径（相对 cwd 或绝对路径）"
+            },
+            "offset": {
+              "type": "number",
+              "description": "起始行（从 0 计），默认 0"
+            },
+            "limit": {
+              "type": "number",
+              "description": "最多返回行数（默认读尽，受上限封顶）"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "write_file",
+        "description": "在本机写入/覆盖一个文本文件（中间目录自动创建，路径相对当前工作目录）。整文件覆盖请用此工具；局部修改优先 edit_file。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径（相对 cwd 或绝对路径）"
+            },
+            "content": {
+              "type": "string",
+              "description": "文件文本内容"
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "edit_file",
+        "description": "对本机文件做精确字符串替换：把唯一出现的 old_string 换成 new_string（含缩进/空白须完全一致）。old_string 必须在文件中**恰好出现一次**，否则报错——这样改动安全可控。新建文件请用 write_file。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径（相对 cwd 或绝对路径）"
+            },
+            "old_string": {
+              "type": "string",
+              "description": "要替换的原文（须唯一匹配）"
+            },
+            "new_string": {
+              "type": "string",
+              "description": "替换后的新文本"
+            }
+          },
+          "required": [
+            "path",
+            "old_string",
+            "new_string"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_dir",
+        "description": "列出本机某目录下的文件与子目录（路径相对当前工作目录，默认列 cwd 本身）。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "目录路径（相对 cwd 或绝对路径），默认当前目录"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "multi_edit",
+        "description": "对本机一个文件做多处精确替换(原子:全部匹配才写入,任一失败整体不动)。每个 edit 的 old_string 须在「前序 edit 依次应用后的文本」中恰好出现一次。同文件多处修改用此工具,比连发多次 edit_file 更安全省轮次。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径(相对 cwd 或绝对路径)"
+            },
+            "edits": {
+              "type": "array",
+              "description": "按序应用的替换列表",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "old_string": {
+                    "type": "string",
+                    "description": "要替换的原文(须唯一匹配)"
+                  },
+                  "new_string": {
+                    "type": "string",
+                    "description": "替换后的新文本"
+                  }
+                },
+                "required": [
+                  "old_string",
+                  "new_string"
+                ]
+              }
+            }
+          },
+          "required": [
+            "path",
+            "edits"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_files",
+        "description": "在工作目录下按正则搜索文件内容(grep 式),返回 文件:行号:内容。支持 include 通配符限定文件(如 *.ts、src/**/*.py)。自动跳过 .git/node_modules/二进制文件。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "搜索的正则表达式(JS 语法;按行匹配)"
+            },
+            "include": {
+              "type": "string",
+              "description": "可选:文件名通配符过滤,如 *.ts 或 src/**/*.py"
+            },
+            "case_sensitive": {
+              "type": "boolean",
+              "description": "区分大小写(默认 false)"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "glob_files",
+        "description": "按通配符模式列出工作目录下匹配的文件路径(如 **/*.test.ts、src/*.py)。找文件用这个;搜内容用 search_files。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "通配符模式:** 跨目录,* 段内,? 单字符,{a,b} 多选"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_fetch",
+        "description": "抓取一个公网网页/文本/JSON 的内容并转为可读文本(HTML 自动去标签,链接保留)。适合读取 web_search 找到的链接、文档页、API 响应。仅 http/https 公网地址。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "要抓取的完整 URL(http/https)"
+            },
+            "max_chars": {
+              "type": "number",
+              "description": "返回文本上限字符数(默认 20000,封顶 60000)"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_write",
+        "description": "维护本会话的任务清单(整单替换)。规划多步任务时先写清单;每完成一步就更新状态再继续。status ∈ pending | in_progress | completed;同一时刻至多一项 in_progress。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "todos": {
+              "type": "array",
+              "description": "完整的任务清单(整单替换旧清单)",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "description": "任务描述(祈使句)"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "in_progress",
+                      "completed"
+                    ],
+                    "description": "任务状态"
+                  }
+                },
+                "required": [
+                  "content",
+                  "status"
+                ]
+              }
+            }
+          },
+          "required": [
+            "todos"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_read",
+        "description": "读取本会话当前的任务清单(恢复上下文/检查剩余步骤时用)。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "run_background",
+        "description": "在本机后台启动一条长跑 shell 命令(dev server、watch、长测试等),立即返回 process_id。用 read_process_output 看输出、list_processes 看状态、kill_process 终止。一次性命令请用 run_bash;只有需要持续运行/不能阻塞后续步骤的才用这个。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "要后台执行的 shell 命令"
+            }
+          },
+          "required": [
+            "command"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_processes",
+        "description": "列出本会话启动的后台进程(id/命令/状态/运行时长)。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_process_output",
+        "description": "读取某后台进程的累计输出(stdout+stderr 合流)。offset 为字符偏移,省略则读尾部。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "process_id": {
+              "type": "string",
+              "description": "run_background 返回的进程 id"
+            },
+            "offset": {
+              "type": "number",
+              "description": "起始字符偏移(默认读最近 20000 字符)"
+            }
+          },
+          "required": [
+            "process_id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "kill_process",
+        "description": "终止某个后台进程(SIGTERM→3s→SIGKILL)。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "process_id": {
+              "type": "string",
+              "description": "要终止的进程 id"
+            }
+          },
+          "required": [
+            "process_id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "delegate",
+        "description": "把一个独立子任务外包给子代理执行(子代理有自己的上下文和同套工具,最多 8 轮),返回其最终报告。适合大范围搜索、批量文件分析等中间过程冗长的任务——过程不占用你的上下文,你只拿结论。子任务描述必须自包含(子代理看不到当前对话)。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "type": "string",
+              "description": "子任务描述(自包含、目标明确,说清要返回什么)"
+            },
+            "context": {
+              "type": "string",
+              "description": "可选:子代理需要的背景信息(相关路径、已知结论等)"
+            }
+          },
+          "required": [
+            "task"
+          ]
+        }
+      }
+    }
+  ],
+  "tangu-none:host+skills": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_datetime",
+        "description": "获取当前日期与时间（服务器时区）。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "remember",
+        "description": "把一条关于用户的稳定、长期有用的事实/偏好写入长期记忆（跨会话保留，会注入到后续对话）。仅用于持久信息（如长期偏好、背景设定、称呼），不要记录一次性任务细节或临时上下文。重复内容会被自动忽略。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "fact": {
+              "type": "string",
+              "description": "要长期记住的一句话事实/偏好"
+            }
+          },
+          "required": [
+            "fact"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "log_event",
+        "description": "把本次交互中值得留痕的事件/进展追加到用户「今天」的活动日志（按日期归档，用户可在账户中心查看）。用于记录已完成的事、得出的结论、产出的文件等；不要记录琐碎闲聊。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "要记入今天日志的一句话事件/进展"
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_log",
+        "description": "读取用户某一天的活动日志（markdown）。日期格式 YYYY-MM-DD，缺省读今天。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "date": {
+              "type": "string",
+              "description": "日期 YYYY-MM-DD，缺省今天"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "calculator",
+        "description": "计算一个算术表达式，支持 + - * / % ( ) 与小数。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "算术表达式，如 (3+4)*2"
+            }
+          },
+          "required": [
+            "expression"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_search",
+        "description": "联网搜索，返回相关网页摘要。用于查实时/外部信息。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "搜索关键词"
+            },
+            "max_results": {
+              "type": "number",
+              "description": "返回结果数，默认 5"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "use_skill",
+        "description": "按需加载某个可用技能的完整说明书（SKILL.md）。当任务匹配 system prompt 列出的某技能时，先用它的 id 调用本工具拿到完整指令，再据此执行。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "skill_id": {
+              "type": "string",
+              "description": "技能 id（见 Available Skills 列表）"
+            }
+          },
+          "required": [
+            "skill_id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "run_bash",
+        "description": "在用户本机执行一条 shell 命令（/bin/sh -c），工作目录为当前会话的 cwd，返回 stdout/stderr/exit_code。用于运行构建/测试、查看目录、git 操作等。破坏性命令可能需要用户审批。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "要执行的 shell 命令"
+            },
+            "timeout_ms": {
+              "type": "number",
+              "description": "超时毫秒（默认 120000）"
+            }
+          },
+          "required": [
+            "command"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "读取本机文件文本内容（路径相对当前工作目录解析）。大文件用 offset/limit 按行分页。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径（相对 cwd 或绝对路径）"
+            },
+            "offset": {
+              "type": "number",
+              "description": "起始行（从 0 计），默认 0"
+            },
+            "limit": {
+              "type": "number",
+              "description": "最多返回行数（默认读尽，受上限封顶）"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "write_file",
+        "description": "在本机写入/覆盖一个文本文件（中间目录自动创建，路径相对当前工作目录）。整文件覆盖请用此工具；局部修改优先 edit_file。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径（相对 cwd 或绝对路径）"
+            },
+            "content": {
+              "type": "string",
+              "description": "文件文本内容"
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "edit_file",
+        "description": "对本机文件做精确字符串替换：把唯一出现的 old_string 换成 new_string（含缩进/空白须完全一致）。old_string 必须在文件中**恰好出现一次**，否则报错——这样改动安全可控。新建文件请用 write_file。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径（相对 cwd 或绝对路径）"
+            },
+            "old_string": {
+              "type": "string",
+              "description": "要替换的原文（须唯一匹配）"
+            },
+            "new_string": {
+              "type": "string",
+              "description": "替换后的新文本"
+            }
+          },
+          "required": [
+            "path",
+            "old_string",
+            "new_string"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_dir",
+        "description": "列出本机某目录下的文件与子目录（路径相对当前工作目录，默认列 cwd 本身）。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "目录路径（相对 cwd 或绝对路径），默认当前目录"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "multi_edit",
+        "description": "对本机一个文件做多处精确替换(原子:全部匹配才写入,任一失败整体不动)。每个 edit 的 old_string 须在「前序 edit 依次应用后的文本」中恰好出现一次。同文件多处修改用此工具,比连发多次 edit_file 更安全省轮次。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "文件路径(相对 cwd 或绝对路径)"
+            },
+            "edits": {
+              "type": "array",
+              "description": "按序应用的替换列表",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "old_string": {
+                    "type": "string",
+                    "description": "要替换的原文(须唯一匹配)"
+                  },
+                  "new_string": {
+                    "type": "string",
+                    "description": "替换后的新文本"
+                  }
+                },
+                "required": [
+                  "old_string",
+                  "new_string"
+                ]
+              }
+            }
+          },
+          "required": [
+            "path",
+            "edits"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "search_files",
+        "description": "在工作目录下按正则搜索文件内容(grep 式),返回 文件:行号:内容。支持 include 通配符限定文件(如 *.ts、src/**/*.py)。自动跳过 .git/node_modules/二进制文件。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "搜索的正则表达式(JS 语法;按行匹配)"
+            },
+            "include": {
+              "type": "string",
+              "description": "可选:文件名通配符过滤,如 *.ts 或 src/**/*.py"
+            },
+            "case_sensitive": {
+              "type": "boolean",
+              "description": "区分大小写(默认 false)"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "glob_files",
+        "description": "按通配符模式列出工作目录下匹配的文件路径(如 **/*.test.ts、src/*.py)。找文件用这个;搜内容用 search_files。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "通配符模式:** 跨目录,* 段内,? 单字符,{a,b} 多选"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "web_fetch",
+        "description": "抓取一个公网网页/文本/JSON 的内容并转为可读文本(HTML 自动去标签,链接保留)。适合读取 web_search 找到的链接、文档页、API 响应。仅 http/https 公网地址。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "要抓取的完整 URL(http/https)"
+            },
+            "max_chars": {
+              "type": "number",
+              "description": "返回文本上限字符数(默认 20000,封顶 60000)"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_write",
+        "description": "维护本会话的任务清单(整单替换)。规划多步任务时先写清单;每完成一步就更新状态再继续。status ∈ pending | in_progress | completed;同一时刻至多一项 in_progress。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "todos": {
+              "type": "array",
+              "description": "完整的任务清单(整单替换旧清单)",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "description": "任务描述(祈使句)"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "in_progress",
+                      "completed"
+                    ],
+                    "description": "任务状态"
+                  }
+                },
+                "required": [
+                  "content",
+                  "status"
+                ]
+              }
+            }
+          },
+          "required": [
+            "todos"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "todo_read",
+        "description": "读取本会话当前的任务清单(恢复上下文/检查剩余步骤时用)。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "run_background",
+        "description": "在本机后台启动一条长跑 shell 命令(dev server、watch、长测试等),立即返回 process_id。用 read_process_output 看输出、list_processes 看状态、kill_process 终止。一次性命令请用 run_bash;只有需要持续运行/不能阻塞后续步骤的才用这个。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "要后台执行的 shell 命令"
+            }
+          },
+          "required": [
+            "command"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "list_processes",
+        "description": "列出本会话启动的后台进程(id/命令/状态/运行时长)。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_process_output",
+        "description": "读取某后台进程的累计输出(stdout+stderr 合流)。offset 为字符偏移,省略则读尾部。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "process_id": {
+              "type": "string",
+              "description": "run_background 返回的进程 id"
+            },
+            "offset": {
+              "type": "number",
+              "description": "起始字符偏移(默认读最近 20000 字符)"
+            }
+          },
+          "required": [
+            "process_id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "kill_process",
+        "description": "终止某个后台进程(SIGTERM→3s→SIGKILL)。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "process_id": {
+              "type": "string",
+              "description": "要终止的进程 id"
+            }
+          },
+          "required": [
+            "process_id"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "delegate",
+        "description": "把一个独立子任务外包给子代理执行(子代理有自己的上下文和同套工具,最多 8 轮),返回其最终报告。适合大范围搜索、批量文件分析等中间过程冗长的任务——过程不占用你的上下文,你只拿结论。子任务描述必须自包含(子代理看不到当前对话)。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "type": "string",
+              "description": "子任务描述(自包含、目标明确,说清要返回什么)"
+            },
+            "context": {
+              "type": "string",
+              "description": "可选:子代理需要的背景信息(相关路径、已知结论等)"
+            }
+          },
+          "required": [
+            "task"
+          ]
+        }
+      }
+    }
+  ]
+}

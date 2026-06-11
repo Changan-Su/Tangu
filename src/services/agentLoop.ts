@@ -333,9 +333,22 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
       console.warn('[agent-core] loadCustomTools failed:', e);
     }
 
+    // MCP 工具(deps().mcp 仅 standalone/TUI 装配):run 开始取一次快照、run 内冻结——
+    // server 集/工具集变更只对之后的 run 生效,杜绝 run 中途 defs 漂移打爆前缀缓存。
+    // agent_config.enabledMcpServers(string[],缺省=全部已连接 server)做会话级过滤。
+    let mcpTools: Map<string, import('../mcp/toolBridge.js').LoadedMcpTool> | undefined;
+    if (deps().mcp) {
+      const enabledMcp = Array.isArray(agentConfig.enabledMcpServers) ? agentConfig.enabledMcpServers : undefined;
+      const snapshot = deps().mcp!.toolsForRun(enabledMcp);
+      if (snapshot.size) {
+        mcpTools = snapshot;
+        console.log(`[agent-core] run=${runId} mcp tools: ${[...snapshot.keys()].join(', ')}`);
+      }
+    }
+
     const toolCtx: ToolContext = {
-      userId, sessionId, appId, runId, signal: ac.signal, customTools,
-      enabledSkillIds, execMode, cwd, approvalMode, profile,
+      userId, sessionId, appId, runId, signal: ac.signal, customTools, mcpTools,
+      enabledSkillIds, execMode, cwd, approvalMode, profile, modelId,
     };
     const toolDefs = getToolDefinitions(toolCtx);
 

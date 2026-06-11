@@ -5,6 +5,10 @@
  *   npm run build && node scripts/dump-tooldefs.mjs > /tmp/tooldefs-before.json
  *   (重构) npm run build && node scripts/dump-tooldefs.mjs > /tmp/tooldefs-after.json
  *   diff /tmp/tooldefs-before.json /tmp/tooldefs-after.json
+ *
+ * 基线快照入库于 scripts/__snapshots__/tooldefs.json:新增工具的 diff 必须是「严格追加」
+ * (旧 defs 字节级前缀不变,新 provider 一律注册在 hostExecProvider 之后)。
+ * 注:MCP 工具(P6)与自定义工具走 ToolContext 运行时注入,不进本静态注册表,故不在快照内。
  */
 import { configureTangu } from '../dist/seams/runtime.js';
 import { createAiStudioProfile, createTanguProfile } from '../dist/profiles/index.js';

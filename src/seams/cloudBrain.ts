@@ -97,6 +97,16 @@ export interface AssetsBrain {
   listForcedCustomTools(appId?: string): Promise<CustomToolRecord[]>;
   /** 技能目录(桌面/TUI 的技能面板用)。可选:旧版云端未实现时调用方降级空列表。 */
   listSkills?(filter?: ListFilter): Promise<SkillRecord[]>;
+  /**
+   * 上传/更新「请求者自己的」技能到云端(本地技能上云;owner 隔离,private,绝不进市场)。
+   * 可选:旧版云端 404 → httpBrain 抛「云端版本过旧」;进程内实现需显式 userId。
+   */
+  upsertUserSkill?(
+    userId: string,
+    skill: { id?: string; name: string; description?: string; content: string; category?: string; icon?: string },
+  ): Promise<{ id: string }>;
+  /** 删除自己的云端技能(他人/全局 → false)。可选,同上。 */
+  deleteUserSkill?(userId: string, id: string): Promise<boolean>;
 }
 
 export interface SearchBrain {
@@ -108,10 +118,18 @@ export interface SearchBrain {
 export interface ModelsBrain {
   listGlobalModels(...args: any[]): Promise<any[]>;
   /**
-   * 本地直连 provider 列表(BYO-key,桌面/TUI 模型选择器用;绝不含 apiKey)。
+   * 本地直连 provider 列表(BYO-key,桌面/TUI 模型选择器用;绝不含 apiKey,baseUrl 仅供 UI 展示)。
    * 可选:仅 standalone 的 multiBrain 实现;forsionSeams/httpBrain 不实现 → 调用方跳过。
    */
-  listDirectProviders?(): Array<{ providerId: string; modelIds?: string[] }>;
+  listDirectProviders?(): Array<{ providerId: string; baseUrl?: string; modelIds?: string[] }>;
+  /**
+   * 按应用过滤的模型列表(遵守 Forsion admin「应用模型配置」project_model_configs)。
+   * 可选:旧版云端/brain 未实现 → 调用方回退 listGlobalModels。
+   * 语义:project 无配置行 → 等价全局列表(优雅降级);有配置行 → 严格遵守。
+   * 错误处理与 listGlobalModels 同款:httpBrain 对网络/旧契约降级 { models: [], defaultModelId: null }
+   * (TUI 依赖不抛;空列表真相由调用方探针补全),进程内实现可抛(调用方捕获)。
+   */
+  listModelsForProject?(projectId: string): Promise<{ models: any[]; defaultModelId: string | null }>;
 }
 
 /**

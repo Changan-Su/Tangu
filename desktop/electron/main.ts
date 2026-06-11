@@ -6,11 +6,114 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { dirname, join } from 'path'
 import { pathToFileURL } from 'url'
-import { readFile, writeFile, mkdir } from 'fs/promises'
+import { readFile, writeFile, mkdir, chmod } from 'fs/promises'
+import { execFile, spawn } from 'child_process'
 import { BackendManager, type BackendStatus } from './backendManager'
 import {
   forsionDeviceLogin, forsionLogout, forsionWhoami, loadTanguCreds,
 } from './forsionAuth'
+import { importMcp, importSkills, scanAll } from './discovery'
+
+/** ~/.tangu(与包内 core/tanguHome.ts 同约定;TANGU_HOME 可整体重定向)。 */
+const tanguHomeDir = (): string => process.env.TANGU_HOME || join(app.getPath('home'), '.tangu')
+
+/** 直连 provider 配置(~/.tangu/providers.json;托管后端启动时自动加载,见包内 assemble.loadProviders)。 */
+interface DirectProviderConfig {
+  providerId: string
+  baseUrl: string
+  apiKey?: string
+  modelIds?: string[]
+}
+
+async function readProvidersFile(): Promise<DirectProviderConfig[]> {
+  try {
+    const parsed = JSON.parse(await readFile(join(tanguHomeDir(), 'providers.json'), 'utf8'))
+    return Array.isArray(parsed) ? parsed : Array.isArray(parsed?.providers) ? parsed.providers : []
+  } catch {
+    return []
+  }
+}
+
+async function writeProvidersFile(list: DirectProviderConfig[]): Promise<void> {
+  const file = join(tanguHomeDir(), 'providers.json')
+  await mkdir(tanguHomeDir(), { recursive: true })
+  await writeFile(file, JSON.stringify(list, null, 2), 'utf8')
+  await chmod(file, 0o600).catch(() => {}) // best-effort:文件含 apiKey
+}
+
+// ── 环境检测 + 引导安装(首启向导;检测+用户确认后执行,绝不静默自动装)──────────────
+interface EnvProbe {
+  tool: string
+  found: boolean
+  version: string | null
+  /** 缺失时的安装命令(按平台);经 env:check 登记,env:run 只认 opaque id——renderer 不能传任意命令。 */
+  installId: string | null
+  installCommand: string | null
+}
+
+/** env:check 登记的可执行安装命令(id → command);env:run 仅从此表取,防 renderer 注入任意命令。 */
+const pendingInstallCommands = new Map<string, string>()
+
+function probeVersion(cmd: string, args: string[]): Promise<string | null> {
+  return new Promise((resolve) => {
+    const p = execFile(cmd, args, { timeout: 8000 }, (err, stdout, stderr) => {
+      if (err) return resolve(null)
+      resolve(String(stdout || stderr).trim().split('\n')[0].slice(0, 80) || '(ok)')
+    })
+    p.on('error', () => resolve(null))
+  })
+}
+
+function installCommandFor(tool: string): string | null {
+  const platform = process.platform
+  const byTool: Record<string, Record<string, string>> = {
+    node: {
+      linux: 'sudo apt-get install -y nodejs npm',
+      darwin: 'brew install node',
+      win32: 'winget install OpenJS.NodeJS.LTS',
+    },
+    python3: {
+      linux: 'sudo apt-get install -y python3 python3-pip',
+      darwin: 'brew install python',
+      win32: 'winget install Python.Python.3.12',
+    },
+    git: {
+      linux: 'sudo apt-get install -y git',
+      darwin: 'brew install git',
+      win32: 'winget install Git.Git',
+    },
+    docker: {
+      linux: 'curl -fsSL https://get.docker.com | sh',
+      darwin: 'brew install --cask docker',
+      win32: 'winget install Docker.DockerDesktop',
+    },
+  }
+  return byTool[tool]?.[platform] ?? null
+}
+
+async function runEnvCheck(): Promise<EnvProbe[]> {
+  pendingInstallCommands.clear()
+  const probes: Array<{ tool: string; cmd: string; args: string[] }> = [
+    { tool: 'node', cmd: 'node', args: ['--version'] },
+    { tool: 'npm', cmd: 'npm', args: ['--version'] },
+    { tool: 'python3', cmd: process.platform === 'win32' ? 'python' : 'python3', args: ['--version'] },
+    { tool: 'git', cmd: 'git', args: ['--version'] },
+    { tool: 'docker', cmd: 'docker', args: ['version', '--format', '{{.Server.Version}}'] },
+  ]
+  const out: EnvProbe[] = []
+  for (const p of probes) {
+    const version = await probeVersion(p.cmd, p.args)
+    // npm 跟随 node 装,无独立安装命令
+    const installCommand = version === null && p.tool !== 'npm' ? installCommandFor(p.tool) : null
+    let installId: string | null = null
+    if (installCommand) {
+      installId = `env_${p.tool}_${Date.now().toString(36)}`
+      pendingInstallCommands.set(installId, installCommand)
+    }
+    out.push({ tool: p.tool, found: version !== null, version, installId, installCommand })
+  }
+  return out
+}
 
 /** 持久化配置(userData/tangu-desktop-config.json)。 */
 interface TanguStoredConfig {
@@ -153,6 +256,82 @@ app.whenReady().then(() => {
   ipcMain.handle('backend:restart', async () => {
     await ensureBackend()
     return backend.getStatus()
+  })
+
+  // ── 环境检测 + 引导安装(首启向导)──
+  ipcMain.handle('env:check', () => runEnvCheck())
+  // env:run 只接受 env:check 登记的 opaque id(renderer 无法注入任意命令);输出流式发 env:output。
+  ipcMain.handle('env:run', async (e, installId: string) => {
+    const command = pendingInstallCommands.get(String(installId))
+    if (!command) throw new Error('未知安装命令 id(请先重新检测)')
+    const wc = e.sender
+    return await new Promise<{ exitCode: number }>((resolve) => {
+      const child = spawn(command, { shell: true })
+      const emit = (line: string): void => {
+        if (!wc.isDestroyed()) wc.send('env:output', { installId, line })
+      }
+      emit(`$ ${command}`)
+      child.stdout?.on('data', (d) => emit(String(d)))
+      child.stderr?.on('data', (d) => emit(String(d)))
+      child.on('error', (err) => {
+        emit(`[error] ${err?.message || err}`)
+        resolve({ exitCode: -1 })
+      })
+      child.on('close', (code) => {
+        emit(`[exit ${code ?? -1}]`)
+        resolve({ exitCode: code ?? -1 })
+      })
+    })
+  })
+
+  // ── MCP server 管理(写 ~/.tangu/mcp.json;managed 模式保存后重启后端重连)──
+  const mcpFile = (): string => join(tanguHomeDir(), 'mcp.json')
+  ipcMain.handle('mcp:read', async () => {
+    try {
+      const parsed = JSON.parse(await readFile(mcpFile(), 'utf8'))
+      return { mcpServers: parsed?.mcpServers && typeof parsed.mcpServers === 'object' ? parsed.mcpServers : {} }
+    } catch {
+      return { mcpServers: {} }
+    }
+  })
+  ipcMain.handle('mcp:write', async (_e, cfg: { mcpServers: Record<string, any> }) => {
+    if (!cfg || typeof cfg.mcpServers !== 'object') throw new Error('非法 MCP 配置')
+    await mkdir(tanguHomeDir(), { recursive: true })
+    await writeFile(mcpFile(), JSON.stringify({ mcpServers: cfg.mcpServers }, null, 2), 'utf8')
+    await chmod(mcpFile(), 0o600).catch(() => {}) // env/headers 可能含密钥
+    const stored = await loadConfig()
+    if (stored.mode === 'managed') void ensureBackend() // 重启后端重连 MCP(进程级冻结语义)
+    return { mcpServers: cfg.mcpServers }
+  })
+
+  // ── 跨生态 agent 资产发现/导入(~/.claude、~/.codex、~/.hermes → ~/.tangu)──
+  // 导入的 MCP 一律 enabled:false(绝不自动运行外来命令),故**不**触发后端重启;
+  // 技能落盘 ~/.tangu/skills/ 后由后端按 mtime 重扫即时生效。
+  ipcMain.handle('discovery:scan', () => scanAll())
+  ipcMain.handle('discovery:importSkills', (_e, ids: string[]) =>
+    importSkills(Array.isArray(ids) ? ids.filter((x) => typeof x === 'string') : [], tanguHomeDir()))
+  ipcMain.handle('discovery:importMcp', (_e, names: string[]) =>
+    importMcp(Array.isArray(names) ? names.filter((x) => typeof x === 'string') : [], tanguHomeDir()))
+
+  // ── 直连 provider 管理(写 ~/.tangu/providers.json;managed 模式保存后重启后端加载)──
+  ipcMain.handle('providers:list', () => readProvidersFile())
+  ipcMain.handle('providers:save', async (_e, provider: DirectProviderConfig) => {
+    if (!provider?.providerId || !provider?.baseUrl) throw new Error('providerId 与 baseUrl 必填')
+    const list = await readProvidersFile()
+    const i = list.findIndex((p) => p.providerId === provider.providerId)
+    if (i >= 0) list[i] = provider
+    else list.push(provider)
+    await writeProvidersFile(list)
+    const stored = await loadConfig()
+    if (stored.mode === 'managed') void ensureBackend()
+    return list
+  })
+  ipcMain.handle('providers:delete', async (_e, providerId: string) => {
+    const list = (await readProvidersFile()).filter((p) => p.providerId !== providerId)
+    await writeProvidersFile(list)
+    const stored = await loadConfig()
+    if (stored.mode === 'managed') void ensureBackend()
+    return list
   })
 
   // ── Forsion 账号 / provider OAuth 登录(与 `tangu login` 同一份凭证)──

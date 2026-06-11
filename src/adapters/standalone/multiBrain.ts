@@ -16,9 +16,9 @@ export function createMultiBrain(httpBrain: CloudBrainServices, registry: Provid
     ...httpBrain,
     models: {
       ...httpBrain.models,
-      // 直连 provider 目录(模型选择器用;剥掉 apiKey/baseUrl,只下发 id 与模型白名单)。
+      // 直连 provider 目录(模型选择器/Providers 页用;剥掉 apiKey,baseUrl 仅供 UI 展示)。
       listDirectProviders: () =>
-        registry.list().map((p) => ({ providerId: p.providerId, modelIds: p.modelIds })),
+        registry.list().map((p) => ({ providerId: p.providerId, baseUrl: p.baseUrl, modelIds: p.modelIds })),
     },
     llm: {
       resolveModelAndKey: async (modelId: string) => {

@@ -15,6 +15,7 @@ import workspaceRouter from './routes/workspace.js';
 import approvalsRouter from './routes/approvals.js';
 import sessionsRouter from './routes/sessions.js';
 import modelsRouter from './routes/models.js';
+import providersRouter from './routes/providers.js';
 import memoryRouter from './routes/memory.js';
 import assetsRouter from './routes/assets.js';
 import adminRouter from './routes/admin.js';
@@ -26,6 +27,7 @@ import { startCacheJanitor, stopCacheJanitor, reapOrphanRunContainers } from './
 import { startSessionReaper, stopSessionReaper, reapOrphanSessions } from './sandbox/sessionSandbox.js';
 import { loadHistorianConfig } from './services/historianConfig.js';
 import { startHistorian, stopHistorian } from './services/historian.js';
+import { disposeAllProcesses } from './tools/processRegistry.js';
 
 export interface TanguModule {
   /** session 亲和路由(runs/SSE/workspace/approvals):fleet 模式按 session 哈希转发到 worker。 */
@@ -64,6 +66,7 @@ export function createTanguModule(d: TanguDeps): TanguModule {
   const dataRouter = Router();
   dataRouter.use(sessionsRouter);
   dataRouter.use(modelsRouter);
+  dataRouter.use(providersRouter);
   dataRouter.use(memoryRouter);
   dataRouter.use(assetsRouter);
 
@@ -102,6 +105,7 @@ export function createTanguModule(d: TanguDeps): TanguModule {
     stopSessionReaper();
     stopHistorian();
     abortAllRuns();
+    disposeAllProcesses(); // run_background 的子进程(防热加载/退出泄漏)
   };
 
   return { userRouter, dataRouter, adminRouter, runMigration, startBackgroundTasks, dispose };

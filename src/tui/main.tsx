@@ -17,6 +17,7 @@ import { validate } from '../standalone/config.js';
 import { resolveSandboxMode, setupHost, buildBrain, fixLegacyAppIds } from '../standalone/assemble.js';
 import { loginFlow } from '../cli/login.js';
 import { OAUTH_PROVIDERS, providerOAuthLogin, loadOAuthDirectProviders } from '../llm/providerOAuth.js';
+import { createMcpManager } from '../mcp/manager.js';
 import { parseTuiConfig, TUI_HELP } from './config.js';
 import { printBanner } from './components/Banner.js';
 import { App } from './app.js';
@@ -58,7 +59,8 @@ async function main(): Promise<void> {
   if (!cfg.cloudUrl) cfg.cloudUrl = creds.cloudUrl || '';
   if (!cfg.defaultModelId) cfg.defaultModelId = creds.model || ''; // 记住的模型；仍可空，进 TUI 后用 /model 选
   try {
-    cfg.providers.push(...(await loadOAuthDirectProviders()));
+    // oauthProviders 在 loadProviders 合并时优先级最低(显式 providers.json/CLI 配置覆盖订阅登录)。
+    cfg.oauthProviders = await loadOAuthDirectProviders();
   } catch {
     /* ignore */
   }
@@ -85,11 +87,16 @@ async function main(): Promise<void> {
   await runBaseSchema();
   const { brain, providers } = buildBrain(cfg);
 
+  // MCP(~/.tangu/mcp.json):启动连一次,进程级冻结;与 standalone server 同语义。
+  const mcp = createMcpManager();
+  await mcp.start();
+
   const mod = createTanguModule({
     host,
     brain,
     billing: createNoopBilling(),
     profile: createTanguProfile({ sandboxMode, defaultModelId: cfg.defaultModelId || undefined }),
+    mcp,
   });
   await mod.runMigration();
   await fixLegacyAppIds(); // 修正 runs.ts 硬编码时期误标 'ai-studio' 的本地会话(仅 standalone 本地库)
@@ -107,6 +114,7 @@ async function main(): Promise<void> {
   const app = render(<App boot={cfg} storage={storage} />, { exitOnCtrlC: false });
   await app.waitUntilExit();
   mod.dispose();
+  await mcp.dispose().catch(() => {});
   process.exit(0);
 }
 

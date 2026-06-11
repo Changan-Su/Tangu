@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
   archived BOOLEAN NOT NULL DEFAULT FALSE,
   emoji VARCHAR(32),
   agent_config JSONB,
+  todos JSONB,
+  project_path TEXT,
+  project_name VARCHAR(255),
   historian_last_summary_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

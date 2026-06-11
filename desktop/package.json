@@ -24,6 +24,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@iarna/toml": "^2.2.5",
     "@types/node": "^20.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
@@ -31,7 +32,9 @@
     "electron": "^40.8.0",
     "electron-builder": "^24.13.3",
     "electron-vite": "^5.0.0",
-    "typescript": "^5.7.0"
+    "gray-matter": "^4.0.3",
+    "typescript": "^5.7.0",
+    "yaml": "^2.9.0"
   },
   "build": {
     "appId": "com.forsion.tangu-desktop",
@@ -40,9 +43,18 @@
       "out/**/*"
     ],
     "extraResources": [
-      { "from": "../dist", "to": "tangu-server/dist" },
-      { "from": "../node_modules", "to": "tangu-server/node_modules" },
-      { "from": "../package.json", "to": "tangu-server/package.json" }
+      {
+        "from": "../dist",
+        "to": "tangu-server/dist"
+      },
+      {
+        "from": "../node_modules",
+        "to": "tangu-server/node_modules"
+      },
+      {
+        "from": "../package.json",
+        "to": "tangu-server/package.json"
+      }
     ],
     "linux": {
       "target": "AppImage"

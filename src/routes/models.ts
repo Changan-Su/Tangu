@@ -8,6 +8,7 @@
  *       forsion: { status: 'ok'|'empty'|'error', detail }               // 云端托管面诊断(空列表不再静默)
  *     }
  * forsion 部分经 deps().brain.models(microserver 进程内直连 / standalone 走 brain-api);
+ * 优先 listModelsForProject(profile.appId) 遵守 admin「应用模型配置」,旧 brain 回退 listGlobalModels。
  * direct 部分仅 standalone 的 multiBrain 实现(listDirectProviders 可选方法),云端自动跳过。
  * 诊断:httpBrain.listGlobalModels 对错误降级 [](TUI 依赖此行为),这里用 users/me 探针
  * 区分「云端可达但 admin 没配模型(empty)」与「云端不可达/未授权/未部署 brain-api(error)」。
@@ -25,8 +26,17 @@ router.get('/agent/models', authMiddleware, async (req: AuthRequest, res) => {
 
     let forsion: { status: 'ok' | 'empty' | 'error'; detail: string | null } = { status: 'ok', detail: null };
     let cloud: any[] = [];
+    let projectDefaultModelId: string | null = null;
     try {
-      cloud = (await deps().brain.models.listGlobalModels()) || [];
+      // 优先按应用过滤(admin 的 project_model_configs);brain 未实现该可选方法 → 回退全局列表。
+      const listForProject = deps().brain.models.listModelsForProject;
+      if (listForProject) {
+        const r = await listForProject(profile.appId);
+        cloud = r?.models || [];
+        projectDefaultModelId = r?.defaultModelId ?? null;
+      } else {
+        cloud = (await deps().brain.models.listGlobalModels()) || [];
+      }
     } catch (e: any) {
       forsion = { status: 'error', detail: e?.message || String(e) };
       cloud = [];
@@ -54,7 +64,8 @@ router.get('/agent/models', authMiddleware, async (req: AuthRequest, res) => {
       }
     }
 
-    res.json({ models, directProviders, defaultModelId: profile.defaultModelId || null, forsion });
+    // 默认模型:admin 的 project 默认 > profile 静态默认。
+    res.json({ models, directProviders, defaultModelId: projectDefaultModelId || profile.defaultModelId || null, forsion });
   } catch (e: any) {
     res.status(500).json({ detail: e?.message || 'list models failed' });
   }

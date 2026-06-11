@@ -4,7 +4,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
-  AgentConfig, AgentRunEvent, Attachment, SessionRecord, TanguDesktopConfig, UiMessage,
+  AgentConfig, AgentRunEvent, Attachment, ModelsResponse, SessionRecord, TanguDesktopConfig, UiMessage,
 } from './types'
 import * as api from './services/backendService'
 import { abortRun, listActiveRuns, resolveApproval, startRun, subscribeRunEvents, testConnection } from './services/agentRunService'
@@ -14,6 +14,8 @@ import { ChatArea } from './components/ChatArea'
 import { MessageInput } from './components/MessageInput'
 import { SettingsModal } from './components/SettingsModal'
 import { RightPanel } from './components/RightPanel'
+import { ProjectPicker, type ProjectChoice } from './components/ProjectPicker'
+import { OnboardingWizard, ONBOARDING_DISMISS_KEY } from './components/OnboardingWizard'
 import { resolveInitialMode, resolveInitialPreset } from './theme/registry'
 
 const UNREAD_KEY = 'forsion_tangu_unread_sessions'
@@ -69,6 +71,7 @@ export function App(): React.JSX.Element {
   const [sessions, setSessions] = useState<SessionRecord[]>([])
   const [archivedSessions, setArchivedSessions] = useState<SessionRecord[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [modelsResp, setModelsResp] = useState<ModelsResponse | null>(null)
   const [messagesBySession, setMessagesBySession] = useState<Record<string, UiMessage[]>>({})
   const [configBySession, setConfigBySession] = useState<Record<string, AgentConfig>>({})
   const [runningBySession, setRunningBySession] = useState<Record<string, string>>({})
@@ -77,6 +80,8 @@ export function App(): React.JSX.Element {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [rightOpen, setRightOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false)
+  const [onboarding, setOnboarding] = useState(false)
   const [themePreset, setThemePreset] = useState(resolveInitialPreset)
   const [themeMode, setThemeMode] = useState<'light' | 'dark'>(resolveInitialMode)
   const [glassOn, setGlassOn] = useState(() => {
@@ -247,6 +252,8 @@ export function App(): React.JSX.Element {
     } catch (e: any) {
       toast(`会话列表加载失败:${e?.message || e}`, true)
     }
+    // 模型目录(输入栏会话内切换器用);失败静默,选择器自动隐藏。
+    void api.listModels(c).then(setModelsResp).catch(() => setModelsResp(null))
   }, [refreshSessions, toast])
 
   useEffect(() => {
@@ -262,6 +269,19 @@ export function App(): React.JSX.Element {
       setCfg(merged)
       setCfgLoaded(true)
       if (merged.token || stored?.mode === 'managed') void connect(merged)
+      // 首启引导:桌面端「从未配置」(无云端地址/凭证/直连 provider,且未跳过过)→ 进向导。
+      if (stored && window.tangu?.envCheck) {
+        try {
+          if (!localStorage.getItem(ONBOARDING_DISMISS_KEY)
+            && !stored.cloudUrl && !stored.cloudToken && !stored.token) {
+            const [auth, provs] = await Promise.all([
+              window.tangu.authStatus?.().catch(() => null) ?? null,
+              window.tangu.listProviders?.().catch(() => []) ?? [],
+            ])
+            if (!auth?.loggedIn && !(provs && provs.length)) setOnboarding(true)
+          }
+        } catch { /* 引导判定失败不阻断 */ }
+      }
     })()
     // managed 后端状态推送:就绪 → 取折算配置重连;崩溃 → 标离线。
     const off = window.tangu?.onBackendStatus?.((st) => {
@@ -339,14 +359,19 @@ export function App(): React.JSX.Element {
     return {}
   }, [])
 
-  const newSession = useCallback(async () => {
+  /** 实际创建会话(可带项目)。项目会话:host 模式 + cwd=项目目录 + 自动编辑审批档。 */
+  const createSessionWith = useCallback(async (choice: ProjectChoice | null) => {
     try {
-      const s = await api.createSession(cfgRef.current)
+      const s = await api.createSession(cfgRef.current, choice?.path
+        ? { project_path: choice.path, project_name: choice.name || undefined }
+        : undefined)
       setSessions((prev) => [s, ...prev])
       setActiveId(s.id)
       loadedHistory.current.add(s.id)
       setMessagesBySession((prev) => ({ ...prev, [s.id]: [] }))
-      const init = defaultSessionConfig()
+      const init: AgentConfig = choice?.path
+        ? { execMode: 'host', approvalMode: 'auto-edit', cwd: choice.path }
+        : defaultSessionConfig()
       if (Object.keys(init).length) {
         setConfigBySession((prev) => ({ ...prev, [s.id]: init }))
         void api.putSessionConfig(cfgRef.current, s.id, init).catch(() => {})
@@ -355,6 +380,26 @@ export function App(): React.JSX.Element {
       toast(`新建失败:${e?.message || e}`, true)
     }
   }, [toast, defaultSessionConfig])
+
+  /** 新建入口:本机托管模式弹项目选择(Codex 式);external/云后端直接建(平铺)。 */
+  const newSession = useCallback(async () => {
+    if (desktopMode.current === 'managed') {
+      setProjectPickerOpen(true)
+      return
+    }
+    await createSessionWith(null)
+  }, [createSessionWith])
+
+  /** 最近项目(活跃+归档会话的 distinct project_path,按 updated_at 新→旧)。 */
+  const recentProjects = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const s of [...sessions, ...archivedSessions]) {
+      if (s.project_path && !seen.has(s.project_path)) {
+        seen.set(s.project_path, s.project_name || s.project_path.split('/').filter(Boolean).pop() || s.project_path)
+      }
+    }
+    return [...seen.entries()].slice(0, 8).map(([path, name]) => ({ path, name }))
+  }, [sessions, archivedSessions])
 
   const renameSession = useCallback(async (id: string, title: string) => {
     setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title } : s)))
@@ -410,8 +455,10 @@ export function App(): React.JSX.Element {
     }
     const sessionId = sid
     const agentConfig = { ...(implicitInit || configBySession[sessionId] || {}) }
+    // 会话级模型(输入栏切换器持久化在 session.model_id)优先于全局默认。
+    const sessionModelId = sessions.find((s) => s.id === sessionId)?.model_id || undefined
     try {
-      const r = await startRun(cfgRef.current, { sessionId, message: text, attachments, agentConfig })
+      const r = await startRun(cfgRef.current, { sessionId, message: text, modelId: sessionModelId, attachments, agentConfig })
       setMessagesBySession((prev) => ({
         ...prev,
         [sessionId]: [
@@ -466,6 +513,34 @@ export function App(): React.JSX.Element {
     if (!sid) return
     setConfigBySession((prev) => {
       const next = { ...(prev[sid] || {}), ...patch }
+      void api.putSessionConfig(cfgRef.current, sid, next).catch(() => {})
+      return { ...prev, [sid]: next }
+    })
+  }, [])
+
+  /** 会话内模型切换:持久化到 session.model_id;无会话时改全局默认。 */
+  const setSessionModel = useCallback((modelId: string) => {
+    const sid = activeIdRef.current
+    if (!sid) {
+      setCfg((prev) => {
+        void window.tangu?.setConfig({ modelId })
+        return { ...prev, modelId }
+      })
+      return
+    }
+    setSessions((prev) => prev.map((s) => (s.id === sid ? { ...s, model_id: modelId } : s)))
+    setArchivedSessions((prev) => prev.map((s) => (s.id === sid ? { ...s, model_id: modelId } : s)))
+    void api.updateSession(cfgRef.current, sid, { model_id: modelId }).catch((e) => {
+      toast(`模型切换保存失败:${e?.message || e}`, true)
+    })
+  }, [toast])
+
+  /** 会话内思考深度切换:合并进 agent_config.thinkingLevel(agentLoop 每轮 run 读取)。 */
+  const setSessionThinking = useCallback((level: NonNullable<AgentConfig['thinkingLevel']>) => {
+    const sid = activeIdRef.current
+    if (!sid) return
+    setConfigBySession((prev) => {
+      const next = { ...(prev[sid] || {}), thinkingLevel: level }
       void api.putSessionConfig(cfgRef.current, sid, next).catch(() => {})
       return { ...prev, [sid]: next }
     })
@@ -534,7 +609,7 @@ export function App(): React.JSX.Element {
       <main className="main">
         <ChatHeader
           title={activeSession?.title || 'Tangu Agent'}
-          modelId={cfg.modelId}
+          modelId={activeSession?.model_id || cfg.modelId}
           connState={connState}
           connMessage={connMessage}
           sidebarCollapsed={sidebarCollapsed}
@@ -544,36 +619,74 @@ export function App(): React.JSX.Element {
           onOpenSettings={() => setSettingsOpen(true)}
         />
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-            <ChatArea
-              messages={activeMessages}
-              onApproval={(mid, aid, action, args) => void decideApproval(mid, aid, action, args)}
-            />
-            <MessageInput
-              disabled={connState !== 'ok'}
-              running={running}
-              execConfig={execConfig}
-              homeDir={homeDirRef.current}
-              onExecConfigChange={setExecConfig}
-              onSend={send}
-              onStop={stop}
-            />
-          </div>
-          {rightOpen && activeId && (
-            <RightPanel
-              cfg={cfg}
-              sessionId={activeId}
-              sessionConfig={execConfig}
-              running={running}
-              onConfigChange={(c) => {
-                setConfigBySession((prev) => ({ ...prev, [activeId]: c }))
-                void api.putSessionConfig(cfgRef.current, activeId, c).catch(() => {})
+          {onboarding ? (
+            <OnboardingWizard
+              onReconnect={() => {
+                desktopMode.current = 'managed'
+                void window.tangu?.getConfig().then((c) => {
+                  const eff = { backendUrl: c.backendUrl, token: c.token, modelId: c.modelId }
+                  setCfg(eff)
+                  void connect(eff)
+                })
               }}
-              onToast={toast}
+              onFinish={() => {
+                setOnboarding(false)
+                void window.tangu?.getConfig().then((c) => {
+                  const eff = { backendUrl: c.backendUrl, token: c.token, modelId: c.modelId }
+                  setCfg(eff)
+                  void connect(eff)
+                })
+              }}
             />
+          ) : (
+            <>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                <ChatArea
+                  messages={activeMessages}
+                  onApproval={(mid, aid, action, args) => void decideApproval(mid, aid, action, args)}
+                />
+                <MessageInput
+                  disabled={connState !== 'ok'}
+                  running={running}
+                  execConfig={execConfig}
+                  homeDir={homeDirRef.current}
+                  models={modelsResp?.models ?? null}
+                  modelId={activeSession?.model_id || cfg.modelId || modelsResp?.defaultModelId || ''}
+                  onModelChange={setSessionModel}
+                  thinkingLevel={execConfig.thinkingLevel}
+                  onThinkingChange={setSessionThinking}
+                  onExecConfigChange={setExecConfig}
+                  onSend={send}
+                  onStop={stop}
+                />
+              </div>
+              {rightOpen && activeId && (
+                <RightPanel
+                  cfg={cfg}
+                  sessionId={activeId}
+                  sessionConfig={execConfig}
+                  running={running}
+                  onConfigChange={(c) => {
+                    setConfigBySession((prev) => ({ ...prev, [activeId]: c }))
+                    void api.putSessionConfig(cfgRef.current, activeId, c).catch(() => {})
+                  }}
+                  onToast={toast}
+                />
+              )}
+            </>
           )}
         </div>
       </main>
+
+      <ProjectPicker
+        open={projectPickerOpen}
+        recents={recentProjects}
+        onClose={() => setProjectPickerOpen(false)}
+        onChoose={(c) => {
+          setProjectPickerOpen(false)
+          void createSessionWith(c)
+        }}
+      />
 
       <SettingsModal
         open={settingsOpen}

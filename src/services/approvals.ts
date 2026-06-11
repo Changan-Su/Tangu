@@ -44,8 +44,9 @@ function nextApprovalId(): string {
  */
 export function toolNeedsApproval(name: string, mode: ApprovalMode | undefined): boolean {
   if (!mode || mode === 'full-auto') return false;
-  const writesFiles = name === 'write_file' || name === 'edit_file';
-  const runsCommands = name === 'run_bash';
+  const writesFiles = name === 'write_file' || name === 'edit_file' || name === 'multi_edit';
+  // MCP 工具(mcp__*)是外部 server 的任意能力,按「跑命令」档对待(auto-edit 也要批)
+  const runsCommands = name === 'run_bash' || name === 'kill_process' || name.startsWith('mcp__');
   if (mode === 'readonly') return writesFiles || runsCommands;
   if (mode === 'auto-edit') return runsCommands;
   return false;
@@ -63,6 +64,8 @@ export function approvalPreview(call: ToolCall): string {
   if (name === 'run_bash') return `$ ${String(args.command ?? '').trim()}`;
   if (name === 'write_file') return `write ${args.path} (${String(args.content ?? '').length} chars)`;
   if (name === 'edit_file') return `edit ${args.path}`;
+  if (name === 'multi_edit') return `multi_edit ${args.path} (${Array.isArray(args.edits) ? args.edits.length : '?'} edits)`;
+  if (name === 'kill_process') return `kill process ${args.process_id ?? ''}`;
   return `${name} ${JSON.stringify(args).slice(0, 200)}`;
 }
 
@@ -135,7 +138,9 @@ export async function gateToolCall(
   ctx: { sessionId: string; execMode?: string; approvalMode?: ApprovalMode },
   signal?: AbortSignal,
 ): Promise<ApprovalDecision> {
-  if (ctx.execMode !== 'host') return { action: 'approve' };
+  // host 模式全部过闸;非 host 仅 MCP 工具过闸(本地形态的 sandbox 会话也可能挂 MCP)。
+  // 云端部署无 deps().mcp → mcp__ 名字不可能出现 → server/worker 行为零变化。
+  if (ctx.execMode !== 'host' && !call.function.name.startsWith('mcp__')) return { action: 'approve' };
   if (!toolNeedsApproval(call.function.name, ctx.approvalMode)) return { action: 'approve' };
   if (isAlwaysAllowed(ctx.sessionId, call.function.name)) return { action: 'approve' };
   const d = await requestApproval(runId, call, approvalPreview(call), signal);
