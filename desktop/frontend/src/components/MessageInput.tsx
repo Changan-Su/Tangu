@@ -2,9 +2,16 @@
  * 输入区:auto-grow textarea + 附件(base64) + 发送/停止 + 执行模式/审批档选择器(host 能力)。
  * auto-grow 模式对齐 AI Studio MessageInput(scrollHeight 撑高,max-height 截断)。
  */
-import React, { useRef, useState } from 'react'
-import { Send, Square, Paperclip, X, Monitor, Cloud, FolderOpen, Brain } from 'lucide-react'
-import type { AgentConfig, Attachment, ModelInfo } from '../types'
+import React, { useMemo, useRef, useState } from 'react'
+import { Send, Square, Paperclip, X, Monitor, Cloud, FolderOpen, Brain, ClipboardList } from 'lucide-react'
+import type { AgentConfig, Attachment, ModelInfo, SkillInfo } from '../types'
+
+/** 斜杠命令项(/ 触发的菜单;参考 hermes 的 slash 命令)。 */
+interface SlashItem {
+  cmd: string
+  desc: string
+  run: () => void
+}
 
 const MAX_ATTACH_BYTES = 5 * 1024 * 1024
 // 客户端输入帽(服务端 runs.ts 还有一道):大段材料整体粘贴会让 agent 每轮迭代全量重发,
@@ -32,6 +39,15 @@ export const MessageInput: React.FC<{
   onModelChange?: (modelId: string) => void
   thinkingLevel?: AgentConfig['thinkingLevel']
   onThinkingChange?: (level: NonNullable<AgentConfig['thinkingLevel']>) => void
+  /** 计划模式开关(只读调研 → exit_plan_mode 提交计划)。 */
+  planMode?: boolean
+  onPlanModeChange?: (on: boolean) => void
+  /** 斜杠命令数据源:技能列表 + 本会话已启用技能 + 各动作回调。 */
+  skills?: SkillInfo[] | null
+  enabledSkillIds?: string[]
+  onToggleSkill?: (id: string) => void
+  onNewSession?: () => void
+  onOpenSettings?: () => void
   onExecConfigChange: (patch: Pick<AgentConfig, 'execMode' | 'approvalMode' | 'cwd'>) => void
   /** 返回是否已受理:失败(连接/参数错)返回 false,草稿保留不清空。 */
   onSend: (text: string, attachments: Attachment[]) => Promise<boolean>
@@ -39,13 +55,80 @@ export const MessageInput: React.FC<{
 }> = ({
   disabled, running, execConfig, homeDir,
   models, modelId, onModelChange, thinkingLevel, onThinkingChange,
+  planMode, onPlanModeChange, skills, enabledSkillIds, onToggleSkill, onNewSession, onOpenSettings,
   onExecConfigChange, onSend, onStop,
 }) => {
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [hint, setHint] = useState<string | null>(null)
+  const [slashIndex, setSlashIndex] = useState(0)
+  const [slashSubMenu, setSlashSubMenu] = useState<'model' | null>(null) // /model 的二级菜单
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // ── 斜杠命令(/ 开头且无换行 → 浮出菜单;Enter/Tab 执行而非发送)──
+  const slashItems = useMemo<SlashItem[]>(() => {
+    const items: SlashItem[] = []
+    const close = () => {
+      setDraft('')
+      setSlashSubMenu(null)
+      requestAnimationFrame(autoGrow)
+    }
+    if (onPlanModeChange) {
+      items.push({
+        cmd: '/plan',
+        desc: planMode ? '关闭计划模式' : '开启计划模式(只读调研 → 提交计划求批准)',
+        run: () => { onPlanModeChange(!planMode); close() },
+      })
+    }
+    if (onThinkingChange) {
+      for (const lv of ['off', 'low', 'medium', 'high'] as const) {
+        items.push({ cmd: `/think ${lv}`, desc: `思考深度设为 ${lv}${thinkingLevel === lv ? '(当前)' : ''}`, run: () => { onThinkingChange(lv); close() } })
+      }
+    }
+    if (onModelChange && models?.length) {
+      items.push({ cmd: '/model', desc: '选择本会话模型…', run: () => { setDraft('/model '); setSlashSubMenu('model'); setSlashIndex(0) } })
+    }
+    if (onNewSession) items.push({ cmd: '/new', desc: '新建会话', run: () => { onNewSession(); close() } })
+    if (onOpenSettings) items.push({ cmd: '/skills', desc: '打开设置管理技能', run: () => { onOpenSettings(); close() } })
+    if (onToggleSkill) {
+      const enabled = new Set(enabledSkillIds || [])
+      for (const s of skills || []) {
+        items.push({
+          cmd: `/skill:${s.id}`,
+          desc: `${enabled.has(s.id) ? '停用' : '启用'}技能 ${s.name}`,
+          run: () => { onToggleSkill(s.id); close() },
+        })
+      }
+    }
+    return items
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planMode, thinkingLevel, models, skills, enabledSkillIds, onPlanModeChange, onThinkingChange, onModelChange, onNewSession, onOpenSettings, onToggleSkill])
+
+  const slashActive = draft.startsWith('/') && !draft.includes('\n') && !disabled
+  const slashMatches = useMemo<SlashItem[]>(() => {
+    if (!slashActive) return []
+    if (slashSubMenu === 'model') {
+      // /model 二级:列模型,点选即切
+      const filter = draft.slice('/model '.length).toLowerCase()
+      return (models || [])
+        .filter((m) => !filter || m.id.toLowerCase().includes(filter) || m.name.toLowerCase().includes(filter))
+        .slice(0, 12)
+        .map((m) => ({
+          cmd: m.id === modelId ? `● ${m.name}` : m.name,
+          desc: `${m.source === 'direct' ? '直连·' : ''}${m.provider} · ${m.id}`,
+          run: () => {
+            onModelChange?.(m.id)
+            setDraft('')
+            setSlashSubMenu(null)
+            requestAnimationFrame(autoGrow)
+          },
+        }))
+    }
+    const q = draft.toLowerCase()
+    return slashItems.filter((it) => it.cmd.toLowerCase().startsWith(q) || (q.length > 1 && it.desc.toLowerCase().includes(q.slice(1)))).slice(0, 10)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slashActive, slashSubMenu, draft, slashItems, models, modelId])
 
   const autoGrow = () => {
     const ta = taRef.current
@@ -137,12 +220,59 @@ export const MessageInput: React.FC<{
               autoGrow()
             }}
             onKeyDown={(e) => {
+              // 斜杠菜单导航:↑↓ 选择,Enter/Tab 执行(不发送),Esc 关闭
+              if (slashActive && slashMatches.length) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault()
+                  setSlashIndex((i) => (i + 1) % slashMatches.length)
+                  return
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  setSlashIndex((i) => (i - 1 + slashMatches.length) % slashMatches.length)
+                  return
+                }
+                if ((e.key === 'Enter' || e.key === 'Tab') && !e.nativeEvent.isComposing) {
+                  e.preventDefault()
+                  slashMatches[Math.min(slashIndex, slashMatches.length - 1)]?.run()
+                  return
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  setDraft('')
+                  setSlashSubMenu(null)
+                  return
+                }
+              }
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault()
                 send()
               }
             }}
           />
+          {slashActive && slashMatches.length > 0 && (
+            <div
+              style={{
+                position: 'absolute', bottom: '100%', left: 0, right: 0, marginBottom: 6,
+                background: 'var(--bg-card)', border: 'var(--border-width) solid var(--border)',
+                borderRadius: 'var(--radius-md)', maxHeight: 240, overflowY: 'auto', zIndex: 30,
+                boxShadow: '0 -4px 16px rgba(0,0,0,0.08)',
+              }}
+            >
+              {slashMatches.map((it, i) => (
+                <button
+                  key={`${it.cmd}-${i}`}
+                  className="file-row"
+                  style={{ width: '100%', background: i === Math.min(slashIndex, slashMatches.length - 1) ? 'var(--bg-hover, rgba(127,127,127,0.12))' : undefined }}
+                  onMouseEnter={() => setSlashIndex(i)}
+                  onClick={() => it.run()}
+                >
+                  <span className="file-name" style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5 }}>{it.cmd}</span>
+                  <span className="file-size">{it.desc}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <div className="composer-bar">
             <button className="icon-btn" title="添加图片(随消息发给模型;其他文件请用右栏工作区上传)" onClick={() => fileRef.current?.click()}>
               <Paperclip size={15} />
@@ -196,6 +326,17 @@ export const MessageInput: React.FC<{
               >
                 <Brain size={13} />
                 {thinkingLabel[thinkingLevel || 'off']}
+              </button>
+            )}
+            {onPlanModeChange && (
+              <button
+                className="mode-select"
+                title="计划模式:agent 只读调研并产出实施计划,经你批准后才执行(/plan 也可切换)"
+                style={planMode ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined}
+                onClick={() => onPlanModeChange(!planMode)}
+              >
+                <ClipboardList size={13} />
+                {planMode ? '计划中' : '计划'}
               </button>
             )}
             <button

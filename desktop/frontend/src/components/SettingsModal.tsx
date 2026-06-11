@@ -9,18 +9,26 @@ import { ThemeCard } from './ThemeCard'
 import { listThemes } from '../theme/registry'
 import { applyTheme } from '../theme/loader'
 import { testConnection } from '../services/agentRunService'
-import { listModels, listTools, testProviderConnection } from '../services/backendService'
+import { deleteUserCloudSkill, listModels, listSkills, listTools, testProviderConnection, uploadSkillToCloud } from '../services/backendService'
 import type {
   AuthStatusInfo, BackendStatusInfo, DirectProviderConfig, DiscoveryResult, McpServerConfigEntry, ModelsResponse,
-  StoredDesktopConfig, TanguDesktopConfig, ToolsResponse,
+  SkillInfo, StoredDesktopConfig, TanguDesktopConfig, ToolsResponse,
 } from '../types'
 
-type Tab = 'connection' | 'model' | 'providers' | 'mcp' | 'theme' | 'advanced'
+type Tab = 'connection' | 'model' | 'providers' | 'mcp' | 'skills' | 'theme' | 'advanced'
 
 const ECO_LABEL: Record<string, string> = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
   hermes: 'Hermes',
+}
+
+const SKILL_SOURCE_LABEL: Record<string, string> = {
+  local: '本地',
+  claude: 'Claude Code',
+  codex: 'Codex',
+  user: '已上云',
+  cloud: '云端',
 }
 
 const BACKEND_STATE_LABEL: Record<string, string> = {
@@ -86,6 +94,49 @@ export const SettingsModal: React.FC<{
       setMcpServers(c.mcpServers)
       setMcpMsg(msg)
     }).catch((e) => setMcpMsg(`保存失败:${e?.message || e}`))
+  }
+
+  // 技能库(设置→技能 tab):列表 + 本地→云端上传 + 删除本人云端技能
+  const [allSkills, setAllSkills] = useState<SkillInfo[] | null>(null)
+  const [allSkillsLoading, setAllSkillsLoading] = useState(false)
+  const [skillBusy, setSkillBusy] = useState<string | null>(null)
+  const [skillMsg, setSkillMsg] = useState('')
+
+  const loadAllSkills = (): void => {
+    setAllSkillsLoading(true)
+    void listSkills(p.cfg)
+      .then(setAllSkills)
+      .catch((e) => setSkillMsg(`技能列表加载失败:${e?.message || e}`))
+      .finally(() => setAllSkillsLoading(false))
+  }
+
+  const doUploadSkill = async (id: string): Promise<void> => {
+    setSkillBusy(id)
+    setSkillMsg('')
+    try {
+      const r = await uploadSkillToCloud(p.cfg, id)
+      setSkillMsg(`✓ 「${r.name}」已上传云端(id: ${r.id})`)
+      loadAllSkills()
+    } catch (e: any) {
+      setSkillMsg(`上传失败:${e?.message || e}`)
+    } finally {
+      setSkillBusy(null)
+    }
+  }
+
+  const doDeleteUserSkill = async (id: string): Promise<void> => {
+    if (!window.confirm(`删除云端技能「${id}」?`)) return
+    setSkillBusy(id)
+    setSkillMsg('')
+    try {
+      await deleteUserCloudSkill(p.cfg, id)
+      setSkillMsg('✓ 已删除')
+      loadAllSkills()
+    } catch (e: any) {
+      setSkillMsg(`删除失败:${e?.message || e}`)
+    } finally {
+      setSkillBusy(null)
+    }
   }
 
   const refreshAuth = (): void => {
@@ -234,6 +285,7 @@ export const SettingsModal: React.FC<{
   useEffect(() => {
     if (p.open && tab === 'model' && !models && !modelsLoading) void loadModels()
     if (p.open && tab === 'mcp') refreshMcp()
+    if (p.open && tab === 'skills' && !allSkills && !allSkillsLoading) loadAllSkills()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.open, tab])
 
@@ -268,7 +320,7 @@ export const SettingsModal: React.FC<{
                   [
                     ['connection', '连接'],
                     ['model', '模型'],
-                    ...(isDesktop ? ([['providers', 'Provider'], ['mcp', 'MCP']] as Array<[Tab, string]>) : []),
+                    ...(isDesktop ? ([['providers', 'Provider'], ['mcp', 'MCP'], ['skills', '技能']] as Array<[Tab, string]>) : []),
                     ['theme', '主题'],
                     ['advanced', '高级'],
                   ] as Array<[Tab, string]>
@@ -919,11 +971,60 @@ export const SettingsModal: React.FC<{
                   </>
                 )}
 
-                {tab === 'advanced' && (
+                {tab === 'skills' && (
                   <>
-                    <div className="panel-note">
-                      会话级配置(技能/工具启用、执行环境、审批档)在右侧面板与输入栏调整。
-                      快捷键:Ctrl/Cmd+N 新建会话,Ctrl/Cmd+, 打开设置。
+                    <div className="field">
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        技能库
+                        <button className="icon-btn" style={{ width: 22, height: 22 }} onClick={loadAllSkills}>
+                          <RefreshCw size={12} className={allSkillsLoading ? 'spin' : ''} />
+                        </button>
+                      </label>
+                      <div className="hint" style={{ marginBottom: 8 }}>
+                        本地技能放 ~/.tangu/skills/&lt;id&gt;/SKILL.md;自动识别 ~/.claude/skills 与
+                        ~/.codex/prompts(env TANGU_EXTERNAL_SKILLS=off 可关)。会话内启用在右侧面板或输入
+                        /skill 命令;此处管理全局技能与云端同步。
+                      </div>
+                      {allSkills === null && <div className="hint">{allSkillsLoading ? '加载中…' : '点击刷新加载'}</div>}
+                      {allSkills?.length === 0 && <div className="hint">暂无技能。</div>}
+                      {!!allSkills?.length && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 300, overflowY: 'auto' }}>
+                          {allSkills.map((s) => (
+                            <div key={s.id} className="file-row" style={{ cursor: 'default' }}>
+                              <span className="file-name" style={{ flex: 1 }}>
+                                <b>{s.name}</b>
+                                <span style={{ color: 'var(--accent)', fontSize: 10.5, marginLeft: 6 }}>{SKILL_SOURCE_LABEL[s.source || 'cloud']}</span>
+                                {s.description && (
+                                  <span style={{ color: 'var(--text-muted)', marginLeft: 8, fontSize: 12 }}>
+                                    {s.description.length > 70 ? `${s.description.slice(0, 70)}…` : s.description}
+                                  </span>
+                                )}
+                              </span>
+                              {(s.source === 'local' || s.source === 'claude' || s.source === 'codex') && (
+                                <button
+                                  className="btn ghost sm"
+                                  disabled={skillBusy === s.id}
+                                  title="上传为本人云端技能(云端 Tangu 会话可用)"
+                                  onClick={() => void doUploadSkill(s.id)}
+                                >
+                                  {skillBusy === s.id ? <Loader2 size={11} className="spin" /> : '上传云端'}
+                                </button>
+                              )}
+                              {s.source === 'user' && (
+                                <button
+                                  className="icon-btn"
+                                  title="删除本人云端技能"
+                                  disabled={skillBusy === s.id}
+                                  onClick={() => void doDeleteUserSkill(s.id)}
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {skillMsg && <div className="hint" style={{ marginTop: 6 }}>{skillMsg}</div>}
                     </div>
 
                     {isDesktop && !!window.tangu?.discoveryScan && (
@@ -1007,6 +1108,16 @@ export const SettingsModal: React.FC<{
                         {discMsg && <div className="hint" style={{ marginTop: 6 }}>{discMsg}</div>}
                       </div>
                     )}
+                  </>
+                )}
+
+                {tab === 'advanced' && (
+                  <>
+                    <div className="panel-note">
+                      会话级配置(技能/工具启用、执行环境、审批档)在右侧面板与输入栏调整。
+                      快捷键:Ctrl/Cmd+N 新建会话,Ctrl/Cmd+, 打开设置。
+                    </div>
+
                   </>
                 )}
               </div>

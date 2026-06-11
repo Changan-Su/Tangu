@@ -14,10 +14,36 @@
  */
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 
 export function tanguHome(): string {
   return process.env.TANGU_HOME || join(homedir(), '.tangu');
+}
+
+export const envFile = (): string => join(tanguHome(), '.env');
+
+/**
+ * 加载 ~/.tangu/.env(KEY=VALUE 行;# 注释;引号可选)进 process.env——**已存在的环境变量不覆盖**
+ * (真实 shell 环境 > .env 文件)。须在 parseConfig 之前调用;模板见包根 example.env。
+ * 注:TANGU_HOME 本身只能来自真实环境(鸡生蛋:定位 .env 要先有 home)。
+ */
+export function loadTanguEnv(): void {
+  let raw: string;
+  try {
+    raw = readFileSync(envFile(), 'utf8');
+  } catch {
+    return; // 无 .env 是常态
+  }
+  for (const line of raw.split('\n')) {
+    const t = line.trim();
+    if (!t || t.startsWith('#')) continue;
+    const i = t.indexOf('=');
+    if (i <= 0) continue;
+    const k = t.slice(0, i).trim();
+    let v = t.slice(i + 1).trim();
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+    if (k && process.env[k] === undefined) process.env[k] = v;
+  }
 }
 
 export const authFile = (): string => join(tanguHome(), 'auth.json');

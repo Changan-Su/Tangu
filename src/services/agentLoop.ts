@@ -223,6 +223,9 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
     typeof agentConfig.cwd === 'string' && agentConfig.cwd ? agentConfig.cwd : undefined;
   const approvalMode: 'readonly' | 'auto-edit' | 'full-auto' =
     agentConfig.approvalMode || (execMode === 'host' ? 'auto-edit' : 'full-auto');
+  // 计划模式(类 Claude plan mode):工具集收敛为只读 + exit_plan_mode(toolRegistry 集中过滤),
+  // custom/MCP 工具整体跳过;run 级冻结——批准退出后下一轮 run 才拿到完整工具集。
+  const planMode = !!agentConfig.planMode && profile.capabilities.hostExec;
 
   // 会话级沙箱：工作区/容器/kernel 按 (user, session) 跨消息常驻（懒 hydrate、空闲 TTL 回收）。
   // 文件工具与 run_python 都在本地操作（首次触发懒 hydrate），run 末按 sha256 diff 选择性回写 Penzor，
@@ -315,6 +318,18 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
     systemParts.push(...skillLoadout.sections);
     systemParts.push(...promptSections.environment);
 
+    // 计划模式指引(追加在最后,不动既有段落的字节序;planMode 是 run 级配置,同 run 内稳定)。
+    if (planMode) {
+      systemParts.push(
+        '## 计划模式(Plan Mode)\n' +
+          '当前处于计划模式:你只有只读工具,**不能**写文件/执行命令/调用外部工具。流程:\n' +
+          '1. 用只读工具(read_file/search_files/glob_files/web_search 等)充分调研\n' +
+          '2. 需求有歧义或方案需取舍时用 ask_user 问清楚\n' +
+          '3. 产出完整实施计划(目标/步骤/涉及文件/验证方式),调用 exit_plan_mode 提交审批\n' +
+          '4. 用户批准前不要承诺"已完成"任何改动;被要求修改就完善计划后重新提交',
+      );
+    }
+
     const workingMessages: ChatMessage[] = [];
     if (systemParts.length) {
       workingMessages.push({ role: 'system', content: systemParts.join('\n\n') } as ChatMessage);
@@ -322,22 +337,25 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
     workingMessages.push(...history);
 
     // 自定义工具（HTTP/JS）：从 custom_tools 表 + 启用技能自带工具加载，喂给 LLM 并在云端执行。
+    // 计划模式下整体跳过(外部副作用不可知,不属于只读集)。
     let customTools: Map<string, LoadedCustomTool> | undefined;
-    try {
-      const loaded = await loadCustomTools(appId, agentConfig);
-      if (loaded.length) {
-        customTools = new Map(loaded.map((t) => [t.name, t]));
-        console.log(`[agent-core] run=${runId} custom tools: ${loaded.map((t) => `${t.name}(${t.executor})`).join(', ')}`);
+    if (!planMode) {
+      try {
+        const loaded = await loadCustomTools(appId, agentConfig);
+        if (loaded.length) {
+          customTools = new Map(loaded.map((t) => [t.name, t]));
+          console.log(`[agent-core] run=${runId} custom tools: ${loaded.map((t) => `${t.name}(${t.executor})`).join(', ')}`);
+        }
+      } catch (e) {
+        console.warn('[agent-core] loadCustomTools failed:', e);
       }
-    } catch (e) {
-      console.warn('[agent-core] loadCustomTools failed:', e);
     }
 
     // MCP 工具(deps().mcp 仅 standalone/TUI 装配):run 开始取一次快照、run 内冻结——
     // server 集/工具集变更只对之后的 run 生效,杜绝 run 中途 defs 漂移打爆前缀缓存。
     // agent_config.enabledMcpServers(string[],缺省=全部已连接 server)做会话级过滤。
     let mcpTools: Map<string, import('../mcp/toolBridge.js').LoadedMcpTool> | undefined;
-    if (deps().mcp) {
+    if (deps().mcp && !planMode) {
       const enabledMcp = Array.isArray(agentConfig.enabledMcpServers) ? agentConfig.enabledMcpServers : undefined;
       const snapshot = deps().mcp!.toolsForRun(enabledMcp);
       if (snapshot.size) {
@@ -348,7 +366,7 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
 
     const toolCtx: ToolContext = {
       userId, sessionId, appId, runId, signal: ac.signal, customTools, mcpTools,
-      enabledSkillIds, execMode, cwd, approvalMode, profile, modelId,
+      enabledSkillIds, execMode, cwd, approvalMode, profile, modelId, planMode,
     };
     const toolDefs = getToolDefinitions(toolCtx);
 

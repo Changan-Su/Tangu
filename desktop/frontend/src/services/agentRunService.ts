@@ -68,6 +68,20 @@ export async function listActiveRuns(
   return j.runs || []
 }
 
+/** 兑现一次询问(ask_user/exit_plan_mode)。410 = 已不在等待(过期/他端已处理)。 */
+export async function resolveInquiry(
+  cfg: TanguDesktopConfig,
+  runId: string,
+  inquiryId: string,
+  answer: string,
+): Promise<{ ok: boolean; gone: boolean }> {
+  const r = await fetch(
+    `${cfg.backendUrl}/agent/runs/${encodeURIComponent(runId)}/inquiries/${encodeURIComponent(inquiryId)}`,
+    { method: 'POST', headers: headers(cfg.token), body: JSON.stringify({ answer }) },
+  )
+  return { ok: r.ok, gone: r.status === 410 }
+}
+
 /** 兑现一次 host-exec 审批。410 = 已不在等待(过期/他端已处理)。 */
 export async function resolveApproval(
   cfg: TanguDesktopConfig,

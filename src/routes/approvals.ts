@@ -14,6 +14,7 @@ import { Router } from 'express';
 import { authMiddleware, AuthRequest } from '../core/http.js';
 import { getRunForUser } from '../services/runStore.js';
 import { resolveApproval, type ApprovalAction } from '../services/approvals.js';
+import { resolveInquiry } from '../services/inquiries.js';
 
 const router = Router();
 
@@ -36,6 +37,24 @@ router.post('/agent/runs/:runId/approvals/:approvalId', authMiddleware, async (r
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ detail: e?.message || 'approval failed' });
+  }
+});
+
+// 询问(ask_user / exit_plan_mode)兑现端点;机制同审批(登记表在 services/inquiries.ts)。
+//   POST /agent/runs/:runId/inquiries/:inquiryId { answer: string }
+//     → 200 | 400 缺 answer | 404 run 不存在/非本人 | 410 该询问已不在等待
+router.post('/agent/runs/:runId/inquiries/:inquiryId', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.user!.userId;
+    const answer = typeof req.body?.answer === 'string' ? req.body.answer.trim() : '';
+    if (!answer) return res.status(400).json({ detail: 'answer required' });
+    const run = await getRunForUser(req.params.runId, userId);
+    if (!run) return res.status(404).json({ detail: 'Run not found' });
+    const ok = resolveInquiry(req.params.inquiryId, answer.slice(0, 4000));
+    if (!ok) return res.status(410).json({ detail: 'inquiry is no longer pending' });
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'inquiry failed' });
   }
 });
 

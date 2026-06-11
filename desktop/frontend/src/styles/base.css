@@ -484,6 +484,7 @@ a:hover { color: var(--accent-hover); }
 .composer { padding: 8px 24px 16px; }
 .composer-inner { max-width: 760px; margin: 0 auto; }
 .composer-box {
+  position: relative; /* 斜杠命令菜单(absolute, bottom:100%)的定位锚 */
   background: var(--bg-card);
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-chat-surface);

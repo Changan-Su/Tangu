@@ -17,6 +17,29 @@ import { importMcp, importSkills, scanAll } from './discovery'
 /** ~/.tangu(与包内 core/tanguHome.ts 同约定;TANGU_HOME 可整体重定向)。 */
 const tanguHomeDir = (): string => process.env.TANGU_HOME || join(app.getPath('home'), '.tangu')
 
+/**
+ * 加载 ~/.tangu/.env 进 process.env(不覆盖真实环境;与包内 tanguHome.loadTanguEnv 同语义)。
+ * 打包 Electron 不继承 shell 环境,.env 文件是 TANGU_CLOUD_URL 等预配置的标准载体(模板:包根 example.env)。
+ */
+async function loadTanguEnvFile(): Promise<void> {
+  let raw: string
+  try {
+    raw = await readFile(join(tanguHomeDir(), '.env'), 'utf8')
+  } catch {
+    return
+  }
+  for (const line of raw.split('\n')) {
+    const t = line.trim()
+    if (!t || t.startsWith('#')) continue
+    const i = t.indexOf('=')
+    if (i <= 0) continue
+    const k = t.slice(0, i).trim()
+    let v = t.slice(i + 1).trim()
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1)
+    if (k && process.env[k] === undefined) process.env[k] = v
+  }
+}
+
 /** 直连 provider 配置(~/.tangu/providers.json;托管后端启动时自动加载,见包内 assemble.loadProviders)。 */
 interface DirectProviderConfig {
   providerId: string
@@ -230,7 +253,9 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await loadTanguEnvFile() // 先于一切 loadConfig(其 env 兜底读 TANGU_CLOUD_URL/TANGU_BACKEND_URL)
+
   ipcMain.handle('config:get', () => effectiveConfig())
   ipcMain.handle('config:set', async (_e, patch: Partial<TanguStoredConfig>) => {
     const before = await loadConfig()

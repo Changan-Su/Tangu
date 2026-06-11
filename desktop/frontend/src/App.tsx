@@ -4,10 +4,10 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
-  AgentConfig, AgentRunEvent, Attachment, ModelsResponse, SessionRecord, TanguDesktopConfig, UiMessage,
+  AgentConfig, AgentRunEvent, Attachment, ModelsResponse, SessionRecord, SkillInfo, TanguDesktopConfig, UiMessage,
 } from './types'
 import * as api from './services/backendService'
-import { abortRun, listActiveRuns, resolveApproval, startRun, subscribeRunEvents, testConnection } from './services/agentRunService'
+import { abortRun, listActiveRuns, resolveApproval, resolveInquiry, startRun, subscribeRunEvents, testConnection } from './services/agentRunService'
 import { Sidebar } from './components/Sidebar'
 import { ChatHeader } from './components/ChatHeader'
 import { ChatArea } from './components/ChatArea'
@@ -72,6 +72,7 @@ export function App(): React.JSX.Element {
   const [archivedSessions, setArchivedSessions] = useState<SessionRecord[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [modelsResp, setModelsResp] = useState<ModelsResponse | null>(null)
+  const [skillsList, setSkillsList] = useState<SkillInfo[] | null>(null)
   const [messagesBySession, setMessagesBySession] = useState<Record<string, UiMessage[]>>({})
   const [configBySession, setConfigBySession] = useState<Record<string, AgentConfig>>({})
   const [runningBySession, setRunningBySession] = useState<Record<string, string>>({})
@@ -194,12 +195,43 @@ export function App(): React.JSX.Element {
           ),
         }))
         break
+      case 'inquiry_request':
+        patchMessage(sessionId, assistantId, (m) => ({
+          ...m,
+          inquiries: [
+            ...(m.inquiries || []),
+            {
+              inquiryId: pl.inquiryId, runId, question: pl.question || '',
+              options: Array.isArray(pl.options) ? pl.options : [], status: 'pending' as const,
+            },
+          ],
+        }))
+        break
+      case 'inquiry_result':
+        patchMessage(sessionId, assistantId, (m) => ({
+          ...m,
+          inquiries: (m.inquiries || []).map((q) =>
+            q.inquiryId === pl.inquiryId ? { ...q, status: 'answered' as const, answer: String(pl.answer ?? '') } : q,
+          ),
+        }))
+        break
+      case 'plan':
+        patchMessage(sessionId, assistantId, (m) => ({ ...m, planProposal: String(pl.plan || '') }))
+        break
+      case 'plan_approved':
+        // 服务端已把会话 agent_config.planMode 落库为 false;同步本地状态(输入栏开关复位)
+        setConfigBySession((prev) => ({
+          ...prev,
+          [sessionId]: { ...(prev[sessionId] || {}), planMode: false },
+        }))
+        break
       case 'done':
         patchMessage(sessionId, assistantId, (m) => ({
           ...m,
           content: pl.content || m.content,
           status: 'done' as const,
           approvals: (m.approvals || []).map((a) => (a.status === 'pending' ? { ...a, status: 'expired' as const } : a)),
+          inquiries: (m.inquiries || []).map((q) => (q.status === 'pending' ? { ...q, status: 'expired' as const } : q)),
         }))
         endRun(sessionId, runId)
         break
@@ -209,6 +241,7 @@ export function App(): React.JSX.Element {
           status: 'error' as const,
           error: pl.error || 'error',
           approvals: (m.approvals || []).map((a) => (a.status === 'pending' ? { ...a, status: 'expired' as const } : a)),
+          inquiries: (m.inquiries || []).map((q) => (q.status === 'pending' ? { ...q, status: 'expired' as const } : q)),
         }))
         endRun(sessionId, runId)
         break
@@ -254,6 +287,8 @@ export function App(): React.JSX.Element {
     }
     // 模型目录(输入栏会话内切换器用);失败静默,选择器自动隐藏。
     void api.listModels(c).then(setModelsResp).catch(() => setModelsResp(null))
+    // 技能目录(斜杠命令 /skill:* 用);失败静默。
+    void api.listSkills(c).then(setSkillsList).catch(() => setSkillsList(null))
   }, [refreshSessions, toast])
 
   useEffect(() => {
@@ -269,11 +304,12 @@ export function App(): React.JSX.Element {
       setCfg(merged)
       setCfgLoaded(true)
       if (merged.token || stored?.mode === 'managed') void connect(merged)
-      // 首启引导:桌面端「从未配置」(无云端地址/凭证/直连 provider,且未跳过过)→ 进向导。
+      // 首启引导:桌面端「从未配置凭证」(未登录、无 token、无直连 provider,且未跳过过)→ 进向导。
+      // cloudUrl 不参与判定:它可由 ~/.tangu/.env(TANGU_CLOUD_URL)预配,有地址没登录仍要引导。
       if (stored && window.tangu?.envCheck) {
         try {
           if (!localStorage.getItem(ONBOARDING_DISMISS_KEY)
-            && !stored.cloudUrl && !stored.cloudToken && !stored.token) {
+            && !stored.cloudToken && !stored.token) {
             const [auth, provs] = await Promise.all([
               window.tangu.authStatus?.().catch(() => null) ?? null,
               window.tangu.listProviders?.().catch(() => []) ?? [],
@@ -546,6 +582,51 @@ export function App(): React.JSX.Element {
     })
   }, [])
 
+  /** 计划模式开关(输入栏「计划」按钮 / /plan 命令):持久化进 agent_config.planMode。 */
+  const setSessionPlanMode = useCallback((on: boolean) => {
+    const sid = activeIdRef.current
+    if (!sid) return
+    setConfigBySession((prev) => {
+      const next = { ...(prev[sid] || {}), planMode: on }
+      void api.putSessionConfig(cfgRef.current, sid, next).catch(() => {})
+      return { ...prev, [sid]: next }
+    })
+  }, [])
+
+  /** 会话内技能启停(/skill:<id> 斜杠命令):合并进 agent_config.enabledSkillIds。 */
+  const toggleSessionSkill = useCallback((skillId: string) => {
+    const sid = activeIdRef.current
+    if (!sid) return
+    setConfigBySession((prev) => {
+      const cur = new Set(prev[sid]?.enabledSkillIds || [])
+      cur.has(skillId) ? cur.delete(skillId) : cur.add(skillId)
+      const next = { ...(prev[sid] || {}), enabledSkillIds: [...cur] }
+      void api.putSessionConfig(cfgRef.current, sid, next).catch(() => {})
+      toast(`技能${cur.has(skillId) ? '已启用' : '已停用'}:${skillId}`)
+      return { ...prev, [sid]: next }
+    })
+  }, [toast])
+
+  /** 兑现询问(ask_user/exit_plan_mode 的询问卡)。 */
+  const answerInquiry = useCallback(
+    async (messageId: string, inquiryId: string, answer: string) => {
+      const sid = activeIdRef.current
+      if (!sid) return
+      const inquiry = (messagesBySession[sid] || [])
+        .find((m) => m.id === messageId)
+        ?.inquiries?.find((q) => q.inquiryId === inquiryId)
+      if (!inquiry?.runId) return
+      const r = await resolveInquiry(cfgRef.current, inquiry.runId, inquiryId, answer)
+      if (r.gone) {
+        patchMessage(sid, messageId, (m) => ({
+          ...m,
+          inquiries: (m.inquiries || []).map((q) => (q.inquiryId === inquiryId ? { ...q, status: 'expired' as const } : q)),
+        }))
+      }
+    },
+    [messagesBySession, patchMessage],
+  )
+
   // ── 设置 ──
   const patchConfig = useCallback((patch: Partial<TanguDesktopConfig>) => {
     setCfg((prev) => {
@@ -644,6 +725,7 @@ export function App(): React.JSX.Element {
                 <ChatArea
                   messages={activeMessages}
                   onApproval={(mid, aid, action, args) => void decideApproval(mid, aid, action, args)}
+                  onInquiry={(mid, iid, answer) => void answerInquiry(mid, iid, answer)}
                 />
                 <MessageInput
                   disabled={connState !== 'ok'}
@@ -655,6 +737,13 @@ export function App(): React.JSX.Element {
                   onModelChange={setSessionModel}
                   thinkingLevel={execConfig.thinkingLevel}
                   onThinkingChange={setSessionThinking}
+                  planMode={execConfig.planMode}
+                  onPlanModeChange={setSessionPlanMode}
+                  skills={skillsList}
+                  enabledSkillIds={execConfig.enabledSkillIds || []}
+                  onToggleSkill={toggleSessionSkill}
+                  onNewSession={() => void newSession()}
+                  onOpenSettings={() => setSettingsOpen(true)}
                   onExecConfigChange={setExecConfig}
                   onSend={send}
                   onStop={stop}

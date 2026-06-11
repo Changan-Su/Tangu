@@ -9,6 +9,7 @@ export const initialState: UiState = {
   status: { state: 'idle', iteration: 0 },
   usage: { total: 0, cost: 0, cached: 0 },
   approval: null,
+  inquiry: null,
 };
 
 /** 取末块若为 text 则在其上追加，否则新开一个 text 块（不可变更新）。 */
@@ -121,6 +122,12 @@ export function reducer(state: UiState, action: UiAction): UiState {
     case 'APPROVAL_CLEAR':
       return { ...state, approval: null };
 
+    case 'INQUIRY':
+      return { ...state, inquiry: action.inquiry };
+
+    case 'INQUIRY_CLEAR':
+      return { ...state, inquiry: null };
+
     case 'DONE': {
       const { items, nextId } = flushLive(state);
       return {
@@ -130,6 +137,7 @@ export function reducer(state: UiState, action: UiAction): UiState {
         live: null,
         busy: false,
         approval: null,
+        inquiry: null,
         status: { state: 'idle', iteration: 0 },
       };
     }
@@ -145,6 +153,7 @@ export function reducer(state: UiState, action: UiAction): UiState {
         live: null,
         busy: false,
         approval: null,
+        inquiry: null,
         status: { state: 'idle', iteration: 0 },
       };
     }
@@ -160,6 +169,7 @@ export function reducer(state: UiState, action: UiAction): UiState {
         live: null,
         busy: false,
         approval: null,
+        inquiry: null,
         status: { state: 'idle', iteration: 0 },
       };
 

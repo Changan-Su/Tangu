@@ -9,6 +9,7 @@ import { createRun } from '../services/runStore.js';
 import { enqueueRun, abortRun } from '../services/agentLoop.js';
 import { subscribe } from '../services/eventBus.js';
 import { resolveApproval, type ApprovalDecision } from '../services/approvals.js';
+import { resolveInquiry } from '../services/inquiries.js';
 import { saveModel } from '../standalone/credStore.js';
 import { getToolDefinitions } from '../tools/registry.js';
 import { reducer, initialState } from './events.js';
@@ -18,6 +19,7 @@ import { ItemView, LiveView } from './components/Message.js';
 import { StatusBar } from './components/StatusBar.js';
 import { InputBox } from './components/InputBox.js';
 import { ApprovalPrompt } from './components/ApprovalPrompt.js';
+import { InquiryPrompt } from './components/InquiryPrompt.js';
 import type { TuiConfig } from './config.js';
 import type { ApprovalMode } from './types.js';
 
@@ -34,6 +36,10 @@ interface MutableConfig {
   tokenBudget?: number;
   thinkingLevel: 'off' | 'low' | 'medium' | 'high';
   seedSystem?: string;
+  /** 计划模式(/plan 切换):只读工具集 + exit_plan_mode,批准后自动关闭。 */
+  planMode?: boolean;
+  /** 本会话启用的技能 id(/skill <id> 切换;/skills 列出)。 */
+  enabledSkillIds?: string[];
 }
 
 export function App({ boot, storage }: { boot: TuiConfig; storage: string }): ReactElement {
@@ -146,6 +152,18 @@ export function App({ boot, storage }: { boot: TuiConfig; storage: string }): Re
         flushNow();
         dispatch({ type: 'APPROVAL', approval: { approvalId: p.approvalId, name: p.name, args: p.arguments || '', preview: p.preview || '' } });
         break;
+      case 'inquiry_request':
+        flushNow();
+        dispatch({ type: 'INQUIRY', inquiry: { inquiryId: p.inquiryId, question: p.question || '', options: Array.isArray(p.options) ? p.options : [] } });
+        break;
+      case 'plan':
+        flushNow();
+        dispatch({ type: 'ADD_NOTICE', text: '📋 计划提案:\n' + String(p.plan || ''), tone: 'info' });
+        break;
+      case 'plan_approved':
+        setCfg((c) => ({ ...c, planMode: false })); // 工具侧已落库,本地配置同步关
+        dispatch({ type: 'ADD_NOTICE', text: '✓ 计划已批准,计划模式关闭——下一条消息开始执行', tone: 'success' });
+        break;
       case 'done':
         flushNow();
         teardownRun();
@@ -190,6 +208,8 @@ export function App({ boot, storage }: { boot: TuiConfig; storage: string }): Re
     if (c.seedSystem) agentConfig.systemPrompt = c.seedSystem;
     if (c.tokenBudget) agentConfig.tokenBudget = c.tokenBudget;
     if (c.thinkingLevel && c.thinkingLevel !== 'off') agentConfig.thinkingLevel = c.thinkingLevel;
+    if (c.planMode) agentConfig.planMode = true;
+    if (c.enabledSkillIds?.length) agentConfig.enabledSkillIds = c.enabledSkillIds;
     createRun({
       id: runId,
       sessionId: sid,
@@ -357,9 +377,51 @@ export function App({ boot, storage }: { boot: TuiConfig; storage: string }): Re
         }
         return;
       }
-      case '/skills':
-        notice('本地 TUI 默认未启用技能（技能在 Forsion 端按 app 配置）。');
+      case '/plan': {
+        const next = !cfgRef.current.planMode;
+        setCfg((c) => ({ ...c, planMode: next }));
+        notice(
+          next
+            ? '📋 计划模式已开:agent 只有只读工具,调研后用 exit_plan_mode 提交计划求批准(/plan 再次输入可关闭)'
+            : '计划模式已关',
+          'success',
+        );
         return;
+      }
+      case '/skills': {
+        try {
+          const skills = (await deps().brain.assets.listSkills?.({ visibleOnly: true, forUser: userId })) || [];
+          if (!skills.length) {
+            notice('暂无可用技能(本地技能放 ~/.tangu/skills/<id>/SKILL.md,自动识别 ~/.claude/skills)。');
+            return;
+          }
+          const enabled = new Set(cfgRef.current.enabledSkillIds || []);
+          const lines = skills
+            .slice(0, 60)
+            .map((s: any) => `  ${enabled.has(s.id) ? '✓' : ' '} ${s.id}${s.name && s.name !== s.id ? ` · ${s.name}` : ''}`)
+            .join('\n');
+          notice(`技能(/skill <id> 启用/停用;✓=本会话已启用):\n${lines}`);
+        } catch (e: any) {
+          notice(`列技能失败:${e?.message || e}`, 'error');
+        }
+        return;
+      }
+      case '/skill': {
+        if (!rest) {
+          notice('用法:/skill <id>(先 /skills 查看;再次执行同 id 即停用)', 'warn');
+          return;
+        }
+        const cur = new Set(cfgRef.current.enabledSkillIds || []);
+        if (cur.has(rest)) {
+          cur.delete(rest);
+          notice(`技能已停用:${rest}`, 'success');
+        } else {
+          cur.add(rest);
+          notice(`技能已启用:${rest}(本会话生效)`, 'success');
+        }
+        setCfg((c) => ({ ...c, enabledSkillIds: [...cur] }));
+        return;
+      }
       case '/tools': {
         const ctx: any = { userId, sessionId: sessionIdRef.current, appId: 'tangu', execMode: cfgRef.current.execMode, enabledSkillIds: [] };
         const names = getToolDefinitions(ctx).map((d) => d.function.name);
@@ -459,6 +521,15 @@ export function App({ boot, storage }: { boot: TuiConfig; storage: string }): Re
           onDecision={(d: ApprovalDecision) => {
             resolveApproval(state.approval!.approvalId, d);
             dispatch({ type: 'APPROVAL_CLEAR' });
+          }}
+          onAbort={abortActive}
+        />
+      ) : state.inquiry ? (
+        <InquiryPrompt
+          inquiry={state.inquiry}
+          onAnswer={(answer) => {
+            resolveInquiry(state.inquiry!.inquiryId, answer);
+            dispatch({ type: 'INQUIRY_CLEAR' });
           }}
           onAbort={abortActive}
         />

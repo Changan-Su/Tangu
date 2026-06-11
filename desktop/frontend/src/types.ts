@@ -46,6 +46,8 @@ export interface AgentConfig {
   execMode?: 'sandbox' | 'host'
   cwd?: string
   approvalMode?: 'readonly' | 'auto-edit' | 'full-auto'
+  /** 计划模式(类 Claude plan mode):只读工具集,agent 经 exit_plan_mode 提交计划求批准。 */
+  planMode?: boolean
 }
 
 export interface MessageRecord {
@@ -90,8 +92,8 @@ export interface SkillInfo {
   description: string
   icon: string | null
   category: string | null
-  /** local=本机磁盘技能;user=本人上传的云端技能;cloud/缺省=全局云端技能。 */
-  source?: 'local' | 'user' | 'cloud'
+  /** local=Tangu 本地;claude/codex=实时识别的外部生态;user=本人已上云;cloud/缺省=全局云端。 */
+  source?: 'local' | 'claude' | 'codex' | 'user' | 'cloud'
 }
 
 export interface ToolsResponse {
@@ -186,6 +188,16 @@ export interface ApprovalRequest {
   status: 'pending' | 'approved' | 'rejected' | 'expired'
 }
 
+/** ask_user / exit_plan_mode 的询问(机制同审批;answer 为自由文本)。 */
+export interface InquiryRequest {
+  inquiryId: string
+  runId: string
+  question: string
+  options: string[]
+  status: 'pending' | 'answered' | 'expired'
+  answer?: string
+}
+
 export interface UiMessage {
   id: string
   role: 'user' | 'assistant'
@@ -193,6 +205,9 @@ export interface UiMessage {
   reasoning?: string
   toolEvents?: ToolEvent[]
   approvals?: ApprovalRequest[]
+  inquiries?: InquiryRequest[]
+  /** 计划模式下 agent 提交的计划(plan 事件;渲染为计划卡)。 */
+  planProposal?: string
   attachments?: Attachment[]
   status?: 'streaming' | 'done' | 'error'
   error?: string

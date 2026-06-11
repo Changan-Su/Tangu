@@ -7,12 +7,14 @@ import { Markdown } from './Markdown'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCallCard } from './ToolCallCard'
 import { ApprovalCard } from './ApprovalCard'
+import { InquiryCard, PlanCard } from './InquiryCard'
 import { BrandLogo } from './BrandLogo'
 
 export const ChatArea: React.FC<{
   messages: UiMessage[]
   onApproval: (runOwnerMessageId: string, approvalId: string, action: 'approve' | 'approve_always' | 'reject', argsOverride?: Record<string, any>) => void
-}> = ({ messages, onApproval }) => {
+  onInquiry: (runOwnerMessageId: string, inquiryId: string, answer: string) => void
+}> = ({ messages, onApproval, onInquiry }) => {
   const ref = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
 
@@ -68,6 +70,10 @@ export const ChatArea: React.FC<{
                     req={a}
                     onDecide={(action, argsOverride) => onApproval(m.id, a.approvalId, action, argsOverride)}
                   />
+                ))}
+                {m.planProposal ? <PlanCard plan={m.planProposal} /> : null}
+                {m.inquiries?.map((q) => (
+                  <InquiryCard key={q.inquiryId} req={q} onAnswer={(answer) => onInquiry(m.id, q.inquiryId, answer)} />
                 ))}
                 {m.content ? (
                   <div className={`msg-content${m.status === 'streaming' ? ' streaming-caret' : ''}`}>

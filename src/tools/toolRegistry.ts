@@ -25,6 +25,19 @@ export interface ToolProvider {
 const providers: ToolProvider[] = [];
 const providerIndex = new Map<string, number>();
 
+/**
+ * 计划模式白名单:只读探查 + 规划辅助。写文件/跑命令/沙箱执行/记忆写入一律不可见;
+ * custom/MCP 工具(外部副作用不可知)由 agentLoop 在 planMode 下整体跳过。
+ * delegate 可用:子代理继承 planMode(subAgent 透传 ctx),同样只读。
+ */
+const PLAN_MODE_TOOLS = new Set([
+  'get_datetime', 'calculator', 'web_search', 'web_fetch',
+  'search_files', 'glob_files', 'list_files', 'read_file', 'list_dir',
+  'read_log', 'use_skill', 'todo_write', 'todo_read',
+  'list_processes', 'read_process_output',
+  'delegate', 'ask_user', 'exit_plan_mode',
+]);
+
 /** 注册一个 provider。同 id 幂等覆盖(保持原位置,热加载安全)。 */
 export function registerToolProvider(p: ToolProvider): void {
   const i = providerIndex.get(p.id);
@@ -57,6 +70,7 @@ export function resolveTools(profile: AppProfile, ctx: ToolContext): Map<string,
     const m = t.mode || 'both';
     if (host && m === 'sandbox') return;
     if (!host && m === 'host') return;
+    if (ctx.planMode && !PLAN_MODE_TOOLS.has(t.name)) return; // 计划模式:只读集中过滤
     if (isBuiltin && builtins !== 'all' && !builtins.includes(t.name)) return;
     if (t.isEnabledFor && !t.isEnabledFor(profile, ctx)) return;
     out.set(t.name, t);

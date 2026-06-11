@@ -19,6 +19,7 @@ import { webFetchProvider } from './builtin/webFetch.js';
 import { todoProvider } from './builtin/todo.js';
 import { hostProcessProvider } from './builtin/hostProcess.js';
 import { delegateProvider } from './builtin/delegate.js';
+import { interactionProvider } from './builtin/interaction.js';
 import type { ToolContext, ToolResult, ToolImpl } from './toolTypes.js';
 
 // 类型 re-export:保持既有 `from './registry.js'` 的 import 路径不变。
@@ -44,6 +45,7 @@ registerToolProvider(webFetchProvider);
 registerToolProvider(todoProvider);
 registerToolProvider(hostProcessProvider);
 registerToolProvider(delegateProvider);
+registerToolProvider(interactionProvider);
 
 /** ctx 自带 profile(loop 按 run.app_id 解析)优先;缺省回退本进程装配的 profile。 */
 function currentProfile(ctx: ToolContext) {

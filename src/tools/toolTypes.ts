@@ -29,6 +29,8 @@ export interface ToolContext {
   profile?: AppProfile;
   /** delegate 子代理深度(0/缺省=主 loop,1=子代理内)。深度 ≥1 时 delegate 工具不可见,防递归裂变。 */
   subAgentDepth?: number;
+  /** 计划模式(类 Claude plan mode):只暴露只读工具 + exit_plan_mode;custom/MCP 工具一并隐藏。 */
+  planMode?: boolean;
   /** 本次 run 的模型 id(delegate 子代理沿用父模型)。 */
   modelId?: string;
 }

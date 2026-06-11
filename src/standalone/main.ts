@@ -17,8 +17,10 @@ import { loadCreds } from './credStore.js';
 import { loadOAuthDirectProviders } from '../llm/providerOAuth.js';
 import { resolveSandboxMode, setupHost, buildBrain, fixLegacyAppIds } from './assemble.js';
 import { createMcpManager } from '../mcp/manager.js';
+import { loadTanguEnv } from '../core/tanguHome.js';
 
 async function main(): Promise<void> {
+  loadTanguEnv(); // ~/.tangu/.env → process.env(不覆盖真实环境);须先于 parseConfig
   const cfg = parseConfig(process.argv.slice(2));
   if (cfg.showHelp) { process.stdout.write(HELP); return; }
   // 未显式给 token / cloud-url → 复用 `tangu-chat login` 存的凭证。

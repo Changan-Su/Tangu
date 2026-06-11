@@ -48,6 +48,13 @@ export interface PendingApproval {
   preview: string;
 }
 
+/** ask_user / exit_plan_mode 的待答询问(机制同审批,answer 为自由文本)。 */
+export interface PendingInquiry {
+  inquiryId: string;
+  question: string;
+  options: string[];
+}
+
 export interface RunStatus {
   state: 'idle' | 'queued' | 'running' | 'generating';
   iteration: number;
@@ -62,6 +69,7 @@ export interface UiState {
   status: RunStatus;
   usage: { total: number; cost: number; cached: number };
   approval: PendingApproval | null;
+  inquiry: PendingInquiry | null;
 }
 
 export type UiAction =
@@ -77,6 +85,8 @@ export type UiAction =
   | { type: 'STATUS'; state?: RunStatus['state']; iteration?: number; phase?: string }
   | { type: 'APPROVAL'; approval: PendingApproval }
   | { type: 'APPROVAL_CLEAR' }
+  | { type: 'INQUIRY'; inquiry: PendingInquiry }
+  | { type: 'INQUIRY_CLEAR' }
   | { type: 'DONE' }
   | { type: 'ERROR'; msg: string; aborted?: boolean }
   | { type: 'CLEAR_ITEMS' }

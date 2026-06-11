@@ -18,11 +18,13 @@ import { resolveSandboxMode, setupHost, buildBrain, fixLegacyAppIds } from '../s
 import { loginFlow } from '../cli/login.js';
 import { OAUTH_PROVIDERS, providerOAuthLogin, loadOAuthDirectProviders } from '../llm/providerOAuth.js';
 import { createMcpManager } from '../mcp/manager.js';
+import { loadTanguEnv } from '../core/tanguHome.js';
 import { parseTuiConfig, TUI_HELP } from './config.js';
 import { printBanner } from './components/Banner.js';
 import { App } from './app.js';
 
 async function main(): Promise<void> {
+  loadTanguEnv(); // ~/.tangu/.env → process.env(不覆盖真实环境);须先于 parseTuiConfig
   const cfg = parseTuiConfig(process.argv.slice(2));
   if (cfg.showHelp) {
     process.stdout.write(TUI_HELP);

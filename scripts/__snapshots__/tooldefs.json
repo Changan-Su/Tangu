@@ -1550,6 +1550,32 @@
           ]
         }
       }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ask_user",
+        "description": "向用户提一个问题并等待回答(可附候选项,用户也可自由输入)。只在**真正需要用户决策**时用:需求有歧义、多个合理方案需取舍、操作影响面大需确认。能从上下文/代码推断的不要问。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "description": "完整的问题(以问号结尾,给足上下文)"
+            },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "候选项(可空;最多 6 个,每项一句话;推荐项放第一个)"
+            }
+          },
+          "required": [
+            "question"
+          ]
+        }
+      }
     }
   ],
   "tangu-docker:sandbox+skills": [
@@ -1931,6 +1957,32 @@
           },
           "required": [
             "task"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ask_user",
+        "description": "向用户提一个问题并等待回答(可附候选项,用户也可自由输入)。只在**真正需要用户决策**时用:需求有歧义、多个合理方案需取舍、操作影响面大需确认。能从上下文/代码推断的不要问。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "description": "完整的问题(以问号结尾,给足上下文)"
+            },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "候选项(可空;最多 6 个,每项一句话;推荐项放第一个)"
+            }
+          },
+          "required": [
+            "question"
           ]
         }
       }
@@ -2421,6 +2473,32 @@
           },
           "required": [
             "task"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ask_user",
+        "description": "向用户提一个问题并等待回答(可附候选项,用户也可自由输入)。只在**真正需要用户决策**时用:需求有歧义、多个合理方案需取舍、操作影响面大需确认。能从上下文/代码推断的不要问。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "description": "完整的问题(以问号结尾,给足上下文)"
+            },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "候选项(可空;最多 6 个,每项一句话;推荐项放第一个)"
+            }
+          },
+          "required": [
+            "question"
           ]
         }
       }
@@ -2933,6 +3011,32 @@
           ]
         }
       }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ask_user",
+        "description": "向用户提一个问题并等待回答(可附候选项,用户也可自由输入)。只在**真正需要用户决策**时用:需求有歧义、多个合理方案需取舍、操作影响面大需确认。能从上下文/代码推断的不要问。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "description": "完整的问题(以问号结尾,给足上下文)"
+            },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "候选项(可空;最多 6 个,每项一句话;推荐项放第一个)"
+            }
+          },
+          "required": [
+            "question"
+          ]
+        }
+      }
     }
   ],
   "tangu-none:sandbox": [
@@ -3254,6 +3358,32 @@
           },
           "required": [
             "task"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ask_user",
+        "description": "向用户提一个问题并等待回答(可附候选项,用户也可自由输入)。只在**真正需要用户决策**时用:需求有歧义、多个合理方案需取舍、操作影响面大需确认。能从上下文/代码推断的不要问。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "description": "完整的问题(以问号结尾,给足上下文)"
+            },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "候选项(可空;最多 6 个,每项一句话;推荐项放第一个)"
+            }
+          },
+          "required": [
+            "question"
           ]
         }
       }
@@ -3597,6 +3727,32 @@
           },
           "required": [
             "task"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ask_user",
+        "description": "向用户提一个问题并等待回答(可附候选项,用户也可自由输入)。只在**真正需要用户决策**时用:需求有歧义、多个合理方案需取舍、操作影响面大需确认。能从上下文/代码推断的不要问。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "description": "完整的问题(以问号结尾,给足上下文)"
+            },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "候选项(可空;最多 6 个,每项一句话;推荐项放第一个)"
+            }
+          },
+          "required": [
+            "question"
           ]
         }
       }
@@ -4087,6 +4243,32 @@
           },
           "required": [
             "task"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ask_user",
+        "description": "向用户提一个问题并等待回答(可附候选项,用户也可自由输入)。只在**真正需要用户决策**时用:需求有歧义、多个合理方案需取舍、操作影响面大需确认。能从上下文/代码推断的不要问。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "description": "完整的问题(以问号结尾,给足上下文)"
+            },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "候选项(可空;最多 6 个,每项一句话;推荐项放第一个)"
+            }
+          },
+          "required": [
+            "question"
           ]
         }
       }
@@ -4596,6 +4778,32 @@
           },
           "required": [
             "task"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ask_user",
+        "description": "向用户提一个问题并等待回答(可附候选项,用户也可自由输入)。只在**真正需要用户决策**时用:需求有歧义、多个合理方案需取舍、操作影响面大需确认。能从上下文/代码推断的不要问。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "description": "完整的问题(以问号结尾,给足上下文)"
+            },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "候选项(可空;最多 6 个,每项一句话;推荐项放第一个)"
+            }
+          },
+          "required": [
+            "question"
           ]
         }
       }

@@ -19,9 +19,10 @@ export function createLocalAssets(inner: AssetsBrain): AssetsBrain {
         listLocalSkills().catch(() => []),
         inner.listSkills ? inner.listSkills(filter).catch(() => []) : Promise.resolve([]),
       ]);
-      // 本地在前(桌面技能面板置顶);id 冲突理论上不可能(local: 前缀),仍按 id 去重保险
+      // 本地在前(桌面技能面板置顶);id 冲突理论上不可能(local: 前缀),仍按 id 去重保险。
+      // source 来自 localSkills(local/claude/codex 来源徽标),缺省兜底 'local'。
       const byId = new Map<string, any>();
-      for (const s of local) byId.set(s.id, { ...s, source: 'local' });
+      for (const s of local) byId.set(s.id, { source: 'local', ...s });
       for (const s of cloud as any[]) if (!byId.has(s.id)) byId.set(s.id, s);
       return [...byId.values()];
     },
