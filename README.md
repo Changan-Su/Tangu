@@ -31,8 +31,8 @@ Tangu = **Agent Core 运行时 + 一套 App 适配规范 + 一个云端共享大
 | 形态 | 入口 | host | brain | billing | 用途 |
 |---|---|---|---|---|---|
 | **microserver**(进程内) | Forsion `server/microserver/agent-core` | Forsion 进程内 | `forsionSeams`(直连) | 真实计费 | 与 AI Studio 等部署在一起,云端多租户 |
-| **TUI / CLI**(终端 agent) | `dist/tui/main.js`(`tangu`) | `embeddedHost`(PGlite,**零安装**) | `httpBrain` | noop | 成熟终端 agent(Ink,hermes/codex 形);进程内跑 loop、**无端口**;**host-exec** 直接操作本机 FS/shell + 三档审批;Markdown/工具卡片/状态栏/slash 命令 |
-| **standalone**(server/云端大脑客户端) | `dist/standalone/main.js`(`tangu-server`) | `embeddedHost`(PGlite,**零安装**)/ `localHost`(外部 PG) | `httpBrain`(→ brain-api) | noop | headless HTTP/SSE 服务,给 desktop / 远程 / 脚本用;可 BYO-key 直连 LLM |
+| **TUI / CLI**(终端 agent) | `dist/tui/main.js`(`tangu`) | `sqliteHost`(SQLite/WAL,**零安装**) | `httpBrain` | noop | 成熟终端 agent(Ink,hermes/codex 形);进程内跑 loop、**无端口**;**host-exec** 直接操作本机 FS/shell + 三档审批;Markdown/工具卡片/状态栏/slash 命令 |
+| **standalone**(server/云端大脑客户端) | `dist/standalone/main.js`(`tangu-server`) | `sqliteHost`(SQLite/WAL,**零安装**)/ `localHost`(外部 PG) | `httpBrain`(→ brain-api) | noop | headless HTTP/SSE 服务,给 desktop / 远程 / 脚本用;可 BYO-key 直连 LLM |
 | **worker**(分离式云节点) | `dist/worker/main.js`(`tangu-worker`) | `cloudWorkerHost`(共享云库 + JWT 多用户) | `httpBrain`(per-user token) | noop(计费收口云端) | 多机横向扩展,支撑大规模在线 agent 服务 |
 | **desktop**(GUI) | `desktop/`(Electron) | — | renderer 直连 standalone HTTP/SSE | — | 本地桌面客户端(壳) |
 
@@ -127,7 +127,7 @@ tangu --model xai/grok-2     # 用你的 xAI 账号当 LLM(api.x.ai/v1,直连不
 
 ### standalone(server / 云端大脑客户端)
 
-只需一个能连到 Forsion 云端(brain-api)的 `forsion_token`。**数据库零安装**——默认用嵌入式 PGlite(进程内真 Postgres,落 `~/.tangu/pgdata`),不需要装/起任何 Postgres。
+只需一个能连到 Forsion 云端(brain-api)的 `forsion_token`。**数据库零安装**——默认用嵌入式 **SQLite(WAL 模式)**,落单文件 `~/.tangu/state.db`,不需要装/起任何 Postgres。
 
 ```bash
 node dist/standalone/main.js \
@@ -137,9 +137,11 @@ node dist/standalone/main.js \
 # 或:npm run standalone   (参数走环境变量,见 --help)
 ```
 
-- run/会话/事件态落本地嵌入式库:默认 `~/.tangu/pgdata`;`--data-dir memory` = 纯内存(退出即丢);`--data-dir <path>` 自定义。
-- 想接外部 Postgres(共享/已有库)→ 加 `--db postgres://…`,自动改走外部库。
-- 大脑(记忆/技能/LLM)始终在云端 brain-api,不落本地。
+- run/会话/事件态落本地 SQLite:默认 `~/.tangu/state.db`;`--data-dir memory` = 纯内存(退出即丢);`--data-dir <path>` 自定义文件。
+- **本地会话共享**:`tangu`(TUI)与本机的 standalone(含 Desktop 内置后端)默认同指 `~/.tangu/state.db`,SQLite WAL「一写多读、多进程共享」→ 两端会话/历史互通。想要各自独立库就给不同的 `--data-dir`。
+- 想接外部 Postgres(共享/已有库)→ 加 `--db postgres://…`,自动改走外部库(多机/跨设备共享会话用这个)。
+- 大脑(记忆/技能/LLM)始终在云端 brain-api,不落本地 → 跨设备本就一致。
+- 回退:`TANGU_EMBED=pglite` 仍可用旧 PGlite(单进程,不与他端共享),仅排障/回滚用。
 
 **LLM 多 provider(可选,BYO-key 直连)**——Forsion 只是其中一个托管 provider:
 
@@ -165,25 +167,38 @@ node dist/worker/main.js \
   --port 8790 --sandbox auto
 ```
 
-然后让 Forsion server 以 fleet 模式把 `/api/agent/*` 按 session 亲和转发到 worker 集群:
+然后在 **Forsion admin 面板「实例管理」** 注册 worker 实例,server 即按 session 亲和把 `/api/agent/*` 转发过去:
 
-```bash
-# Forsion server 侧环境变量
-AGENT_DISPATCH_MODE=fleet
-TANGU_WORKERS=http://w1:8790,http://w2:8790
+```
+Forsion admin → 实例管理(/api/admin/agent-core/workers)→ 增删改 worker URL + 测试连通
 ```
 
-### microserver(由 Forsion server 自动挂载)
+> ⚠️ 自 2026-06-10 起 server **恒为调度网关**(不再进程内跑 loop):`AGENT_DISPATCH_MODE` 已移除,
+> 实例改由 `agent_workers` 表 + admin 面板管理(DB 粘滞 pin 保 session 亲和,15s /health 探测)。
+> `TANGU_WORKERS=csv` 仅在表为空时**一次性 seed**,之后不再生效。
+
+### microserver(由 Forsion server 自动挂载,**纯调度网关**)
 
 无需单独启动——`server/microserver/agent-core` 被 Forsion 的 `mountMicroBackends` 自动发现并挂在 `/api/agent/*`。
 启动 Forsion server(`npm run server:dev`)即生效。
 
+> **它不跑 agent loop**,而是把请求按 session 亲和转发给上面注册的 **worker** 实例(网关 + 执行器是一对)。
+> 故云端生产形态 = microserver(网关)+ ≥1 个 worker;**未注册任何 worker 时返回 503 `NO_AGENT_WORKERS`**。
+
 ### desktop(本地 GUI)
+
+Desktop 是 GUI 壳,经 HTTP/SSE 连一个 standalone 后端(**不是连 TUI**),两种模式:
+
+- **managed**(内置):自己 spawn 一个 tangu-server 子进程(动态端口),`--data-dir` 默认 `~/.tangu/state.db` → 与 TUI 共享会话。
+- **external**:连一个你已起好的 standalone(默认 `127.0.0.1:8787`)。
 
 ```bash
 npm run desktop:install
-npm run desktop:dev     # 需先起一个 standalone 服务(默认连 127.0.0.1:8787)
+npm run desktop:dev     # external 模式需先起一个 standalone;managed 模式自带后端(dev 用系统 node 跑)
 ```
+
+> better-sqlite3 是原生模块:**managed 打包态**需为 Electron ABI 重建(已配 `build/afterPack.cjs`);
+> **dev 用系统 node 跑后端**(免 rebuild);**external 模式**连系统-node 起的 standalone 同样即刻共享。
 
 ---
 

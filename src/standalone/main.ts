@@ -2,10 +2,10 @@
 /**
  * Tangu standalone 入口(**server 前端**:headless HTTP/SSE 服务)。
  * /health 带 version/startedAt:桌面端/运维据此识别「dist 已重建但旧进程还在跑」。
- *   parseConfig → setupHost(嵌入式 PGlite / 外部 PG)+ base schema + runMigration
+ *   parseConfig → setupHost(嵌入式 SQLite/WAL / 外部 PG)+ base schema + runMigration
  *   → 装配 deps(host/brain/noopBilling)→ createTanguModule → mount(/agent/*) → listen。
  * run 接口与 microserver 同契约:POST /agent/runs、SSE GET /agent/runs/:id/events。
- * 终端交互前端见 cli/main.ts(`tangu chat`);二者共用 standalone/assemble.ts 的装配。
+ * 终端交互前端见 tui/main.tsx(`tangu`);二者共用 standalone/assemble.ts 的装配。
  */
 import express from 'express';
 import { readFileSync } from 'node:fs';

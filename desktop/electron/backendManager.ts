@@ -132,10 +132,19 @@ export class BackendManager {
       if (s.cloudUrl) args.push('--cloud-url', s.cloudUrl)
       if (s.modelId) args.push('--model', s.modelId)
 
-      const env: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+      // better-sqlite3 是原生模块,ABI 必须匹配运行时:
+      //  - 打包:无系统 Node 保证 → 用 Electron(process.execPath)+ELECTRON_RUN_AS_NODE 跑,
+      //    bundled better-sqlite3 已由 build/afterPack.cjs 为 Electron ABI 重建。
+      //  - dev:终端必有系统 Node → 直接用系统 node(匹配 ../node_modules 的系统 ABI 预编译
+      //    二进制),省去 dev 也要 electron-rebuild。TANGU_NODE_BIN 可覆盖 node 路径。
+      const useSystemNode = !app.isPackaged
+      const cmd = useSystemNode ? (process.env.TANGU_NODE_BIN || 'node') : process.execPath
+      const env: NodeJS.ProcessEnv = { ...process.env }
+      if (!useSystemNode) env.ELECTRON_RUN_AS_NODE = '1'
+      else delete env.ELECTRON_RUN_AS_NODE
       // 凭证走 env,不出现在 ps 输出;留空让子进程回退 ~/.tangu/auth.json(tangu login)。
       if (this.token) env.TANGU_TOKEN = this.token
-      const child = spawn(process.execPath, args, {
+      const child = spawn(cmd, args, {
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
