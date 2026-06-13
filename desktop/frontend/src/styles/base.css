@@ -148,6 +148,51 @@ a:hover { color: var(--accent-hover); }
 }
 .new-chat-btn:hover { background: var(--accent-light); border-color: var(--accent); color: var(--accent-hover); }
 
+/* 工作区分组(Cloud / Tangu 默认 / 本地项目) */
+.ws-group-head { display: flex; align-items: center; padding: 2px 8px 0; }
+.ws-group-toggle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 6px;
+  border-radius: var(--radius-md);
+  text-align: left;
+  transition: background var(--duration-fast);
+}
+.ws-group-toggle:hover { background: var(--overlay-light); }
+.ws-group-toggle .session-emoji { width: 14px; }
+.ws-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-name svg { flex-shrink: 0; }
+.ws-add { width: 24px; height: 24px; opacity: 0; flex-shrink: 0; }
+.ws-group-head:hover .ws-add { opacity: 1; }
+.ws-add-workspace {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: calc(100% - 16px);
+  margin: 8px 8px 4px;
+  padding: 6px 9px;
+  border: var(--border-width) dashed var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  transition: background var(--duration-fast), border-color var(--duration-fast), color var(--duration-fast);
+}
+.ws-add-workspace:hover { border-color: var(--accent); color: var(--accent-hover); background: var(--accent-light); }
+
 .session-list { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 .session-item {
   position: relative;

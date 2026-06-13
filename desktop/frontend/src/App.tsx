@@ -4,8 +4,9 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
-  AgentConfig, AgentRunEvent, Attachment, ModelsResponse, SessionRecord, SkillInfo, TanguDesktopConfig, UiMessage,
+  AgentConfig, AgentRunEvent, Attachment, ModelsResponse, SessionRecord, SkillInfo, TanguDesktopConfig, UiMessage, WorkspaceDescriptor,
 } from './types'
+import { CLOUD_WORKSPACE_KEY } from './types'
 import * as api from './services/backendService'
 import { abortRun, listActiveRuns, resolveApproval, resolveInquiry, startRun, subscribeRunEvents, testConnection } from './services/agentRunService'
 import { Sidebar } from './components/Sidebar'
@@ -14,7 +15,6 @@ import { ChatArea } from './components/ChatArea'
 import { MessageInput } from './components/MessageInput'
 import { SettingsModal } from './components/SettingsModal'
 import { RightPanel } from './components/RightPanel'
-import { ProjectPicker, type ProjectChoice } from './components/ProjectPicker'
 import { OnboardingWizard, ONBOARDING_DISMISS_KEY } from './components/OnboardingWizard'
 import { resolveInitialMode, resolveInitialPreset } from './theme/registry'
 
@@ -67,6 +67,9 @@ export function App(): React.JSX.Element {
   // managed(本机托管)后端 → 新会话默认本机执行(与 TUI 对齐);homeDir 作 cwd 兜底。
   const desktopMode = useRef<'managed' | 'external' | null>(null)
   const homeDirRef = useRef<string | undefined>(undefined)
+  // 「Tangu 默认工作区」本地目录(effectiveConfig 折算的 ~/Tangu;设置里可改)。
+  const defaultWsDirRef = useRef<string>('')
+  const [defaultWsDir, setDefaultWsDir] = useState('')
 
   const [sessions, setSessions] = useState<SessionRecord[]>([])
   const [archivedSessions, setArchivedSessions] = useState<SessionRecord[]>([])
@@ -81,7 +84,6 @@ export function App(): React.JSX.Element {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [rightOpen, setRightOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [projectPickerOpen, setProjectPickerOpen] = useState(false)
   const [onboarding, setOnboarding] = useState(false)
   const [themePreset, setThemePreset] = useState(resolveInitialPreset)
   const [themeMode, setThemeMode] = useState<'light' | 'dark'>(resolveInitialMode)
@@ -296,6 +298,8 @@ export function App(): React.JSX.Element {
       const stored = await window.tangu?.getConfig()
       desktopMode.current = stored?.mode ?? null
       homeDirRef.current = stored?.homeDir
+      defaultWsDirRef.current = stored?.defaultWorkspaceDir || ''
+      setDefaultWsDir(stored?.defaultWorkspaceDir || '')
       const merged = {
         backendUrl: stored?.backendUrl || cfgRef.current.backendUrl,
         token: stored?.token ?? cfgRef.current.token,
@@ -386,56 +390,74 @@ export function App(): React.JSX.Element {
     })()
   }, [activeId, connState, subscribeRun, toast])
 
-  // ── 会话操作 ──
-  /** managed(本机托管)后端的新会话默认本机执行,cwd=主目录——与 TUI host 模式对齐。 */
-  const defaultSessionConfig = useCallback((): AgentConfig => {
-    if (desktopMode.current === 'managed' && homeDirRef.current) {
-      return { execMode: 'host', approvalMode: 'auto-edit', cwd: homeDirRef.current }
-    }
-    return {}
-  }, [])
+  // ── 工作区 / 会话操作 ──
+  /** 默认本地工作区(Tangu 默认工作区;cwd=defaultWsDir,空时回退主目录)。 */
+  const defaultWorkspace = useCallback((): WorkspaceDescriptor => ({
+    key: defaultWsDirRef.current || '__default_ws__',
+    name: 'Tangu 默认工作区',
+    kind: 'local',
+    path: defaultWsDirRef.current || homeDirRef.current || null,
+  }), [])
 
-  /** 实际创建会话(可带项目)。项目会话:host 模式 + cwd=项目目录 + 自动编辑审批档。 */
-  const createSessionWith = useCallback(async (choice: ProjectChoice | null) => {
+  /** 工作区列表:Cloud + Tangu 默认 常驻(空也在),再并入会话出现过的其它本地目录。 */
+  const workspaces = useMemo<WorkspaceDescriptor[]>(() => {
+    const defPath = defaultWsDir || homeDirRef.current || null
+    const list: WorkspaceDescriptor[] = [
+      { key: CLOUD_WORKSPACE_KEY, name: 'Cloud 工作区', kind: 'cloud', path: null },
+      { key: defaultWsDir || '__default_ws__', name: 'Tangu 默认工作区', kind: 'local', path: defPath },
+    ]
+    const seen = new Set<string>([CLOUD_WORKSPACE_KEY, defaultWsDir || '__default_ws__'])
+    for (const s of [...sessions, ...archivedSessions]) {
+      if (s.project_path && s.project_path !== defPath && !seen.has(s.project_path)) {
+        seen.add(s.project_path)
+        list.push({
+          key: s.project_path,
+          name: s.project_name || s.project_path.split('/').filter(Boolean).pop() || '工作区',
+          kind: 'local',
+          path: s.project_path,
+        })
+      }
+    }
+    return list
+  }, [sessions, archivedSessions, defaultWsDir])
+
+  /** 在工作区下新建会话:cloud→云沙箱;本地→host + cwd=工作区目录 + 自动编辑审批档。 */
+  const createInWorkspace = useCallback(async (ws: WorkspaceDescriptor) => {
     try {
-      const s = await api.createSession(cfgRef.current, choice?.path
-        ? { project_path: choice.path, project_name: choice.name || undefined }
+      const path = ws.kind === 'local' ? (ws.path || defaultWsDirRef.current || homeDirRef.current || null) : null
+      const s = await api.createSession(cfgRef.current, path
+        ? { project_path: path, project_name: ws.name }
         : undefined)
       setSessions((prev) => [s, ...prev])
       setActiveId(s.id)
       loadedHistory.current.add(s.id)
       setMessagesBySession((prev) => ({ ...prev, [s.id]: [] }))
-      const init: AgentConfig = choice?.path
-        ? { execMode: 'host', approvalMode: 'auto-edit', cwd: choice.path }
-        : defaultSessionConfig()
-      if (Object.keys(init).length) {
-        setConfigBySession((prev) => ({ ...prev, [s.id]: init }))
-        void api.putSessionConfig(cfgRef.current, s.id, init).catch(() => {})
-      }
+      const init: AgentConfig = path
+        ? { execMode: 'host', approvalMode: 'auto-edit', cwd: path }
+        : { execMode: 'sandbox' }
+      setConfigBySession((prev) => ({ ...prev, [s.id]: init }))
+      void api.putSessionConfig(cfgRef.current, s.id, init).catch(() => {})
     } catch (e: any) {
       toast(`新建失败:${e?.message || e}`, true)
     }
-  }, [toast, defaultSessionConfig])
+  }, [toast])
 
-  /** 新建入口:本机托管模式弹项目选择(Codex 式);external/云后端直接建(平铺)。 */
-  const newSession = useCallback(async () => {
-    if (desktopMode.current === 'managed') {
-      setProjectPickerOpen(true)
-      return
-    }
-    await createSessionWith(null)
-  }, [createSessionWith])
+  /** 新建会话(默认进 Tangu 默认工作区;Ctrl/Cmd+N 与输入栏 /new 用)。 */
+  const newSession = useCallback(() => {
+    void createInWorkspace(defaultWorkspace())
+  }, [createInWorkspace, defaultWorkspace])
 
-  /** 最近项目(活跃+归档会话的 distinct project_path,按 updated_at 新→旧)。 */
-  const recentProjects = useMemo(() => {
-    const seen = new Map<string, string>()
-    for (const s of [...sessions, ...archivedSessions]) {
-      if (s.project_path && !seen.has(s.project_path)) {
-        seen.set(s.project_path, s.project_name || s.project_path.split('/').filter(Boolean).pop() || s.project_path)
-      }
-    }
-    return [...seen.entries()].slice(0, 8).map(([path, name]) => ({ path, name }))
-  }, [sessions, archivedSessions])
+  /** 浏览文件夹新增本地工作区(选目录 → 直接在其中建会话)。 */
+  const addLocalWorkspace = useCallback(async () => {
+    const dir = await window.tangu?.pickDirectory?.()
+    if (!dir) return
+    await createInWorkspace({
+      key: dir,
+      name: dir.split('/').filter(Boolean).pop() || dir,
+      kind: 'local',
+      path: dir,
+    })
+  }, [createInWorkspace])
 
   const renameSession = useCallback(async (id: string, title: string) => {
     setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title } : s)))
@@ -474,7 +496,11 @@ export function App(): React.JSX.Element {
     let sid = activeIdRef.current
     let implicitInit: AgentConfig | null = null
     if (!sid) {
-      const s = await api.createSession(cfgRef.current).catch(() => null)
+      // 无会话直接发送:落进 Tangu 默认工作区(managed)或云沙箱(其余)。
+      const path = desktopMode.current === 'managed' ? (defaultWsDirRef.current || homeDirRef.current || null) : null
+      const s = await api.createSession(cfgRef.current, path
+        ? { project_path: path, project_name: 'Tangu 默认工作区' }
+        : undefined).catch(() => null)
       if (!s) {
         toast('无法创建会话', true)
         return false
@@ -483,11 +509,9 @@ export function App(): React.JSX.Element {
       setActiveId(s.id)
       loadedHistory.current.add(s.id)
       sid = s.id
-      implicitInit = defaultSessionConfig()
-      if (Object.keys(implicitInit).length) {
-        setConfigBySession((prev) => ({ ...prev, [s.id]: implicitInit! }))
-        void api.putSessionConfig(cfgRef.current, s.id, implicitInit).catch(() => {})
-      }
+      implicitInit = path ? { execMode: 'host', approvalMode: 'auto-edit', cwd: path } : { execMode: 'sandbox' }
+      setConfigBySession((prev) => ({ ...prev, [s.id]: implicitInit! }))
+      void api.putSessionConfig(cfgRef.current, s.id, implicitInit).catch(() => {})
     }
     const sessionId = sid
     const agentConfig = { ...(implicitInit || configBySession[sessionId] || {}) }
@@ -681,7 +705,9 @@ export function App(): React.JSX.Element {
         runningIds={runningIds}
         unreadIds={unread}
         onSelect={setActiveId}
-        onNew={() => void newSession()}
+        workspaces={workspaces}
+        onNewInWorkspace={(ws) => void createInWorkspace(ws)}
+        onAddWorkspace={() => void addLocalWorkspace()}
         onRename={(id, t) => void renameSession(id, t)}
         onArchive={(id, a) => void archiveSession(id, a)}
         onDelete={(id) => void deleteSession(id)}
@@ -731,7 +757,6 @@ export function App(): React.JSX.Element {
                   disabled={connState !== 'ok'}
                   running={running}
                   execConfig={execConfig}
-                  homeDir={homeDirRef.current}
                   models={modelsResp?.models ?? null}
                   modelId={activeSession?.model_id || cfg.modelId || modelsResp?.defaultModelId || ''}
                   onModelChange={setSessionModel}
@@ -767,23 +792,21 @@ export function App(): React.JSX.Element {
         </div>
       </main>
 
-      <ProjectPicker
-        open={projectPickerOpen}
-        recents={recentProjects}
-        onClose={() => setProjectPickerOpen(false)}
-        onChoose={(c) => {
-          setProjectPickerOpen(false)
-          void createSessionWith(c)
-        }}
-      />
-
       <SettingsModal
         open={settingsOpen}
         cfg={cfg}
         themePreset={themePreset}
         themeMode={themeMode}
         glassOn={glassOn}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => {
+          setSettingsOpen(false)
+          // 设置里可能改了默认工作区目录 → 重读折算值,刷新侧栏工作区。
+          void window.tangu?.getConfig().then((c) => {
+            homeDirRef.current = c.homeDir
+            defaultWsDirRef.current = c.defaultWorkspaceDir || ''
+            setDefaultWsDir(c.defaultWorkspaceDir || '')
+          })
+        }}
         onConfigChange={patchConfig}
         onThemeChange={(preset, mode) => {
           setThemePreset(preset)

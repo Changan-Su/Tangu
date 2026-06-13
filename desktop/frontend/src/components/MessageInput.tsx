@@ -6,7 +6,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Send, Square, Plus, Mic, ImagePlus, X, Monitor, Cloud, FolderOpen, Brain, ClipboardList, Check, ChevronDown,
+  Send, Square, Plus, Mic, ImagePlus, X, Brain, ClipboardList, Check, ChevronDown,
 } from 'lucide-react'
 import type { AgentConfig, Attachment, ModelInfo, SkillInfo } from '../types'
 
@@ -18,22 +18,12 @@ interface SlashItem {
 }
 
 /** 框外控制排当前打开的弹出菜单。 */
-type OpenMenu = 'add' | 'context' | 'mode' | 'model' | null
+type OpenMenu = 'add' | 'mode' | 'model' | null
 
 const MAX_ATTACH_BYTES = 5 * 1024 * 1024
 // 客户端输入帽(服务端 runs.ts 还有一道):大段材料整体粘贴会让 agent 每轮迭代全量重发,
 // token 消耗 = 消息体量 × 轮数(2026-06-10 的百万 token 事故根因)。
 const MAX_INPUT_CHARS = 150_000
-
-/** 选本机工作目录:Electron 用系统目录对话框,浏览器调试回退手输。 */
-async function pickCwd(current?: string, fallback?: string): Promise<string | null> {
-  if (window.tangu?.pickDirectory) {
-    const dir = await window.tangu.pickDirectory()
-    return dir || current || fallback || null
-  }
-  const v = window.prompt('输入工作目录绝对路径', current || fallback || '')
-  return v?.trim() || null
-}
 
 const approvalLabel = { readonly: '只读·全审批', 'auto-edit': '自动编辑', 'full-auto': '全自动' } as const
 const thinkingLabel = { off: '思考·关', low: '思考·浅', medium: '思考·中', high: '思考·深' } as const
@@ -43,7 +33,6 @@ export const MessageInput: React.FC<{
   disabled: boolean
   running: boolean
   execConfig: Pick<AgentConfig, 'execMode' | 'approvalMode' | 'cwd'>
-  homeDir?: string
   /** 会话内模型/思考深度切换器(models 为 null=未加载,隐藏选择器)。 */
   models?: ModelInfo[] | null
   modelId?: string
@@ -64,7 +53,7 @@ export const MessageInput: React.FC<{
   onSend: (text: string, attachments: Attachment[]) => Promise<boolean>
   onStop: () => void
 }> = ({
-  disabled, running, execConfig, homeDir,
+  disabled, running, execConfig,
   models, modelId, onModelChange, thinkingLevel, onThinkingChange,
   planMode, onPlanModeChange, skills, enabledSkillIds, onToggleSkill, onNewSession, onOpenSettings,
   onExecConfigChange, onSend, onStop,
@@ -212,21 +201,7 @@ export const MessageInput: React.FC<{
     setAttachments((prev) => [...prev, ...next])
   }
 
-  // ── 框外控制:执行环境切换(复用 pickCwd) ──
-  const toSandbox = () => {
-    onExecConfigChange({ execMode: 'sandbox', approvalMode: execConfig.approvalMode, cwd: execConfig.cwd })
-    setOpenMenu(null)
-  }
-  const toHost = (changeDir: boolean) => {
-    void (async () => {
-      const cwd = (changeDir ? await pickCwd(execConfig.cwd, homeDir) : execConfig.cwd)
-        || (await pickCwd(undefined, homeDir))
-        || homeDir
-      if (!cwd) return
-      onExecConfigChange({ execMode: 'host', approvalMode: execConfig.approvalMode || 'auto-edit', cwd })
-    })()
-    setOpenMenu(null)
-  }
+  // ── 框外控制:审批档(执行环境由工作区决定,不在输入栏切换) ──
   const setApproval = (m: NonNullable<AgentConfig['approvalMode']>) => {
     onExecConfigChange({ execMode: 'host', approvalMode: m, cwd: execConfig.cwd })
     setOpenMenu(null)
@@ -238,9 +213,6 @@ export const MessageInput: React.FC<{
   const currentModel = (models || []).find((m) => m.id === modelId)
 
   // chip 文案
-  const ctxLabel = isHost
-    ? (execConfig.cwd ? (execConfig.cwd.split('/').filter(Boolean).pop() || execConfig.cwd) : '本机')
-    : '云沙箱'
   const modeLabel = planMode ? '计划模式' : (isHost ? approvalLabel[approval] : '常规')
   const modelLabel = currentModel?.name || modelId || '选择模型'
   const effortSuffix = thinkingLevel && thinkingLevel !== 'off' ? ` · ${thinkingShort[thinkingLevel]}` : ''
@@ -411,41 +383,8 @@ export const MessageInput: React.FC<{
           </div>
         </div>
 
-        {/* 框外控制排:上下文 / 模式(左)· 模型(右) */}
+        {/* 框外控制排:模式(左)· 模型(右)。执行环境由工作区决定,不在此切换。 */}
         <div className="composer-actions">
-          <span style={{ position: 'relative', display: 'inline-flex' }} data-cmenu>
-            <button
-              className={`composer-chip${isHost ? ' active' : ''}`}
-              title="执行环境:云沙箱(隔离工作区)/ 本机(后端所在机器真实文件系统,需审批)"
-              onClick={() => setOpenMenu((m) => (m === 'context' ? null : 'context'))}
-            >
-              {isHost ? <Monitor size={13} /> : <Cloud size={13} />}
-              <span className="chip-label">{ctxLabel}</span>
-              <ChevronDown size={12} />
-            </button>
-            {openMenu === 'context' && (
-              <div className="composer-menu left">
-                <div className="menu-section">执行环境</div>
-                <button className={`menu-item${!isHost ? ' active' : ''}`} onClick={toSandbox}>
-                  <Cloud size={14} />
-                  <span className="grow">云沙箱</span>
-                  {!isHost && <Check size={13} />}
-                </button>
-                <button className={`menu-item${isHost ? ' active' : ''}`} onClick={() => toHost(false)}>
-                  <Monitor size={14} />
-                  <span className="grow">本机{isHost && execConfig.cwd ? ` · ${ctxLabel}` : ''}</span>
-                  {isHost && <Check size={13} />}
-                </button>
-                {isHost && (
-                  <button className="menu-item" onClick={() => toHost(true)}>
-                    <FolderOpen size={14} />
-                    <span className="grow">更换工作目录…</span>
-                  </button>
-                )}
-              </div>
-            )}
-          </span>
-
           {showModeChip && (
             <span style={{ position: 'relative', display: 'inline-flex' }} data-cmenu>
               <button

@@ -148,6 +148,8 @@ interface TanguStoredConfig {
   cloudUrl: string // managed:传给 tangu-server 的 Forsion 云端
   cloudToken: string // managed:forsion_token(空则子进程回退 tangu login 凭证)
   sandbox: 'auto' | 'docker' | 'none'
+  /** 「Tangu 默认工作区」本地目录(空=按 ~/Tangu 兜底);新建本机会话默认 cwd。 */
+  defaultWorkspaceDir: string
 }
 
 const DEFAULT_CONFIG: TanguStoredConfig = {
@@ -158,6 +160,14 @@ const DEFAULT_CONFIG: TanguStoredConfig = {
   cloudUrl: '',
   cloudToken: '',
   sandbox: 'auto',
+  defaultWorkspaceDir: '',
+}
+
+/** 默认工作区目录(配置未填时兜底 ~/Tangu);best-effort 创建,失败不阻断。 */
+async function ensureDefaultWorkspaceDir(stored: TanguStoredConfig): Promise<string> {
+  const dir = stored.defaultWorkspaceDir?.trim() || join(app.getPath('home'), 'Tangu')
+  await mkdir(dir, { recursive: true }).catch(() => {})
+  return dir
 }
 
 const configPath = (): string => join(app.getPath('userData'), 'tangu-desktop-config.json')
@@ -195,10 +205,12 @@ async function effectiveConfig(): Promise<TanguStoredConfig & { backendState: Ba
   const stored = await loadConfig()
   const st = backend.getStatus()
   const homeDir = app.getPath('home')
+  // 默认工作区目录折算为有效绝对路径(并确保存在),renderer 用它建「Tangu 默认工作区」会话。
+  const defaultWorkspaceDir = await ensureDefaultWorkspaceDir(stored)
   if (stored.mode === 'managed' && st.state === 'ready' && st.url) {
-    return { ...stored, backendUrl: st.url, token: backend.getToken(), backendState: st, homeDir }
+    return { ...stored, backendUrl: st.url, token: backend.getToken(), backendState: st, homeDir, defaultWorkspaceDir }
   }
-  return { ...stored, backendState: st, homeDir }
+  return { ...stored, backendState: st, homeDir, defaultWorkspaceDir }
 }
 
 // 串行化:连续 config:set(如先改 cloudUrl 再改 sandbox)触发的多次 ensureBackend

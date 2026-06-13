@@ -50,6 +50,19 @@ export interface AgentConfig {
   planMode?: boolean
 }
 
+/** 侧栏工作区:Cloud(云沙箱,project_path 为空)或本地目录(host 执行,cwd=path)。 */
+export interface WorkspaceDescriptor {
+  /** 分组键:cloud 用 CLOUD_WORKSPACE_KEY 哨兵;本地用绝对路径(= project_path)。 */
+  key: string
+  name: string
+  kind: 'cloud' | 'local'
+  /** 本地工作目录绝对路径;cloud 为 null。 */
+  path: string | null
+}
+
+/** 「Cloud 工作区」分组键哨兵(project_path 为空的会话归此组;真实本地路径永不为此值)。 */
+export const CLOUD_WORKSPACE_KEY = '__cloud__'
+
 export interface MessageRecord {
   id: string
   role: 'user' | 'model' | 'assistant' | string
@@ -231,6 +244,8 @@ export interface StoredDesktopConfig extends TanguDesktopConfig {
   cloudUrl: string
   cloudToken: string
   sandbox: 'auto' | 'docker' | 'none'
+  /** 「Tangu 默认工作区」本地目录(空=主进程按 ~/Tangu 兜底并首启创建)。设置里可改。 */
+  defaultWorkspaceDir?: string
   backendState?: BackendStatusInfo
   /** 主进程附带的用户主目录(本机模式 cwd 兜底)。 */
   homeDir?: string

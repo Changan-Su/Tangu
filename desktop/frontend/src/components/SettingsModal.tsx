@@ -15,7 +15,7 @@ import type {
   SkillInfo, StoredDesktopConfig, TanguDesktopConfig, ToolsResponse,
 } from '../types'
 
-type Tab = 'connection' | 'model' | 'providers' | 'mcp' | 'skills' | 'theme' | 'advanced'
+type Tab = 'connection' | 'model' | 'mcp' | 'skills' | 'theme' | 'advanced'
 
 const ECO_LABEL: Record<string, string> = {
   'claude-code': 'Claude Code',
@@ -322,8 +322,8 @@ export const SettingsModal: React.FC<{
                 {(
                   [
                     ['connection', '连接'],
-                    ['model', '模型'],
-                    ...(isDesktop ? ([['providers', 'Provider'], ['mcp', 'MCP'], ['skills', '技能']] as Array<[Tab, string]>) : []),
+                    ['model', '模型/Provider'],
+                    ...(isDesktop ? ([['mcp', 'MCP'], ['skills', '技能']] as Array<[Tab, string]>) : []),
                     ['theme', '主题'],
                     ['advanced', '高级'],
                   ] as Array<[Tab, string]>
@@ -346,6 +346,37 @@ export const SettingsModal: React.FC<{
                           <button className={mode === 'external' ? 'active' : ''} onClick={() => setMode('external')}>
                             外部连接
                           </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {isDesktop && stored && (
+                      <div className="field">
+                        <label>Tangu 默认工作区目录</label>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <input
+                            type="text"
+                            value={stored.defaultWorkspaceDir || ''}
+                            onChange={(e) => setStored({ ...stored, defaultWorkspaceDir: e.target.value })}
+                            placeholder="~/Tangu(默认,首启自动创建)"
+                          />
+                          <button
+                            className="btn ghost sm"
+                            onClick={() => void window.tangu?.pickDirectory?.().then((d) => {
+                              if (d) void window.tangu!.setConfig({ defaultWorkspaceDir: d }).then(setStored)
+                            })}
+                          >
+                            选择…
+                          </button>
+                          <button
+                            className="btn primary sm"
+                            onClick={() => void window.tangu!.setConfig({ defaultWorkspaceDir: (stored.defaultWorkspaceDir || '').trim() }).then(setStored)}
+                          >
+                            保存
+                          </button>
+                        </div>
+                        <div className="hint">
+                          侧栏「Tangu 默认工作区」新建会话用的本机目录;留空用 ~/Tangu。改后关闭设置即刷新侧栏工作区。
                         </div>
                       </div>
                     )}
@@ -587,8 +618,11 @@ export const SettingsModal: React.FC<{
                   </>
                 )}
 
-                {tab === 'providers' && (
+                {tab === 'model' && isDesktop && (
                   <>
+                    <div className="panel-section-title" style={{ marginTop: 8, padding: '12px 0 6px', borderTop: 'var(--border-width) solid var(--border)' }}>
+                      自定义 Provider(BYO-key 直连)
+                    </div>
                     <div className="field">
                       <label>自定义 Provider(BYO-key 直连;对齐 Forsion 模型添加:base_URL + api key)</label>
                       <div className="hint" style={{ marginBottom: 8 }}>
