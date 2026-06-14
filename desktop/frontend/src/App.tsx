@@ -508,7 +508,7 @@ export function App(): React.JSX.Element {
   }, [toast])
 
   // ── 发送 / 停止 / 审批 ──
-  const send = useCallback(async (text: string, attachments: Attachment[]): Promise<boolean> => {
+  const send = useCallback(async (text: string, attachments: Attachment[], workspaceFiles?: Attachment[]): Promise<boolean> => {
     let sid = activeIdRef.current
     let implicitInit: AgentConfig | null = null
     if (!sid) {
@@ -531,6 +531,17 @@ export function App(): React.JSX.Element {
     }
     const sessionId = sid
     const agentConfig = { ...(implicitInit || configBySession[sessionId] || {}) }
+    // 云沙箱拖入的文件:发送前先上传到会话工作区(agent run 时即可 list/read)。
+    if (workspaceFiles?.length) {
+      try {
+        await api.uploadWorkspaceFiles(cfgRef.current, sessionId, workspaceFiles.map((f) => ({
+          path: f.name, content: f.data, encoding: 'base64' as const, mimeType: f.mimeType,
+        })))
+        toast(`已上传 ${workspaceFiles.length} 个文件到工作区`)
+      } catch (e: any) {
+        toast(`工作区上传失败:${e?.message || e}`, true)
+      }
+    }
     // 会话级模型(输入栏切换器持久化在 session.model_id)优先于全局默认。
     const sessionModelId = sessions.find((s) => s.id === sessionId)?.model_id || undefined
     try {

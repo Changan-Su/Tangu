@@ -21,13 +21,11 @@ export const ChatArea: React.FC<{
   const ref = useRef<HTMLDivElement>(null)
   const followBottom = useRef(true) // 是否自动吸底(用户上滑释放,回底恢复)
   const lastTop = useRef(0)
-  const progScrollAt = useRef(0) // 程序化滚动时刻(抑制把自身滚动误判为用户上滑)
   const [showJump, setShowJump] = useState(false)
 
   const scrollToBottom = useCallback((smooth = false) => {
     const el = ref.current
     if (!el) return
-    progScrollAt.current = performance.now()
     el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
     lastTop.current = el.scrollHeight
     followBottom.current = true
@@ -43,8 +41,9 @@ export const ChatArea: React.FC<{
       lastTop.current = top
       const dist = el.scrollHeight - top - el.clientHeight
       const atBottom = dist < 80
-      // 自身程序化滚动刚发生(<120ms)不当作用户操作
-      if (scrolledUp && !atBottom && performance.now() - progScrollAt.current > 120) {
+      // 程序化吸底只会让 top 增大并落到底部(atBottom),绝不会产生「上滑」;
+      // 故「上滑且未到底」必是用户操作 → 立刻释放跟随(不用时间窗,流式高频更新下也能松手)。
+      if (scrolledUp && !atBottom) {
         followBottom.current = false
       } else if (atBottom) {
         followBottom.current = true
@@ -59,7 +58,6 @@ export const ChatArea: React.FC<{
   useEffect(() => {
     const el = ref.current
     if (el && followBottom.current) {
-      progScrollAt.current = performance.now()
       el.scrollTop = el.scrollHeight
       lastTop.current = el.scrollTop
     }

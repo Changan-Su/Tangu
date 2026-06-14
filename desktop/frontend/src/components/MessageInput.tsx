@@ -6,7 +6,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Send, Square, Plus, Mic, ImagePlus, X, Brain, ClipboardList, Check, ChevronDown,
+  Send, Square, Plus, Mic, ImagePlus, X, Brain, ClipboardList, Check, ChevronDown, FileText,
 } from 'lucide-react'
 import type { AgentConfig, Attachment, ModelInfo, SkillInfo } from '../types'
 
@@ -24,6 +24,8 @@ const MAX_ATTACH_BYTES = 5 * 1024 * 1024
 // 客户端输入帽(服务端 runs.ts 还有一道):大段材料整体粘贴会让 agent 每轮迭代全量重发,
 // token 消耗 = 消息体量 × 轮数(2026-06-10 的百万 token 事故根因)。
 const MAX_INPUT_CHARS = 150_000
+// 工作区文件上限(云沙箱:拖入消息区的文件,发送时上传到会话工作区)。
+const MAX_WS_BYTES = 25 * 1024 * 1024
 
 const approvalLabel = { readonly: '只读·全审批', 'auto-edit': '自动编辑', 'full-auto': '全自动' } as const
 const thinkingLabel = { off: '思考·关', low: '思考·浅', medium: '思考·中', high: '思考·深' } as const
@@ -49,8 +51,9 @@ export const MessageInput: React.FC<{
   onNewSession?: () => void
   onOpenSettings?: () => void
   onExecConfigChange: (patch: Pick<AgentConfig, 'execMode' | 'approvalMode' | 'cwd'>) => void
-  /** 返回是否已受理:失败(连接/参数错)返回 false,草稿保留不清空。 */
-  onSend: (text: string, attachments: Attachment[]) => Promise<boolean>
+  /** 返回是否已受理:失败(连接/参数错)返回 false,草稿保留不清空。
+   *  workspaceFiles:云沙箱拖入消息区的文件,发送时上传到会话工作区。 */
+  onSend: (text: string, attachments: Attachment[], workspaceFiles?: Attachment[]) => Promise<boolean>
   onStop: () => void
 }> = ({
   disabled, running, execConfig,
@@ -60,6 +63,7 @@ export const MessageInput: React.FC<{
 }) => {
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [wsFiles, setWsFiles] = useState<Attachment[]>([]) // 云沙箱待传工作区的文件
   const [hint, setHint] = useState<string | null>(null)
   const [slashIndex, setSlashIndex] = useState(0)
   const [slashSubMenu, setSlashSubMenu] = useState<'model' | null>(null) // /model 的二级菜单
@@ -167,10 +171,11 @@ export const MessageInput: React.FC<{
       return
     }
     setHint(null)
-    void onSend(text, attachments).then((accepted) => {
+    void onSend(text, attachments, wsFiles).then((accepted) => {
       if (!accepted) return // 失败保留草稿
       setDraft('')
       setAttachments([])
+      setWsFiles([])
       requestAnimationFrame(autoGrow)
     })
   }
@@ -197,8 +202,30 @@ export const MessageInput: React.FC<{
       }
       next.push({ name: f.name, mimeType: f.type, data: btoa(bin), size: f.size })
     }
-    setHint(skipped.length ? `已跳过:${skipped.join('、')}。图片随消息发给模型;其他文件请用右栏工作区上传。` : null)
+    setHint(skipped.length ? `已跳过:${skipped.join('、')}。图片随消息发给模型;其他文件可直接拖进输入框(发送后进工作区)。` : null)
     setAttachments((prev) => [...prev, ...next])
+  }
+
+  // 云沙箱:拖入消息区的任意文件 → 暂存为待传工作区的文件,发送时上传到会话工作区。
+  const pickWsFiles = async (files: FileList | null) => {
+    if (!files) return
+    const next: Attachment[] = []
+    const skipped: string[] = []
+    for (const f of Array.from(files)) {
+      if (f.size > MAX_WS_BYTES) {
+        skipped.push(`${f.name}(超 ${Math.round(MAX_WS_BYTES / 1024 / 1024)}MB)`)
+        continue
+      }
+      const buf = await f.arrayBuffer()
+      let bin = ''
+      const bytes = new Uint8Array(buf)
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+      }
+      next.push({ name: f.name, mimeType: f.type || 'application/octet-stream', data: btoa(bin), size: f.size })
+    }
+    setHint(skipped.length ? `已跳过:${skipped.join('、')}` : null)
+    setWsFiles((prev) => [...prev, ...next])
   }
 
   // ── 框外控制:审批档(执行环境由工作区决定,不在输入栏切换) ──
@@ -239,7 +266,7 @@ export const MessageInput: React.FC<{
             setDragOver(false)
             const files = e.dataTransfer?.files
             if (!files?.length) return
-            // 本机模式:拖入文件 → 把绝对路径粘进输入框(agent 用工具按路径读);云沙箱仍走图片附件。
+            // 本机模式:拖入文件 → 把绝对路径粘进输入框(agent 用工具按路径读)。
             if (isHost && window.tangu?.getPathForFile) {
               const paths = Array.from(files)
                 .map((f) => { try { return window.tangu!.getPathForFile!(f) } catch { return '' } })
@@ -252,7 +279,8 @@ export const MessageInput: React.FC<{
                 return
               }
             }
-            void pickFiles(files)
+            // 云沙箱:任意文件 → 暂存为待传工作区文件(chip 预览),发送时上传到会话工作区。
+            void pickWsFiles(files)
           }}
         >
           {hint && (
@@ -269,6 +297,22 @@ export const MessageInput: React.FC<{
                   )}
                   <span>{a.name}</span>
                   <button title="移除" onClick={() => setAttachments(attachments.filter((_, j) => j !== i))}>
+                    <X size={12} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          {wsFiles.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+              {wsFiles.map((a, i) => (
+                <span className="attach-chip" key={`ws-${a.name}-${i}`} title={`发送后上传到工作区:${a.name}`}>
+                  {a.mimeType.startsWith('image/')
+                    ? <img src={`data:${a.mimeType};base64,${a.data}`} alt={a.name} />
+                    : <FileText size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />}
+                  <span>{a.name}</span>
+                  <span style={{ fontSize: 10, color: 'var(--text-faint)', flexShrink: 0 }}>→工作区</span>
+                  <button title="移除" onClick={() => setWsFiles(wsFiles.filter((_, j) => j !== i))}>
                     <X size={12} />
                   </button>
                 </span>
