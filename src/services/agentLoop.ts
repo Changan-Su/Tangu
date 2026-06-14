@@ -22,6 +22,7 @@ import {
   estimateTokensRough, estimateMessagesTokens, compactContext, capToolResult, capHistoryContent,
 } from './contextBudget.js';
 import { normalizeImageAttachments, toImageParts } from './imageAttachments.js';
+import { looksLikeToolCallText } from '../llm/textToolCalls.js';
 
 // ── 注入依赖的 lazy 别名:保持下方调用点不变(接缝装配后才会真正取到 deps)──
 const resolveModelAndKey = (modelId: string) => deps().brain.llm.resolveModelAndKey(modelId);
@@ -213,7 +214,12 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
   const modelId = run.model_id || '';
   const input = typeof run.input === 'string' ? safeParse(run.input) : run.input || {};
   const agentConfig = input.agentConfig || {};
-  const maxIterations = Math.min(Math.max(1, agentConfig.maxIterations || 10), 30);
+  // 默认 20(原 10):重试型模型(命令报错→改写重试)很容易把 10 轮耗光被迫收尾;上限保持 30。
+  const maxIterations = Math.min(Math.max(1, agentConfig.maxIterations || 20), 30);
+  // 文本工具调用「无法解析」的纠正重试预算:模型把工具调用当正文吐(原生 tool_calls 空、
+  // 文本兜底也没解出来)时,回灌一次纠正提示让它改用原生函数调用,而非静默收尾。
+  const MAX_TOOLCALL_RECOVERY = 2;
+  let toolCallRecoveryUsed = 0;
   const thinkingLevel: ThinkingLevel = agentConfig.thinkingLevel || 'off';
   const attachments = input.attachments || [];
   // host-exec（TUI/桌面本机模式）注入：execMode/cwd/approvalMode 只经 per-run agentConfig 传入。
@@ -481,8 +487,41 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
       ).catch(() => {});
 
       if (!res.toolCalls || res.toolCalls.length === 0 || lastIter) {
+        // 安全网:模型把工具调用当正文吐(原生 tool_calls 空且文本兜底没解出来),但正文带工具
+        // 调用标记 —— 别静默收尾。回灌一次纠正提示让它改用原生函数调用重试(预算内、非最后一轮)。
+        // 这能兜住「兜底解析器认不出的新网关格式」,把硬停转成自愈,正常完成(无标记)零影响。
+        if (
+          !lastIter &&
+          (!res.toolCalls || res.toolCalls.length === 0) &&
+          !(consumed && consumed.ok === false) && // 额度已不足就别再起一轮纠正重试(下轮 :404 会收尾)
+          toolCallRecoveryUsed < MAX_TOOLCALL_RECOVERY &&
+          looksLikeToolCallText(res.content)
+        ) {
+          toolCallRecoveryUsed++;
+          workingMessages.push({ role: 'assistant', content: res.content || '' } as ChatMessage);
+          workingMessages.push({
+            role: 'user',
+            content:
+              '⚠️ 系统提示:你上一条消息里的工具调用用了无法被解析的文本格式(如 <invoke …> / ' +
+              '<｜tool▁call▁begin｜> 标记),并未被实际执行。请改用本平台的原生函数调用机制重新发起这次' +
+              '工具调用 —— 不要把这些标记当作正文输出。',
+          } as ChatMessage);
+          void publish(runId, 'status', { phase: 'toolcall_format_recovery', iteration });
+          await appendStep({
+            id: uuidv4(), runId, stepNo: iteration,
+            llmResponse: { content: res.content, usage: res.usage },
+          });
+          continue;
+        }
+        // 收尾:正文优先取兜底清理后的 res.content;为空(整条都是工具标记被剔空)时退回历史值,
+        // 仍为空则给一条可读提示,避免最终消息全空白。
         finalContent = res.content || finalContent;
         finalReasoning = res.reasoning || finalReasoning;
+        if (!finalContent.trim() && !finalReasoning.trim()) {
+          finalContent = looksLikeToolCallText(res.content)
+            ? '(本轮达到最大工具调用次数或工具调用格式异常,已停止。发送"继续"可让我接着操作。)'
+            : finalContent;
+        }
         await appendStep({
           id: uuidv4(), runId, stepNo: iteration,
           llmResponse: { content: res.content, usage: res.usage },

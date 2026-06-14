@@ -9,7 +9,13 @@
  *   ② Kimi K2 式:<|tool_call_begin|>functions.NAME:IDX<|tool_call_argument_begin|>{json}<|tool_call_end|>
  *   ③ DeepSeek 原生:<｜tool▁call▁begin｜>function<｜tool▁sep｜>NAME ```json {json} ```<｜tool▁call▁end｜>
  *
- * 安全:解析出的调用与原生调用走同一套审批闸门;仅在原生 tool_calls 为空时启用,正常流零影响。
+ * 健壮性:① 采用「按起始标记切段」而非「严格配对闭合」,流被截断 / 模型漏写 </invoke> / 网关吞掉
+ * 收尾标记时仍能解析出已写完的调用(否则单个缺失闭合标记会让整轮工具调用全丢、loop 静默收尾)。
+ *
+ * 性能/安全:前缀字符类用 [^<>](不含 '<'),否则裸 `<` 串(ASCII art / 截断的 HTML/diff / `<<<<<<<`
+ * 冲突标记)会让每个 `<` 都成候选起点、惰性扫到文末 → O(n²) ReDoS。真实前缀只会是 antml:/｜｜DSML｜｜/空,
+ * 都不含 '<' '>',故收窄字符类零行为损失。再加 200KB 上限与代码围栏跳过(见下)。
+ * 解析出的调用与原生调用走**同一套审批闸门**;仅在原生 tool_calls 为空时启用,正常流零影响。
  */
 export interface ParsedTextToolCall {
   id: string;
@@ -23,45 +29,132 @@ function call(idx: number, name: string, argsJson: string): ParsedTextToolCall {
   return { id: `call_fb_${idx}`, type: 'function', function: { name, arguments: argsJson } };
 }
 
-/** ① Anthropic <invoke>/<parameter>(前缀容错);string="false" 的参数按 JSON 解析。 */
+/** 标记型正则(前缀容错 [^<>]*? 吸收 antml:/｜｜DSML｜｜/任意非'<>'占位;不含 '<' 杜绝 ReDoS)。 */
+const INVOKE_OPEN = /<[^<>]*?invoke\s+name="([^"]+)"\s*>/gi;
+const INVOKE_CLOSE = /<\/[^<>]*?invoke\s*>/gi;
+const PARAM_OPEN = /<[^<>]*?parameter\s+name="([^"]+)"(?:\s+string="([^"]*)")?\s*>/gi;
+const PARAM_CLOSE = /<\/[^<>]*?parameter\s*>/gi;
+const TOOLCALLS_TAG = /<\/?[^<>]*?tool_calls\s*>/gi;
+/** 剔除工具标记后,清掉正文里游离的 invoke/parameter/tool_calls 收尾标记(值里写了字面闭合标记时的泄漏)。 */
+const STRAY_TAGS = /<\/?[^<>]*?(?:invoke|parameter|tool_calls)[^<>]*?>/gi;
+
+const MAX_LEN = 200_000;
+
+/** ``` 围栏代码块的区间(用于跳过"举例/文档里"的工具调用语法,避免把示例当真调用执行)。
+ *  惰性、单量词、无嵌套 → 线性,无 ReDoS;未闭合围栏吃到文末。 */
+function fenceRanges(s: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  const re = /```[\s\S]*?(?:```|$)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s)) !== null) {
+    if (m[0].length === 0) {
+      re.lastIndex++;
+      continue;
+    }
+    ranges.push([m.index, m.index + m[0].length]);
+  }
+  return ranges;
+}
+/** ranges 由 fenceRanges 升序、互不重叠产出 → 二分(避免 N 个 open × M 个围栏的 O(N·M))。 */
+function inFence(pos: number, ranges: Array<[number, number]>): boolean {
+  let lo = 0;
+  let hi = ranges.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const [a, b] = ranges[mid];
+    if (pos < a) hi = mid - 1;
+    else if (pos >= b) lo = mid + 1;
+    else return true;
+  }
+  return false;
+}
+
+/** 解析单个 invoke body 内的参数(容忍漏写 </parameter>:值取到下一个 parameter 起始或 body 末尾)。 */
+function parseParams(body: string): Record<string, unknown> {
+  const args: Record<string, unknown> = {};
+  const opens: Array<{ key: string; hint?: string; openStart: number; valStart: number }> = [];
+  PARAM_OPEN.lastIndex = 0;
+  let pm: RegExpExecArray | null;
+  while ((pm = PARAM_OPEN.exec(body)) !== null) {
+    opens.push({ key: pm[1], hint: pm[2], openStart: pm.index, valStart: PARAM_OPEN.lastIndex });
+  }
+  for (let i = 0; i < opens.length; i++) {
+    const p = opens[i];
+    const nextOpenStart = i + 1 < opens.length ? opens[i + 1].openStart : body.length;
+    // 只在 [valStart, nextOpenStart) 窗口找 </parameter>:窗口互不重叠,总扫描 O(n)。
+    // 否则缺闭合标记时每个 param 都 exec 到 body 末尾 → O(n²)(大量未闭合 <parameter> 输入打成 DoS)。
+    const seg = body.slice(p.valStart, nextOpenStart);
+    PARAM_CLOSE.lastIndex = 0;
+    const cm = PARAM_CLOSE.exec(seg);
+    const valEnd = cm ? p.valStart + cm.index : nextOpenStart;
+    const raw = body.slice(p.valStart, valEnd).trim();
+    if (p.hint === 'false') {
+      try {
+        args[p.key] = JSON.parse(raw);
+      } catch {
+        args[p.key] = raw;
+      }
+    } else {
+      args[p.key] = raw;
+    }
+  }
+  return args;
+}
+
+/** ① Anthropic <invoke>/<parameter>(前缀容错 + 截断容错 + 围栏跳过);string="false" 的参数按 JSON 解析。 */
 function parseAnthropic(content: string): ParseResult | null {
   if (!/invoke\s+name=/i.test(content)) return null;
-  const invokeRe = /<[^>]*?invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/[^>]*?invoke\s*>/gi;
-  const calls: ParsedTextToolCall[] = [];
+  const fences = fenceRanges(content);
+  // 先收集所有 invoke 起始(含位置;围栏内的示例跳过);body 边界 = 最近的 </invoke> 或下一个 <invoke 或 文末。
+  INVOKE_OPEN.lastIndex = 0;
+  const opens: Array<{ name: string; openStart: number; bodyStart: number }> = [];
   let m: RegExpExecArray | null;
-  while ((m = invokeRe.exec(content)) !== null) {
-    const name = m[1].trim();
-    if (!name) continue;
-    const body = m[2];
-    const args: Record<string, unknown> = {};
-    const paramRe =
-      /<[^>]*?parameter\s+name="([^"]+)"(?:\s+string="([^"]*)")?\s*>([\s\S]*?)<\/[^>]*?parameter\s*>/gi;
-    let pm: RegExpExecArray | null;
-    while ((pm = paramRe.exec(body)) !== null) {
-      const key = pm[1];
-      const hint = pm[2]; // 'true' | 'false' | undefined
-      const raw = pm[3].trim();
-      if (hint === 'false') {
-        try {
-          args[key] = JSON.parse(raw);
-        } catch {
-          args[key] = raw;
-        }
-      } else {
-        args[key] = raw;
-      }
+  while ((m = INVOKE_OPEN.exec(content)) !== null) {
+    if (inFence(m.index, fences)) continue;
+    opens.push({ name: m[1].trim(), openStart: m.index, bodyStart: INVOKE_OPEN.lastIndex });
+  }
+  if (!opens.length) return null;
+
+  const calls: ParsedTextToolCall[] = [];
+  const spans: Array<[number, number]> = []; // 需从正文剔除的 [start,end) 区间
+  for (let i = 0; i < opens.length; i++) {
+    const o = opens[i];
+    const nextOpenStart = i + 1 < opens.length ? opens[i + 1].openStart : content.length;
+    // 只在 [bodyStart, nextOpenStart) 窗口找 </invoke>:窗口互不重叠,N 个 open 总扫描 = O(n)。
+    // 否则缺闭合标记时每个 open 都 exec 到 EOF → N×O(n) = O(n²)(大量未闭合 <invoke> 输入打成 DoS)。
+    const seg = content.slice(o.bodyStart, nextOpenStart);
+    INVOKE_CLOSE.lastIndex = 0;
+    const cm = INVOKE_CLOSE.exec(seg);
+    let bodyEnd = nextOpenStart;
+    let spanEnd = nextOpenStart;
+    if (cm) {
+      bodyEnd = o.bodyStart + cm.index;
+      spanEnd = bodyEnd + cm[0].length; // 连闭合标记一起剔除
     }
-    calls.push(call(calls.length, name, JSON.stringify(args)));
+    if (!o.name) continue;
+    const args = parseParams(seg.slice(0, cm ? cm.index : seg.length));
+    calls.push(call(calls.length, o.name, JSON.stringify(args)));
+    spans.push([o.openStart, spanEnd]);
   }
   if (!calls.length) return null;
-  const cleaned = content.replace(invokeRe, '').replace(/<\/?[^>]*?tool_calls\s*>/gi, '').trim();
+
+  // 拼出剔除工具调用区间后的正文 + 清理游离的 invoke/parameter/tool_calls 标记(值里写了字面闭合标记时的泄漏)。
+  let cleaned = '';
+  let cur = 0;
+  for (const [s, e] of spans) {
+    if (s > cur) cleaned += content.slice(cur, s);
+    cur = Math.max(cur, e);
+  }
+  cleaned += content.slice(cur);
+  cleaned = cleaned.replace(STRAY_TAGS, '').trim();
   return { toolCalls: calls, cleaned };
 }
 
 /** ② Kimi K2 <|tool_call_begin|>functions.NAME:IDX<|tool_call_argument_begin|>{json}<|tool_call_end|> */
 function parseKimi(content: string): ParseResult | null {
   if (!content.includes('<|tool_call_begin|>')) return null;
-  const re = /<\|tool_call_begin\|>([\s\S]*?)<\|tool_call_argument_begin\|>([\s\S]*?)<\|tool_call_end\|>/g;
+  // 收尾容错:<|tool_call_end|> 缺失时,argument 取到下一个 <|tool_call_begin|> 或文末。
+  const re = /<\|tool_call_begin\|>([\s\S]*?)<\|tool_call_argument_begin\|>([\s\S]*?)(?:<\|tool_call_end\|>|(?=<\|tool_call_begin\|>)|$)/g;
   const calls: ParsedTextToolCall[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(content)) !== null) {
@@ -76,10 +169,10 @@ function parseKimi(content: string): ParseResult | null {
 }
 
 /** ③ DeepSeek 原生 <｜tool▁call▁begin｜>function<｜tool▁sep｜>NAME ```json {json} ```<｜tool▁call▁end｜>。
- *     ｜=U+FF5C ▁=U+2581,用转义避免源码编码歧义。 */
+ *     ｜=U+FF5C ▁=U+2581,用转义避免源码编码歧义。收尾容错同上。 */
 function parseDeepSeek(content: string): ParseResult | null {
   if (!content.includes('｜tool▁call▁begin｜')) return null;
-  const re = /<｜tool▁call▁begin｜>[\s\S]*?<｜tool▁sep｜>([\s\S]*?)<｜tool▁call▁end｜>/g;
+  const re = /<｜tool▁call▁begin｜>[\s\S]*?<｜tool▁sep｜>([\s\S]*?)(?:<｜tool▁call▁end｜>|(?=<｜tool▁call▁begin｜>)|$)/g;
   const calls: ParsedTextToolCall[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(content)) !== null) {
@@ -101,10 +194,26 @@ function parseDeepSeek(content: string): ParseResult | null {
 }
 
 export function parseTextToolCalls(content: string): ParseResult {
-  if (!content || content.length > 200_000) return { toolCalls: [], cleaned: content };
+  if (!content || content.length > MAX_LEN) return { toolCalls: [], cleaned: content };
   return (
     parseAnthropic(content) ||
     parseKimi(content) ||
     parseDeepSeek(content) || { toolCalls: [], cleaned: content }
+  );
+}
+
+/**
+ * 正文是否「看起来含工具调用意图」但没被解析成结构化调用。
+ * agent loop 的安全网:原生 tool_calls 为空、文本兜底也没解出来,但正文带工具调用标记时,
+ * 别静默收尾——而是回灌一条纠正提示让模型用原生函数调用重试(见 agentLoop 的 recovery)。
+ * 严格匹配「带 name= 的 invoke / 带起始 token 的 Kimi·DeepSeek」,避免把单纯讨论这些语法的散文误判。
+ * 字符类 [^<>] + 长度上限:这函数跑在 recovery 路径的原始模型正文上,裸 `<` 串否则会 O(n²) 卡死。
+ */
+export function looksLikeToolCallText(content: string): boolean {
+  if (!content || content.length > MAX_LEN) return false;
+  return (
+    /<[^<>]*?invoke\s+name="/i.test(content) ||
+    content.includes('<|tool_call_begin|>') ||
+    content.includes('｜tool▁call▁begin｜')
   );
 }
