@@ -5,11 +5,13 @@
 import React, { useState } from 'react'
 import { ShieldQuestion, Check, CheckCheck, X } from 'lucide-react'
 import type { ApprovalRequest } from '../types'
+import { useI18n } from '../i18n'
 
 export const ApprovalCard: React.FC<{
   req: ApprovalRequest
   onDecide: (action: 'approve' | 'approve_always' | 'reject', argsOverride?: Record<string, any>) => void
 }> = ({ req, onDecide }) => {
+  const { t } = useI18n()
   const isBash = req.name === 'run_bash'
   const initialCmd = (() => {
     if (!isBash || !req.arguments) return ''
@@ -28,10 +30,10 @@ export const ApprovalCard: React.FC<{
     <div className={`approval-card${resolved ? ' resolved' : ''}`}>
       <div className="approval-title">
         <ShieldQuestion size={15} style={{ color: 'var(--accent)' }} />
-        {req.name} 请求执行
+        {t('approval.requestExec', { name: req.name })}
         {resolved && (
           <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-faint)' }}>
-            {req.status === 'approved' ? '· 已批准' : req.status === 'rejected' ? '· 已拒绝' : '· 已失效'}
+            {req.status === 'approved' ? t('approval.statusApproved') : req.status === 'rejected' ? t('approval.statusRejected') : t('approval.statusExpired')}
           </span>
         )}
       </div>
@@ -49,13 +51,13 @@ export const ApprovalCard: React.FC<{
       {!resolved && (
         <div className="approval-actions">
           <button className="btn primary sm" onClick={() => decide('approve')}>
-            <Check size={13} /> 批准
+            <Check size={13} /> {t('approval.approve')}
           </button>
           <button className="btn ghost sm" onClick={() => decide('approve_always')}>
-            <CheckCheck size={13} /> 本会话总是允许
+            <CheckCheck size={13} /> {t('approval.approveAlways')}
           </button>
           <button className="btn danger sm" onClick={() => decide('reject')}>
-            <X size={13} /> 拒绝
+            <X size={13} /> {t('approval.reject')}
           </button>
         </div>
       )}

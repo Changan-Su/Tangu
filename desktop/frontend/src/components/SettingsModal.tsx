@@ -14,8 +14,12 @@ import type {
   AuthStatusInfo, BackendStatusInfo, DirectProviderConfig, DiscoveryResult, McpServerConfigEntry, ModelsResponse,
   SkillInfo, StoredDesktopConfig, TanguDesktopConfig, ToolsResponse,
 } from '../types'
+import { useI18n } from '../i18n'
+import { LocaleToggle } from './LocaleToggle'
+import { CHANGELOG } from '../changelog'
+import { ModelGroupList } from './ModelGroupList'
 
-type Tab = 'connection' | 'model' | 'mcp' | 'skills' | 'theme' | 'advanced'
+type Tab = 'connection' | 'model' | 'mcp' | 'skills' | 'theme' | 'advanced' | 'about'
 
 const ECO_LABEL: Record<string, string> = {
   'claude-code': 'Claude Code',
@@ -25,20 +29,20 @@ const ECO_LABEL: Record<string, string> = {
 
 // 技能渠道(agent 文件夹)分组顺序;可扩展:新增渠道(如 opencode 后端扫描接上后)只加一行,
 // 空渠道自动不渲染。未知 source 落入「其他」兜底组。
-const SKILL_CHANNELS: Array<{ key: NonNullable<SkillInfo['source']> | 'opencode'; label: string }> = [
-  { key: 'local', label: '本地' },
-  { key: 'claude', label: 'Claude Code' },
-  { key: 'codex', label: 'Codex' },
-  { key: 'opencode', label: 'OpenCode' },
-  { key: 'user', label: '已上云' },
-  { key: 'cloud', label: '云端' },
+const SKILL_CHANNELS: Array<{ key: NonNullable<SkillInfo['source']> | 'opencode'; labelKey: string }> = [
+  { key: 'local', labelKey: 'settings.skills.channel.local' },
+  { key: 'claude', labelKey: 'settings.skills.channel.claude' },
+  { key: 'codex', labelKey: 'settings.skills.channel.codex' },
+  { key: 'opencode', labelKey: 'settings.skills.channel.opencode' },
+  { key: 'user', labelKey: 'settings.skills.channel.user' },
+  { key: 'cloud', labelKey: 'settings.skills.channel.cloud' },
 ]
 
 const BACKEND_STATE_LABEL: Record<string, string> = {
-  stopped: '已停止',
-  starting: '启动中…',
-  ready: '运行中',
-  crashed: '已崩溃',
+  stopped: 'settings.backend.state.stopped',
+  starting: 'settings.backend.state.starting',
+  ready: 'settings.backend.state.ready',
+  crashed: 'settings.backend.state.crashed',
 }
 
 export const SettingsModal: React.FC<{
@@ -54,7 +58,9 @@ export const SettingsModal: React.FC<{
   /** patch 随调用传入:避免「setState 未刷新就重连」的旧值竞态。 */
   onReconnect: (patch?: Partial<TanguDesktopConfig>) => void
 }> = (p) => {
+  const { t, locale } = useI18n()
   const [tab, setTab] = useState<Tab>('connection')
+  const [appVersion, setAppVersion] = useState<string>('')
   const [draft, setDraft] = useState(p.cfg)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState('')
@@ -96,7 +102,7 @@ export const SettingsModal: React.FC<{
     void window.tangu!.writeMcpConfig!({ mcpServers: next }).then((c) => {
       setMcpServers(c.mcpServers)
       setMcpMsg(msg)
-    }).catch((e) => setMcpMsg(`保存失败:${e?.message || e}`))
+    }).catch((e) => setMcpMsg(`${t('settings.toast.saveFailed')}${e?.message || e}`))
   }
 
   // 技能库(设置→技能 tab):列表 + 本地→云端上传 + 删除本人云端技能
@@ -109,7 +115,7 @@ export const SettingsModal: React.FC<{
     setAllSkillsLoading(true)
     void listSkills(p.cfg)
       .then(setAllSkills)
-      .catch((e) => setSkillMsg(`技能列表加载失败:${e?.message || e}`))
+      .catch((e) => setSkillMsg(`${t('settings.skills.loadFailed')}${e?.message || e}`))
       .finally(() => setAllSkillsLoading(false))
   }
 
@@ -118,25 +124,25 @@ export const SettingsModal: React.FC<{
     setSkillMsg('')
     try {
       const r = await uploadSkillToCloud(p.cfg, id)
-      setSkillMsg(`✓ 「${r.name}」已上传云端(id: ${r.id})`)
+      setSkillMsg(t('settings.skills.uploadOk', { name: r.name, id: r.id }))
       loadAllSkills()
     } catch (e: any) {
-      setSkillMsg(`上传失败:${e?.message || e}`)
+      setSkillMsg(`${t('settings.skills.uploadFailed')}${e?.message || e}`)
     } finally {
       setSkillBusy(null)
     }
   }
 
   const doDeleteUserSkill = async (id: string): Promise<void> => {
-    if (!window.confirm(`删除云端技能「${id}」?`)) return
+    if (!window.confirm(t('settings.skills.deleteConfirm', { id }))) return
     setSkillBusy(id)
     setSkillMsg('')
     try {
       await deleteUserCloudSkill(p.cfg, id)
-      setSkillMsg('✓ 已删除')
+      setSkillMsg(t('settings.skills.deleteOk'))
       loadAllSkills()
     } catch (e: any) {
-      setSkillMsg(`删除失败:${e?.message || e}`)
+      setSkillMsg(`${t('settings.skills.deleteFailed')}${e?.message || e}`)
     } finally {
       setSkillBusy(null)
     }
@@ -175,7 +181,7 @@ export const SettingsModal: React.FC<{
       setDisc(await window.tangu.discoveryScan())
     } catch (e: any) {
       setDisc(null)
-      setDiscMsg(`扫描失败:${e?.message || e}`)
+      setDiscMsg(`${t('settings.discovery.scanFailed')}${e?.message || e}`)
     } finally {
       setDiscScanning(false)
     }
@@ -193,12 +199,9 @@ export const SettingsModal: React.FC<{
       setDiscSelSkills(new Set())
       setDiscSelMcp(new Set())
       if (r2.imported.length) refreshMcp() // MCP 页同步看到导入项(未启用)
-      setDiscMsg(
-        `已导入技能 ${r1.imported.length} 个、MCP ${r2.imported.length} 个。`
-        + `技能即时生效(后端按 mtime 重扫);MCP 默认停用,请到 MCP 页启用。`,
-      )
+      setDiscMsg(t('settings.discovery.importOk', { skills: r1.imported.length, mcp: r2.imported.length }))
     } catch (e: any) {
-      setDiscMsg(`导入失败:${e?.message || e}`)
+      setDiscMsg(`${t('settings.discovery.importFailed')}${e?.message || e}`)
     } finally {
       setDiscImporting(false)
     }
@@ -279,7 +282,7 @@ export const SettingsModal: React.FC<{
       setModels(await listModels(draft))
     } catch (e: any) {
       setModels(null)
-      setTestResult(e?.message || '模型列表加载失败')
+      setTestResult(e?.message || t('settings.model.loadFailed'))
     } finally {
       setModelsLoading(false)
     }
@@ -289,6 +292,7 @@ export const SettingsModal: React.FC<{
     if (p.open && tab === 'model' && !models && !modelsLoading) void loadModels()
     if (p.open && tab === 'mcp') refreshMcp()
     if (p.open && tab === 'skills' && !allSkills && !allSkillsLoading) loadAllSkills()
+    if (p.open && tab === 'about' && !appVersion) void window.tangu?.appVersion?.().then((v) => setAppVersion(v || '')).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.open, tab])
 
@@ -312,7 +316,7 @@ export const SettingsModal: React.FC<{
           <AnimatedModalContent>
             <div className="modal">
               <div className="modal-head">
-                设置
+                {t('settings.title')}
                 <span className="grow" />
                 <button className="icon-btn" onClick={p.onClose}>
                   <X size={16} />
@@ -321,11 +325,12 @@ export const SettingsModal: React.FC<{
               <div className="modal-tabs">
                 {(
                   [
-                    ['connection', '连接'],
-                    ['model', '模型/Provider'],
-                    ...(isDesktop ? ([['mcp', 'MCP'], ['skills', '技能']] as Array<[Tab, string]>) : []),
-                    ['theme', '主题'],
-                    ['advanced', '高级'],
+                    ['connection', t('settings.tab.connection')],
+                    ['model', t('settings.tab.model')],
+                    ...(isDesktop ? ([['mcp', 'MCP'], ['skills', t('settings.tab.skills')]] as Array<[Tab, string]>) : []),
+                    ['theme', t('settings.tab.theme')],
+                    ['advanced', t('settings.tab.advanced')],
+                    ['about', t('settings.tab.about')],
                   ] as Array<[Tab, string]>
                 ).map(([id, label]) => (
                   <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>
@@ -338,13 +343,13 @@ export const SettingsModal: React.FC<{
                   <>
                     {isDesktop && (
                       <div className="field">
-                        <label>后端模式</label>
+                        <label>{t('settings.backend.modeLabel')}</label>
                         <div className="seg">
                           <button className={mode === 'managed' ? 'active' : ''} onClick={() => setMode('managed')}>
-                            自动托管(内置)
+                            {t('settings.backend.modeManaged')}
                           </button>
                           <button className={mode === 'external' ? 'active' : ''} onClick={() => setMode('external')}>
-                            外部连接
+                            {t('settings.backend.modeExternal')}
                           </button>
                         </div>
                       </div>
@@ -352,13 +357,13 @@ export const SettingsModal: React.FC<{
 
                     {isDesktop && stored && (
                       <div className="field">
-                        <label>Tangu 默认工作区目录</label>
+                        <label>{t('settings.workspace.label')}</label>
                         <div style={{ display: 'flex', gap: 8 }}>
                           <input
                             type="text"
                             value={stored.defaultWorkspaceDir || ''}
                             onChange={(e) => setStored({ ...stored, defaultWorkspaceDir: e.target.value })}
-                            placeholder="~/Tangu(默认,首启自动创建)"
+                            placeholder={t('settings.workspace.placeholder')}
                           />
                           <button
                             className="btn ghost sm"
@@ -366,17 +371,17 @@ export const SettingsModal: React.FC<{
                               if (d) void window.tangu!.setConfig({ defaultWorkspaceDir: d }).then(setStored)
                             })}
                           >
-                            选择…
+                            {t('settings.workspace.pick')}
                           </button>
                           <button
                             className="btn primary sm"
                             onClick={() => void window.tangu!.setConfig({ defaultWorkspaceDir: (stored.defaultWorkspaceDir || '').trim() }).then(setStored)}
                           >
-                            保存
+                            {t('settings.btn.save')}
                           </button>
                         </div>
                         <div className="hint">
-                          侧栏「Tangu 默认工作区」新建会话用的本机目录;留空用 ~/Tangu。改后关闭设置即刷新侧栏工作区。
+                          {t('settings.workspace.hint')}
                         </div>
                       </div>
                     )}
@@ -384,87 +389,50 @@ export const SettingsModal: React.FC<{
                     {isDesktop && mode === 'managed' && stored && (
                       <>
                         <div className="field">
-                          <label>Forsion 云端地址(大脑:记忆/技能/托管模型)</label>
+                          <label>{t('settings.cloud.label')}</label>
                           <input
                             type="text"
-                            value={stored.cloudUrl}
-                            onChange={(e) => setStored({ ...stored, cloudUrl: e.target.value })}
-                            placeholder="https://api.forsion.app"
+                            value={stored.cloudUrl || ''}
+                            readOnly
+                            disabled
+                            placeholder={t('settings.cloud.unset')}
                           />
-                          <div className="hint">可用环境变量 TANGU_CLOUD_URL 预设;登录成功后自动记住。</div>
-                        </div>
-
-                        <div className="field">
-                          <label>Forsion 账号</label>
-                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                            {authSt?.loggedIn ? (
-                              <>
-                                <span className="conn-pill ok">
-                                  <span className="dot" />
-                                  已登录{authSt.username ? ` · ${authSt.username}` : ''}
-                                  {authSt.tokenSource === 'config' ? '(手动 token)' : ''}
-                                </span>
-                                <button className="btn ghost sm" onClick={() => {
-                                  void window.tangu!.forsionLogout?.().then(() => refreshAuth())
-                                }}>
-                                  <LogOut size={12} /> 登出
-                                </button>
-                              </>
-                            ) : (
-                              <span className="conn-pill"><span className="dot" />未登录</span>
-                            )}
-                            <button className="btn primary sm" onClick={() => void doForsionLogin()} disabled={loggingIn || !stored.cloudUrl}>
-                              {loggingIn ? <Loader2 size={12} className="spin" /> : <LogIn size={12} />}
-                              通过浏览器登录
-                            </button>
-                          </div>
-                          {device && (
-                            <div className="hint" style={{ marginTop: 6 }}>
-                              浏览器没弹出来?手动打开:
-                              <a href={device.url} target="_blank" rel="noreferrer" style={{ wordBreak: 'break-all' }}>
-                                {device.url} <ExternalLink size={10} style={{ verticalAlign: -1 }} />
-                              </a>
-                              {device.userCode ? <> · 验证码 <b>{device.userCode}</b></> : null}
-                            </div>
-                          )}
-                          {!authSt?.loggedIn && (
-                            <div className="hint">与 `tangu login` 同一份凭证(~/.tangu/auth.json),CLI/TUI/桌面通用。</div>
-                          )}
+                          <div className="hint">{t('settings.cloud.envOnly')}</div>
                         </div>
 
                         <div className="field-row">
                           <div className="field">
-                            <label><KeyRound size={11} style={{ verticalAlign: -1 }} /> 手动 token(高级,可选;覆盖登录凭证)</label>
+                            <label><KeyRound size={11} style={{ verticalAlign: -1 }} /> {t('settings.token.label')}</label>
                             <input
                               type="password"
                               value={stored.cloudToken}
                               onChange={(e) => setStored({ ...stored, cloudToken: e.target.value })}
-                              placeholder="一般不需要,浏览器登录即可"
+                              placeholder={t('settings.token.placeholder')}
                             />
                           </div>
                           <div className="field" style={{ maxWidth: 160 }}>
-                            <label>代码沙箱</label>
+                            <label>{t('settings.sandbox.label')}</label>
                             <select
                               value={stored.sandbox}
                               onChange={(e) => setStored({ ...stored, sandbox: e.target.value as any })}
                             >
-                              <option value="auto">自动检测</option>
+                              <option value="auto">{t('settings.sandbox.auto')}</option>
                               <option value="docker">Docker</option>
-                              <option value="none">禁用</option>
+                              <option value="none">{t('settings.sandbox.none')}</option>
                             </select>
                           </div>
                         </div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
-                          <button className="btn primary sm" onClick={saveManaged}>保存并重启后端</button>
+                          <button className="btn primary sm" onClick={saveManaged}>{t('settings.backend.saveRestart')}</button>
                           <button
                             className="btn ghost sm"
                             onClick={() => void window.tangu!.backendRestart!().then(setBackendSt)}
                           >
-                            <RotateCcw size={12} /> 重启
+                            <RotateCcw size={12} /> {t('settings.backend.restart')}
                           </button>
                           <span className={`conn-pill ${backendSt?.state === 'ready' ? 'ok' : backendSt?.state === 'crashed' ? 'err' : ''}`}>
                             <span className="dot" />
-                            {BACKEND_STATE_LABEL[backendSt?.state || 'stopped']}
+                            {t(BACKEND_STATE_LABEL[backendSt?.state || 'stopped'])}
                             {backendSt?.url ? ` · ${backendSt.url}` : ''}
                           </span>
                         </div>
@@ -473,7 +441,7 @@ export const SettingsModal: React.FC<{
                         )}
                         {backendSt?.staleDist && (
                           <div className="hint" style={{ color: 'var(--danger)' }}>
-                            ⚠ 服务端代码已重新构建,当前后端仍在跑旧版本 —— 点上方「重启」加载新代码。
+                            {t('settings.backend.staleDist')}
                           </div>
                         )}
                         <div className="field">
@@ -481,7 +449,7 @@ export const SettingsModal: React.FC<{
                             className="btn ghost sm"
                             onClick={() => void window.tangu!.backendLogs!().then(setLogs)}
                           >
-                            查看后端日志
+                            {t('settings.backend.viewLogs')}
                           </button>
                           {logs && (
                             <pre style={{
@@ -490,7 +458,7 @@ export const SettingsModal: React.FC<{
                               border: 'var(--border-width) solid var(--border)', borderRadius: 'var(--radius-sm)',
                               whiteSpace: 'pre-wrap', wordBreak: 'break-all',
                             }}>
-                              {logs.length ? logs.join('\n') : '(暂无日志)'}
+                              {logs.length ? logs.join('\n') : t('settings.backend.noLogs')}
                             </pre>
                           )}
                         </div>
@@ -500,30 +468,30 @@ export const SettingsModal: React.FC<{
                     {(!isDesktop || mode === 'external') && (
                       <>
                         <div className="field">
-                          <label>后端地址</label>
+                          <label>{t('settings.external.urlLabel')}</label>
                           <input
                             type="text"
                             value={draft.backendUrl}
                             onChange={(e) => setDraft({ ...draft, backendUrl: e.target.value })}
                             placeholder="http://localhost:8787"
                           />
-                          <div className="hint">tangu-server 的 HTTP 地址(本机或远程);可用环境变量 TANGU_BACKEND_URL 预设。</div>
+                          <div className="hint">{t('settings.external.urlHint')}</div>
                         </div>
                         <div className="field">
-                          <label>访问令牌</label>
+                          <label>{t('settings.external.tokenLabel')}</label>
                           <input
                             type="password"
                             value={draft.token}
                             onChange={(e) => setDraft({ ...draft, token: e.target.value })}
-                            placeholder="tangu-server --token 配置的值"
+                            placeholder={t('settings.external.tokenPlaceholder')}
                           />
                         </div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                           <button className="btn ghost sm" onClick={test} disabled={testing}>
-                            {testing ? <Loader2 size={13} className="spin" /> : null} 测试连接
+                            {testing ? <Loader2 size={13} className="spin" /> : null} {t('settings.btn.testConnection')}
                           </button>
                           <button className="btn primary sm" onClick={saveConnection}>
-                            保存并连接
+                            {t('settings.btn.saveConnect')}
                           </button>
                           <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{testResult}</span>
                         </div>
@@ -535,66 +503,57 @@ export const SettingsModal: React.FC<{
                 {tab === 'model' && (
                   <>
                     <div className="field">
-                      <label>默认模型</label>
+                      <label>{t('settings.model.defaultLabel')}</label>
                       <div style={{ display: 'flex', gap: 8 }}>
                         <input
                           type="text"
                           value={draft.modelId}
                           onChange={(e) => setDraft({ ...draft, modelId: e.target.value })}
-                          placeholder="如 forsion 模型 id 或 ollama/llama3"
+                          placeholder={t('settings.model.defaultPlaceholder')}
                         />
                         <button className="btn ghost sm" onClick={() => p.onConfigChange({ modelId: draft.modelId })}>
-                          保存
+                          {t('settings.btn.save')}
                         </button>
                       </div>
                       <div className="hint">
-                        直连 provider 支持 <code>&lt;providerId&gt;/&lt;model&gt;</code> 自由填写;其余走 Forsion 托管面。
+                        {t('settings.model.defaultHintPrefix')}<code>&lt;providerId&gt;/&lt;model&gt;</code>{t('settings.model.defaultHintSuffix')}
                       </div>
                     </div>
                     <div className="field">
                       <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        可用模型
+                        {t('settings.model.availableLabel')}
                         <button className="icon-btn" style={{ width: 22, height: 22 }} onClick={loadModels}>
                           <RefreshCw size={12} className={modelsLoading ? 'spin' : ''} />
                         </button>
                       </label>
                       {models?.models.length ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                          {models.models.map((m) => (
-                            <button
-                              key={`${m.source}-${m.id}`}
-                              className="file-row"
-                              onClick={() => {
-                                setDraft({ ...draft, modelId: m.id })
-                                p.onConfigChange({ modelId: m.id })
-                              }}
-                            >
-                              <span className="file-name" style={{ color: m.id === draft.modelId ? 'var(--accent)' : undefined }}>
-                                {m.name}
-                              </span>
-                              <span className="file-size">{m.source === 'direct' ? `直连·${m.provider}` : m.provider}</span>
-                            </button>
-                          ))}
-                        </div>
+                        <ModelGroupList
+                          models={models.models}
+                          selectedId={draft.modelId}
+                          onSelect={(id) => {
+                            setDraft({ ...draft, modelId: id })
+                            p.onConfigChange({ modelId: id })
+                          }}
+                        />
                       ) : (
-                        <div className="hint">{modelsLoading ? '加载中…' : '暂无模型'}</div>
+                        <div className="hint">{modelsLoading ? t('common.loading') : t('model.empty')}</div>
                       )}
                       {models?.forsion && models.forsion.status !== 'ok' && (
                         <div className="hint" style={{ color: models.forsion.status === 'error' ? 'var(--danger)' : undefined, marginTop: 6 }}>
-                          {models.forsion.status === 'error' ? '⚠ 云端托管模型获取失败:' : 'ℹ '}
+                          {models.forsion.status === 'error' ? t('settings.model.cloudFetchError') : 'ℹ '}
                           {models.forsion.detail}
                         </div>
                       )}
                       {models?.directProviders.length ? (
                         <div className="hint">
-                          直连 provider:{models.directProviders.map((d) => d.providerId).join('、')}
+                          {t('settings.model.directProviders')}{models.directProviders.map((d) => d.providerId).join('、')}
                         </div>
                       ) : null}
                     </div>
 
                     {isDesktop && providers && providers.length > 0 && (
                       <div className="field">
-                        <label>Provider 账号登录(用订阅账号当 LLM,直连不计 Forsion 额度)</label>
+                        <label>{t('settings.provider.loginLabel')}</label>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           {providers.map((pr) => (
                             <button
@@ -605,13 +564,12 @@ export const SettingsModal: React.FC<{
                             >
                               {providerBusy === pr.id ? <Loader2 size={12} className="spin" /> : <LogIn size={12} />}
                               {pr.id}
-                              {pr.loggedIn ? ' · 已登录(重新登录)' : ''}
+                              {pr.loggedIn ? t('settings.provider.loggedInSuffix') : ''}
                             </button>
                           ))}
                         </div>
                         <div className="hint">
-                          OAuth 浏览器登录,凭证存 ~/.tangu/provider-auth.json(与 `tangu login {'<provider>'}` 通用);
-                          托管后端会自动重启加载,之后用 <code>provider/模型名</code>(如 xai/grok-3)即可。
+                          {t('settings.provider.loginHintPrefix')}<code>provider/model</code>{t('settings.provider.loginHintSuffix')}
                         </div>
                       </div>
                     )}
@@ -621,13 +579,12 @@ export const SettingsModal: React.FC<{
                 {tab === 'model' && isDesktop && (
                   <>
                     <div className="panel-section-title" style={{ marginTop: 8, padding: '12px 0 6px', borderTop: 'var(--border-width) solid var(--border)' }}>
-                      自定义 Provider(BYO-key 直连)
+                      {t('settings.customProvider.sectionTitle')}
                     </div>
                     <div className="field">
-                      <label>自定义 Provider(BYO-key 直连;对齐 Forsion 模型添加:base_URL + api key)</label>
+                      <label>{t('settings.customProvider.label')}</label>
                       <div className="hint" style={{ marginBottom: 8 }}>
-                        配置存 ~/.tangu/providers.json,与 CLI <code>--providers-file</code> 同格式;
-                        托管模式保存后自动重启后端加载。模型用 <code>providerId/模型名</code> 或白名单内的名字直接选。
+                        {t('settings.customProvider.introPrefix')}<code>--providers-file</code>{t('settings.customProvider.introMid')}<code>providerId/model</code>{t('settings.customProvider.introSuffix')}
                       </div>
                       {customProviders.length > 0 && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
@@ -638,12 +595,12 @@ export const SettingsModal: React.FC<{
                                 <span style={{ color: 'var(--text-muted)', marginLeft: 8, fontSize: 12 }}>{cp.baseUrl}</span>
                               </span>
                               <span className="file-size">
-                                {cp.modelIds?.length ? `${cp.modelIds.length} 模型` : '前缀任意模型'}
+                                {cp.modelIds?.length ? t('settings.customProvider.modelCount', { count: cp.modelIds.length }) : t('settings.customProvider.anyModel')}
                                 {cp.apiKey ? ' · key✓' : ''}
                               </span>
                               <button
                                 className="icon-btn"
-                                title="编辑"
+                                title={t('settings.btn.edit')}
                                 onClick={() => {
                                   setEditProvider({ ...cp, modelsCsv: (cp.modelIds || []).join(', ') })
                                   setProviderTestMsg('')
@@ -654,12 +611,12 @@ export const SettingsModal: React.FC<{
                               </button>
                               <button
                                 className="icon-btn"
-                                title="删除"
+                                title={t('settings.btn.delete')}
                                 onClick={() => {
-                                  if (!window.confirm(`删除 provider「${cp.providerId}」?`)) return
+                                  if (!window.confirm(t('settings.customProvider.deleteConfirm', { id: cp.providerId }))) return
                                   void window.tangu!.deleteProvider!(cp.providerId).then((list) => {
                                     setCustomProviders(list)
-                                    setProviderSaveMsg('已删除;托管后端重启加载中…')
+                                    setProviderSaveMsg(t('settings.customProvider.deletedReloading'))
                                   })
                                 }}
                               >
@@ -678,7 +635,7 @@ export const SettingsModal: React.FC<{
                             setProviderSaveMsg('')
                           }}
                         >
-                          <Plus size={13} /> 添加 Provider
+                          <Plus size={13} /> {t('settings.customProvider.add')}
                         </button>
                       )}
                       {providerSaveMsg && !editProvider && (
@@ -690,27 +647,27 @@ export const SettingsModal: React.FC<{
                       <>
                         <div className="field-row">
                           <div className="field">
-                            <label>Provider ID(也作模型前缀,如 ollama → ollama/llama3)</label>
+                            <label>{t('settings.customProvider.idLabel')}</label>
                             <input
                               type="text"
                               value={editProvider.providerId}
                               onChange={(e) => setEditProvider({ ...editProvider, providerId: e.target.value.trim() })}
-                              placeholder="如 ollama / siliconflow / openai"
+                              placeholder={t('settings.customProvider.idPlaceholder')}
                             />
                           </div>
                         </div>
                         <div className="field">
-                          <label>Base URL(OpenAI 兼容端点根,含 /v1)</label>
+                          <label>{t('settings.customProvider.baseUrlLabel')}</label>
                           <input
                             type="text"
                             value={editProvider.baseUrl}
                             onChange={(e) => setEditProvider({ ...editProvider, baseUrl: e.target.value.trim() })}
-                            placeholder="如 http://localhost:11434/v1 或 https://api.siliconflow.cn/v1"
+                            placeholder={t('settings.customProvider.baseUrlPlaceholder')}
                           />
                         </div>
                         <div className="field-row">
                           <div className="field">
-                            <label>API Key(Ollama 等本地端点可空)</label>
+                            <label>{t('settings.customProvider.apiKeyLabel')}</label>
                             <input
                               type="password"
                               value={editProvider.apiKey || ''}
@@ -719,12 +676,12 @@ export const SettingsModal: React.FC<{
                             />
                           </div>
                           <div className="field">
-                            <label>模型白名单(逗号分隔,可空)</label>
+                            <label>{t('settings.customProvider.modelsLabel')}</label>
                             <input
                               type="text"
                               value={editProvider.modelsCsv}
                               onChange={(e) => setEditProvider({ ...editProvider, modelsCsv: e.target.value })}
-                              placeholder="如 llama3, qwen2.5-coder"
+                              placeholder={t('settings.customProvider.modelsPlaceholder')}
                             />
                           </div>
                         </div>
@@ -746,7 +703,7 @@ export const SettingsModal: React.FC<{
                                 .finally(() => setProviderTesting(false))
                             }}
                           >
-                            {providerTesting ? <Loader2 size={12} className="spin" /> : <Plug size={12} />} 测试连接
+                            {providerTesting ? <Loader2 size={12} className="spin" /> : <Plug size={12} />} {t('settings.btn.testConnection')}
                           </button>
                           <button
                             className="btn primary sm"
@@ -762,13 +719,13 @@ export const SettingsModal: React.FC<{
                                 setCustomProviders(list)
                                 setEditProvider(null)
                                 setModels(null) // 强制下次进模型页重新拉列表
-                                setProviderSaveMsg('已保存;托管后端重启加载中…')
-                              }).catch((e) => setProviderTestMsg(`保存失败:${e?.message || e}`))
+                                setProviderSaveMsg(t('settings.customProvider.savedReloading'))
+                              }).catch((e) => setProviderTestMsg(`${t('settings.toast.saveFailed')}${e?.message || e}`))
                             }}
                           >
-                            保存
+                            {t('settings.btn.save')}
                           </button>
-                          <button className="btn ghost sm" onClick={() => setEditProvider(null)}>取消</button>
+                          <button className="btn ghost sm" onClick={() => setEditProvider(null)}>{t('settings.btn.cancel')}</button>
                           <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{providerTestMsg}</span>
                         </div>
                       </>
@@ -776,7 +733,7 @@ export const SettingsModal: React.FC<{
 
                     {stored?.mode === 'external' && !(stored?.backendUrl || '').includes('localhost') && !(stored?.backendUrl || '').includes('127.0.0.1') && (
                       <div className="hint" style={{ marginTop: 10 }}>
-                        ⚠ 当前为外部后端模式:这里编辑的是本机 ~/.tangu/providers.json,远程 tangu-server 不会读到。
+                        {t('settings.customProvider.externalWarning')}
                       </div>
                     )}
                   </>
@@ -785,20 +742,19 @@ export const SettingsModal: React.FC<{
                 {tab === 'mcp' && (
                   <>
                     <div className="field">
-                      <label>MCP Server(配置存 ~/.tangu/mcp.json;保存后托管后端重启重连)</label>
+                      <label>{t('settings.mcp.label')}</label>
                       <div className="hint" style={{ marginBottom: 8 }}>
-                        工具以 <code>mcp__服务名__工具名</code> 出现;server 集在后端启动时冻结,
-                        变更只对重启后的新对话生效(上下文缓存会重建一次)。
+                        {t('settings.mcp.introPrefix')}<code>mcp__server__tool</code>{t('settings.mcp.introSuffix')}
                       </div>
                       {Object.keys(mcpServers).length > 0 && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>
                           {Object.entries(mcpServers).map(([name, sc]) => {
                             const st = mcpStatus?.find((s) => s.server === name)
                             const stLabel = sc.enabled === false
-                              ? '未启用'
+                              ? t('settings.mcp.statusDisabled')
                               : st
-                                ? st.status === 'connected' ? `已连接 · ${st.tools.length} 工具` : st.status === 'error' ? `连接失败` : st.status
-                                : '后端未加载(重启后生效)'
+                                ? st.status === 'connected' ? t('settings.mcp.statusConnected', { count: st.tools.length }) : st.status === 'error' ? t('settings.mcp.statusError') : st.status
+                                : t('settings.mcp.statusNotLoaded')
                             return (
                               <div key={name} className="file-row" style={{ cursor: 'default' }}>
                                 <span className="file-name">
@@ -810,17 +766,17 @@ export const SettingsModal: React.FC<{
                                 <span className="file-size" title={st?.error || undefined}>{stLabel}</span>
                                 <button
                                   className="icon-btn"
-                                  title={sc.enabled === false ? '启用' : '停用'}
+                                  title={sc.enabled === false ? t('settings.mcp.enable') : t('settings.mcp.disable')}
                                   onClick={() => writeMcp(
                                     { ...mcpServers, [name]: { ...sc, enabled: sc.enabled === false } },
-                                    sc.enabled === false ? '已启用;重启后端后连接' : '已停用;重启后端后断开',
+                                    sc.enabled === false ? t('settings.mcp.enabledMsg') : t('settings.mcp.disabledMsg'),
                                   )}
                                 >
                                   <Plug size={13} style={{ opacity: sc.enabled === false ? 0.35 : 1 }} />
                                 </button>
                                 <button
                                   className="icon-btn"
-                                  title="编辑"
+                                  title={t('settings.btn.edit')}
                                   onClick={() => setEditMcp({
                                     name,
                                     isNew: false,
@@ -835,12 +791,12 @@ export const SettingsModal: React.FC<{
                                 </button>
                                 <button
                                   className="icon-btn"
-                                  title="删除"
+                                  title={t('settings.btn.delete')}
                                   onClick={() => {
-                                    if (!window.confirm(`删除 MCP server「${name}」?`)) return
+                                    if (!window.confirm(t('settings.mcp.deleteConfirm', { name }))) return
                                     const next = { ...mcpServers }
                                     delete next[name]
-                                    writeMcp(next, '已删除')
+                                    writeMcp(next, t('settings.mcp.deletedMsg'))
                                   }}
                                 >
                                   <Trash2 size={13} />
@@ -855,7 +811,7 @@ export const SettingsModal: React.FC<{
                           className="btn ghost sm"
                           onClick={() => setEditMcp({ name: '', isNew: true, command: '', argsText: '', url: '', transport: 'auto', envText: '' })}
                         >
-                          <Plus size={13} /> 添加 MCP Server
+                          <Plus size={13} /> {t('settings.mcp.add')}
                         </button>
                       )}
                       {mcpMsg && !editMcp && <div className="hint" style={{ marginTop: 6 }}>{mcpMsg}</div>}
@@ -865,22 +821,22 @@ export const SettingsModal: React.FC<{
                       <>
                         <div className="field-row">
                           <div className="field">
-                            <label>名称(工具前缀)</label>
+                            <label>{t('settings.mcp.nameLabel')}</label>
                             <input
                               type="text"
                               value={editMcp.name}
                               disabled={!editMcp.isNew}
                               onChange={(e) => setEditMcp({ ...editMcp, name: e.target.value.trim() })}
-                              placeholder="如 filesystem / github"
+                              placeholder={t('settings.mcp.namePlaceholder')}
                             />
                           </div>
                           <div className="field" style={{ maxWidth: 140 }}>
-                            <label>传输</label>
+                            <label>{t('settings.mcp.transportLabel')}</label>
                             <select
                               value={editMcp.transport}
                               onChange={(e) => setEditMcp({ ...editMcp, transport: e.target.value as any })}
                             >
-                              <option value="auto">自动推断</option>
+                              <option value="auto">{t('settings.mcp.transportAuto')}</option>
                               <option value="stdio">stdio</option>
                               <option value="http">HTTP</option>
                               <option value="sse">SSE</option>
@@ -888,7 +844,7 @@ export const SettingsModal: React.FC<{
                           </div>
                         </div>
                         <div className="field">
-                          <label>命令(stdio;与 URL 二选一)</label>
+                          <label>{t('settings.mcp.commandLabel')}</label>
                           <div style={{ display: 'flex', gap: 8 }}>
                             <input
                               type="text"
@@ -906,7 +862,7 @@ export const SettingsModal: React.FC<{
                           </div>
                         </div>
                         <div className="field">
-                          <label>URL(HTTP/SSE)</label>
+                          <label>{t('settings.mcp.urlLabel')}</label>
                           <input
                             type="text"
                             value={editMcp.url}
@@ -915,7 +871,7 @@ export const SettingsModal: React.FC<{
                           />
                         </div>
                         <div className="field">
-                          <label>环境变量(每行 KEY=VALUE,可空)</label>
+                          <label>{t('settings.mcp.envLabel')}</label>
                           <textarea
                             rows={2}
                             value={editMcp.envText}
@@ -940,13 +896,13 @@ export const SettingsModal: React.FC<{
                                 ...(Object.keys(env).length ? { env } : {}),
                                 enabled: mcpServers[editMcp.name]?.enabled !== false,
                               }
-                              writeMcp({ ...mcpServers, [editMcp.name]: entry }, '已保存;托管后端重启重连中…')
+                              writeMcp({ ...mcpServers, [editMcp.name]: entry }, t('settings.mcp.savedReconnecting'))
                               setEditMcp(null)
                             }}
                           >
-                            保存
+                            {t('settings.btn.save')}
                           </button>
-                          <button className="btn ghost sm" onClick={() => setEditMcp(null)}>取消</button>
+                          <button className="btn ghost sm" onClick={() => setEditMcp(null)}>{t('settings.btn.cancel')}</button>
                           <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{mcpMsg}</span>
                         </div>
                       </>
@@ -957,7 +913,7 @@ export const SettingsModal: React.FC<{
                 {tab === 'theme' && (
                   <>
                     <div className="field">
-                      <label>主题</label>
+                      <label>{t('settings.theme.themeLabel')}</label>
                       <div className="theme-grid">
                         {listThemes().map((t) => (
                           <ThemeCard
@@ -974,7 +930,7 @@ export const SettingsModal: React.FC<{
                       </div>
                     </div>
                     <div className="field">
-                      <label>明暗</label>
+                      <label>{t('settings.theme.modeLabel')}</label>
                       <div className="seg">
                         <button
                           className={p.themeMode === 'light' ? 'active' : ''}
@@ -984,7 +940,7 @@ export const SettingsModal: React.FC<{
                           }}
                         >
                           <Sun size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
-                          亮色
+                          {t('settings.theme.light')}
                         </button>
                         <button
                           className={p.themeMode === 'dark' ? 'active' : ''}
@@ -994,15 +950,15 @@ export const SettingsModal: React.FC<{
                           }}
                         >
                           <Moon size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
-                          暗色{p.themePreset === 'sozhi' ? '(夜读)' : ''}
+                          {t('settings.theme.dark')}{p.themePreset === 'sozhi' ? t('settings.theme.darkNightRead') : ''}
                         </button>
                       </div>
                     </div>
                     <div className="field">
-                      <label>毛玻璃质感</label>
+                      <label>{t('settings.theme.glassLabel')}</label>
                       <div className="seg">
-                        <button className={p.glassOn ? 'active' : ''} onClick={() => p.onGlassChange(true)}>开</button>
-                        <button className={!p.glassOn ? 'active' : ''} onClick={() => p.onGlassChange(false)}>关(低配模式)</button>
+                        <button className={p.glassOn ? 'active' : ''} onClick={() => p.onGlassChange(true)}>{t('settings.theme.glassOn')}</button>
+                        <button className={!p.glassOn ? 'active' : ''} onClick={() => p.onGlassChange(false)}>{t('settings.theme.glassOff')}</button>
                       </div>
                     </div>
                   </>
@@ -1012,18 +968,16 @@ export const SettingsModal: React.FC<{
                   <>
                     <div className="field">
                       <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        技能库
+                        {t('settings.skills.libraryLabel')}
                         <button className="icon-btn" style={{ width: 22, height: 22 }} onClick={loadAllSkills}>
                           <RefreshCw size={12} className={allSkillsLoading ? 'spin' : ''} />
                         </button>
                       </label>
                       <div className="hint" style={{ marginBottom: 8 }}>
-                        按来源渠道(agent 文件夹)分组。本地技能放 ~/.tangu/skills/&lt;id&gt;/SKILL.md;自动识别
-                        ~/.claude/skills 与 ~/.codex/prompts(env TANGU_EXTERNAL_SKILLS=off 可关)。会话内启用在
-                        右侧面板或输入 /skill 命令;此处管理全局技能与云端同步。
+                        {t('settings.skills.libraryHintPrefix')}~/.tangu/skills/&lt;id&gt;/SKILL.md{t('settings.skills.libraryHintSuffix')}
                       </div>
-                      {allSkills === null && <div className="hint">{allSkillsLoading ? '加载中…' : '点击刷新加载'}</div>}
-                      {allSkills?.length === 0 && <div className="hint">暂无技能。</div>}
+                      {allSkills === null && <div className="hint">{allSkillsLoading ? t('settings.skills.loading') : t('settings.skills.clickRefresh')}</div>}
+                      {allSkills?.length === 0 && <div className="hint">{t('settings.skills.empty')}</div>}
                       {!!allSkills?.length && (() => {
                         // 按来源渠道(agent 文件夹)分组,空渠道不渲染;未知 source → 「其他」。
                         const known = new Set<string>(SKILL_CHANNELS.map((c) => c.key))
@@ -1034,14 +988,14 @@ export const SettingsModal: React.FC<{
                           arr.push(s)
                           groups.set(k, arr)
                         }
-                        const sections = [...SKILL_CHANNELS, { key: 'other' as const, label: '其他' }]
+                        const sections = [...SKILL_CHANNELS, { key: 'other' as const, labelKey: 'settings.skills.channel.other' }]
                           .filter((c) => (groups.get(c.key)?.length || 0) > 0)
                         return (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                             {sections.map((c) => (
                               <div key={c.key}>
                                 <div className="panel-section-title" style={{ padding: '8px 8px 4px' }}>
-                                  {c.label} · {groups.get(c.key)!.length}
+                                  {t(c.labelKey)} · {groups.get(c.key)!.length}
                                 </div>
                                 {groups.get(c.key)!.map((s) => (
                                   <div key={s.id} className="file-row" style={{ cursor: 'default' }}>
@@ -1057,16 +1011,16 @@ export const SettingsModal: React.FC<{
                                       <button
                                         className="btn ghost sm"
                                         disabled={skillBusy === s.id}
-                                        title="上传为本人云端技能(云端 Tangu 会话可用)"
+                                        title={t('settings.skills.uploadTitle')}
                                         onClick={() => void doUploadSkill(s.id)}
                                       >
-                                        {skillBusy === s.id ? <Loader2 size={11} className="spin" /> : '上传云端'}
+                                        {skillBusy === s.id ? <Loader2 size={11} className="spin" /> : t('settings.skills.uploadBtn')}
                                       </button>
                                     )}
                                     {s.source === 'user' && (
                                       <button
                                         className="icon-btn"
-                                        title="删除本人云端技能"
+                                        title={t('settings.skills.deleteTitle')}
                                         disabled={skillBusy === s.id}
                                         onClick={() => void doDeleteUserSkill(s.id)}
                                       >
@@ -1085,14 +1039,13 @@ export const SettingsModal: React.FC<{
 
                     {isDesktop && !!window.tangu?.discoveryScan && (
                       <div className="field" style={{ marginTop: 14 }}>
-                        <label>从其他 Agent 导入(Claude Code / Codex / Hermes)</label>
+                        <label>{t('settings.discovery.label')}</label>
                         <div className="hint" style={{ marginBottom: 8 }}>
-                          扫描本机 ~/.claude、~/.codex、~/.hermes 的技能与 MCP 配置,勾选后导入
-                          ~/.tangu。导入的 MCP 一律默认停用,不会自动运行外来命令。
+                          {t('settings.discovery.hint')}
                         </div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
                           <button className="btn ghost sm" disabled={discScanning} onClick={() => void doDiscScan()}>
-                            {discScanning ? <Loader2 size={12} className="spin" /> : <Search size={12} />} 扫描本机
+                            {discScanning ? <Loader2 size={12} className="spin" /> : <Search size={12} />} {t('settings.discovery.scan')}
                           </button>
                           {disc && (
                             <button
@@ -1101,18 +1054,18 @@ export const SettingsModal: React.FC<{
                               onClick={() => void doDiscImport()}
                             >
                               {discImporting ? <Loader2 size={12} className="spin" /> : <Download size={12} />}
-                              导入所选({discSelSkills.size + discSelMcp.size})
+                              {t('settings.discovery.importSelected', { count: discSelSkills.size + discSelMcp.size })}
                             </button>
                           )}
                         </div>
 
                         {disc && disc.skills.length === 0 && disc.mcpServers.length === 0 && (
-                          <div className="hint">未发现可导入的技能或 MCP 配置。</div>
+                          <div className="hint">{t('settings.discovery.nothingFound')}</div>
                         )}
 
                         {disc && disc.skills.length > 0 && (
                           <div className="field">
-                            <label>技能({disc.skills.length})</label>
+                            <label>{t('settings.discovery.skillsCount', { count: disc.skills.length })}</label>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                               {disc.skills.map((s) => (
                                 <label key={`${s.ecosystem}:${s.id}`} className="file-row" style={{ cursor: 'pointer' }}>
@@ -1136,7 +1089,7 @@ export const SettingsModal: React.FC<{
 
                         {disc && disc.mcpServers.length > 0 && (
                           <div className="field">
-                            <label>MCP Server({disc.mcpServers.length})</label>
+                            <label>{t('settings.discovery.mcpCount', { count: disc.mcpServers.length })}</label>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                               {disc.mcpServers.map((m) => {
                                 const key = `${m.ecosystem}:${m.name}`
@@ -1170,10 +1123,50 @@ export const SettingsModal: React.FC<{
                 {tab === 'advanced' && (
                   <>
                     <div className="panel-note">
-                      会话级配置(技能/工具启用、执行环境、审批档)在右侧面板与输入栏调整。
-                      快捷键:Ctrl/Cmd+N 新建会话,Ctrl/Cmd+, 打开设置。
+                      {t('settings.advanced.note')}
                     </div>
 
+                  </>
+                )}
+
+                {tab === 'about' && (
+                  <>
+                    <div className="field">
+                      <label>{t('common.language')}</label>
+                      <LocaleToggle />
+                    </div>
+                    <div className="field" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div>
+                        <div style={{ fontWeight: 600 }}>{t('about.builtWith')}</div>
+                        <div className="hint" style={{ marginTop: 2 }}>
+                          {t('about.version')} {appVersion || CHANGELOG[0]?.version || '—'}
+                        </div>
+                      </div>
+                      <span className="grow" />
+                      <button
+                        className="btn ghost sm"
+                        onClick={() => window.open('https://forsion.app', '_blank')}
+                      >
+                        <ExternalLink size={12} /> {t('about.checkUpdates')}
+                      </button>
+                    </div>
+                    <div className="field">
+                      <label>{t('about.changelogTitle')}</label>
+                      <div className="changelog">
+                        {CHANGELOG.map((c) => (
+                          <div key={c.version} className="changelog-entry">
+                            <div className="changelog-ver">
+                              v{c.version} <span className="changelog-date">{c.date}</span>
+                            </div>
+                            <ul>
+                              {(locale === 'en' ? c.en : c.zh).map((line, i) => (
+                                <li key={i}>{line}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </>
                 )}
               </div>

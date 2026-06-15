@@ -12,6 +12,7 @@ import { ToolCallCard } from './ToolCallCard'
 import { ApprovalCard } from './ApprovalCard'
 import { InquiryCard, PlanCard, TodoList } from './InquiryCard'
 import { BrandLogo } from './BrandLogo'
+import { useI18n } from '../i18n'
 
 export const ChatArea: React.FC<{
   messages: UiMessage[]
@@ -19,15 +20,17 @@ export const ChatArea: React.FC<{
   onApproval: (runOwnerMessageId: string, approvalId: string, action: 'approve' | 'approve_always' | 'reject', argsOverride?: Record<string, any>) => void
   onInquiry: (runOwnerMessageId: string, inquiryId: string, answer: string) => void
 }> = ({ messages, containerRef, onApproval, onInquiry }) => {
+  const { t } = useI18n()
   const internalRef = useRef<HTMLDivElement>(null)
   const ref = containerRef ?? internalRef
-  const followBottom = useRef(true) // 是否自动吸底(用户上滑释放,回底恢复)
-  const lastTop = useRef(0)
-  // 程序化滚动后短暂(100ms)忽略「上滑」判定:scrollTo()/scrollTop= 自身会触发 scroll 事件,
-  // 否则会被误读成用户上滑而错误释放跟随——这正是旧版「上滑仍被强拽回底」的根因。
-  const programmaticScrollAt = useRef(0)
+  // 是否吸底:**纯位置**判定。每次 scroll 事件按"离底距离"重算 —— 程序化吸底落到底→dist≈0→stick=true
+  // (自洽,不会被误判为上滑);用户用任意方式(滚轮/触摸/拖滚动条/键盘)上滑→dist>阈值→stick=false。
+  // 内容增长只改 scrollHeight、不改 scrollTop、不触发 scroll → 增长期间 stick 不被误改。
+  // 没有 delta/时间窗 → 不会出现旧版"流式高频 follow 把时间窗焐热、令上滑判定永久失效"的死锁。
+  const stick = useRef(true)
   const streamingNodeRef = useRef<HTMLDivElement | null>(null)
   const [showJump, setShowJump] = useState(false)
+  const STICK_THRESHOLD = 80
 
   // 正在流式输出的消息 id(吸底锚点;无则非流式,走一次性 snap)。
   const streamingId = useMemo(() => messages.find((m) => m.status === 'streaming')?.id ?? null, [messages])
@@ -35,10 +38,8 @@ export const ChatArea: React.FC<{
   const scrollToBottom = useCallback((smooth = false) => {
     const el = ref.current
     if (!el) return
-    programmaticScrollAt.current = performance.now()
     el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
-    lastTop.current = el.scrollHeight
-    followBottom.current = true
+    stick.current = true
     setShowJump(false)
   }, [ref])
 
@@ -46,54 +47,39 @@ export const ChatArea: React.FC<{
     const el = ref.current
     if (!el) return
     const onScroll = () => {
-      const top = el.scrollTop
-      const scrolledUp = top < lastTop.current - 2
-      lastTop.current = top
-      const dist = el.scrollHeight - top - el.clientHeight
-      const atBottom = dist < 80
-      const sinceProgrammatic = performance.now() - programmaticScrollAt.current
-      // 仅当「用户上滑且未到底,且不是刚刚的程序化滚动余波」才释放跟随。
-      if (scrolledUp && !atBottom && sinceProgrammatic > 100) {
-        followBottom.current = false
-      } else if (atBottom) {
-        followBottom.current = true
-      }
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD
+      stick.current = atBottom
       setShowJump(!atBottom)
     }
-    // 用户主动滚动(滚轮上滑 / 触摸拖动)是**无歧义**的「我要看历史」信号 —— 程序化滚动绝不会
-    // 触发 wheel/touchmove。据此立刻释放吸底,绕开 sinceProgrammatic 时间窗:流式高频 follow() 每帧
-    // 刷新该时间戳会让窗口长期"热"、令 onScroll 里的上滑判定永远被压制(死锁),表现为「上滑仍被拽回底」。
-    const releaseIfScrolledUp = () => {
-      const dist = el.scrollHeight - el.scrollTop - el.clientHeight
-      if (dist > 80) {
-        followBottom.current = false
+    // 滚轮上滑 / 触摸拖动是**无歧义**的用户意图(程序化滚动绝不触发),立即解除吸底并 latch 住,
+    // 确保在下一帧 follow() 之前 stick 已为 false —— 极快流式下也不会被 follow 抢回。
+    const releaseIfUp = () => {
+      if (el.scrollHeight - el.scrollTop - el.clientHeight >= STICK_THRESHOLD) {
+        stick.current = false
         setShowJump(true)
       }
     }
-    const onWheel = (e: WheelEvent) => { if (e.deltaY < 0) releaseIfScrolledUp() }
+    const onWheel = (e: WheelEvent) => { if (e.deltaY < 0) releaseIfUp() }
     el.addEventListener('scroll', onScroll, { passive: true })
     el.addEventListener('wheel', onWheel, { passive: true })
-    el.addEventListener('touchmove', releaseIfScrolledUp, { passive: true })
+    el.addEventListener('touchmove', releaseIfUp, { passive: true })
     return () => {
       el.removeEventListener('scroll', onScroll)
       el.removeEventListener('wheel', onWheel)
-      el.removeEventListener('touchmove', releaseIfScrolledUp)
+      el.removeEventListener('touchmove', releaseIfUp)
     }
   }, [ref])
 
   // 流式中:用 ResizeObserver 盯住「流式消息节点」的实际布局增长来吸底(而非靠 messages 引用
   // 每 token 变化触发的 effect——那会在布局未稳时滚动,产生上下抖动)。instant 滚动避免平滑动画
-  // 互相追逐。仅在仍吸底时跟随,绝不抢用户已上滑的视图。
+  // 互相追逐。仅在 stick 时跟随,绝不抢用户已上滑的视图。
   useEffect(() => {
     if (!streamingId) return
     const node = streamingNodeRef.current
     const el = ref.current
     if (!node || !el) return
     const follow = () => {
-      if (!followBottom.current) return
-      programmaticScrollAt.current = performance.now()
-      el.scrollTop = el.scrollHeight
-      lastTop.current = el.scrollTop
+      if (stick.current) el.scrollTop = el.scrollHeight
     }
     follow() // 流式气泡首次挂载时先吸一次
     const ro = new ResizeObserver(() => requestAnimationFrame(follow))
@@ -104,20 +90,18 @@ export const ChatArea: React.FC<{
   // 非流式的一次性吸底(新用户消息 / 工具结果插入)。流式期间交给上面的 ResizeObserver。
   useEffect(() => {
     if (streamingId) return
-    if (!followBottom.current) return
+    if (!stick.current) return
     const el = ref.current
     if (!el) return
-    programmaticScrollAt.current = performance.now()
     el.scrollTop = el.scrollHeight
-    lastTop.current = el.scrollTop
   }, [messages, streamingId, ref])
 
   if (!messages.length) {
     return (
       <div className="empty-state">
         <BrandLogo size={56} />
-        <div className="empty-title">纸上得来终觉浅,绝知此事要躬行。</div>
-        <div style={{ fontSize: 12.5 }}>输入一句话,让 Tangu 开始干活。</div>
+        <div className="empty-title">{t('chat.emptyTitle')}</div>
+        <div style={{ fontSize: 12.5 }}>{t('chat.emptyHint')}</div>
       </div>
     )
   }
@@ -174,10 +158,10 @@ export const ChatArea: React.FC<{
                   </div>
                 ) : m.status === 'streaming' && !m.toolEvents?.length && !m.reasoning ? (
                   <div style={{ color: 'var(--text-faint)', fontSize: 13 }} className="streaming-caret">
-                    思考中
+                    {t('chat.thinking')}
                   </div>
                 ) : null}
-                {m.error ? <div className="msg-error">{m.error === 'aborted' ? '已停止。' : m.error}</div> : null}
+                {m.error ? <div className="msg-error">{m.error === 'aborted' ? t('chat.aborted') : m.error}</div> : null}
               </div>
             </div>
           ),
@@ -185,7 +169,7 @@ export const ChatArea: React.FC<{
         </div>
       </div>
       {showJump && (
-        <button className="jump-bottom" title="跳到底部" onClick={() => scrollToBottom(true)}>
+        <button className="jump-bottom" title={t('chat.jumpToBottom')} onClick={() => scrollToBottom(true)}>
           <ArrowDown size={16} />
         </button>
       )}

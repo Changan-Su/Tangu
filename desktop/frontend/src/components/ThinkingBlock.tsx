@@ -2,8 +2,10 @@
 import React, { useState } from 'react'
 import { ChevronRight, ChevronDown, Sparkles } from 'lucide-react'
 import { AnimatedCollapse } from './AnimatedUI'
+import { useI18n } from '../i18n'
 
 export const ThinkingBlock: React.FC<{ reasoning: string; streaming?: boolean }> = ({ reasoning, streaming }) => {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   if (!reasoning) return null
   return (
@@ -11,8 +13,8 @@ export const ThinkingBlock: React.FC<{ reasoning: string; streaming?: boolean }>
       <button className="thinking-toggle" onClick={() => setOpen(!open)}>
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         <Sparkles size={12} />
-        {streaming ? '思考中…' : '思考过程'}
-        <span style={{ opacity: 0.7 }}>({reasoning.length} 字)</span>
+        {streaming ? t('thinking.thinking') : t('thinking.process')}
+        <span style={{ opacity: 0.7 }}>{t('thinking.charCount', { count: reasoning.length })}</span>
       </button>
       <AnimatedCollapse open={open}>
         <div className="thinking-content">{reasoning}</div>

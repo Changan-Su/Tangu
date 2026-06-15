@@ -3,10 +3,10 @@
  * 负责:建窗 + 配置持久化(IPC)+ 托管内置 tangu-server(managed 模式,backendManager)。
  * agent 调用由 renderer 直连 HTTP/SSE(localhost),不经主进程代理。
  */
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell, nativeImage } from 'electron'
 import { dirname, join } from 'path'
 import { pathToFileURL } from 'url'
-import { readFile, writeFile, mkdir, chmod, readdir, stat } from 'fs/promises'
+import { readFile, writeFile, mkdir, chmod, readdir, stat, rename } from 'fs/promises'
 import { execFile, spawn } from 'child_process'
 import { BackendManager, type BackendStatus } from './backendManager'
 import {
@@ -322,6 +322,52 @@ app.whenReady().then(async () => {
     return { mimeType, content: buf.toString('base64'), size: st.size }
   })
 
+  // ── 本机工作区文件操作:重命名 / 新建文件夹 / 删除到回收站 / 在文件管理器显示 / 原生拖出 ──
+  // 安全:重命名/新建只接受**单段名字**(无路径分隔符、非 . / ..),结果始终落在原目录内,杜绝越权写。
+  const safeName = (s: unknown): s is string =>
+    typeof s === 'string' && s.length > 0 && s.length < 256 && !/[\\/]/.test(s) && !s.includes('\0') && s !== '.' && s !== '..'
+  const exists = async (p: string): Promise<boolean> => stat(p).then(() => true).catch(() => false)
+
+  ipcMain.handle('fs:rename', async (_e, oldPath: string, newName: string) => {
+    if (!oldPath || typeof oldPath !== 'string' || !safeName(newName)) throw new Error('非法的重命名参数')
+    const dest = join(dirname(oldPath), newName)
+    if (dest !== oldPath && (await exists(dest))) throw new Error('同名文件/文件夹已存在')
+    await rename(oldPath, dest)
+    return { path: dest }
+  })
+  ipcMain.handle('fs:mkdir', async (_e, parentDir: string, name: string) => {
+    if (!parentDir || typeof parentDir !== 'string' || !safeName(name)) throw new Error('非法的文件夹名')
+    const dest = join(parentDir, name)
+    if (await exists(dest)) throw new Error('同名文件/文件夹已存在')
+    await mkdir(dest, { recursive: false })
+    return { path: dest }
+  })
+  ipcMain.handle('fs:trash', async (_e, p: string) => {
+    if (!p || typeof p !== 'string') throw new Error('非法路径')
+    await shell.trashItem(p) // 移入系统回收站(可恢复),不做不可逆删除
+    return { ok: true }
+  })
+  ipcMain.handle('fs:reveal', async (_e, p: string) => {
+    if (!p || typeof p !== 'string') return { ok: false }
+    shell.showItemInFolder(p) // 在系统文件管理器中定位并高亮
+    return { ok: true }
+  })
+  // 原生拖出(把工作区文件拖到其它应用 / 桌面):必须用 webContents.startDrag,HTML5 dataTransfer
+  // 无法投递真实文件。单向 send(非 invoke);icon 用文件自身图标,取不到则回退一枚 16px 占位图。
+  const DRAG_FALLBACK_ICON =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAHElEQVR42mNkoBAwjhoAA0YwGo0GjUajQYMBADaqAQ8E2sQ4AAAAAElFTkSuQmCC'
+  ipcMain.on('fs:startDrag', async (e, filePath: string) => {
+    if (!filePath || typeof filePath !== 'string') return
+    let icon: Electron.NativeImage | undefined
+    try {
+      icon = await app.getFileIcon(filePath, { size: 'normal' })
+    } catch {
+      /* fall through to placeholder */
+    }
+    if (!icon || icon.isEmpty()) icon = nativeImage.createFromDataURL(DRAG_FALLBACK_ICON)
+    e.sender.startDrag({ file: filePath, icon })
+  })
+
   ipcMain.handle('backend:getStatus', () => backend.getStatus())
   ipcMain.handle('backend:getLogs', () => backend.getLogs())
   ipcMain.handle('backend:restart', async () => {
@@ -420,8 +466,24 @@ app.whenReady().then(async () => {
       loggedIn: !!token,
       cloudUrl,
       username: who?.username || null,
+      nickname: who?.nickname || null,
+      avatar: who?.avatar || null,
       tokenSource: stored.cloudToken ? 'config' : creds.token ? 'tangu-login' : null,
     }
+  })
+
+  ipcMain.handle('app:version', () => app.getVersion())
+
+  // 打开 Forsion 个人中心(对齐 AI Studio:{cloudUrl}/account?token=…)。token 留在主进程,不下发渲染层。
+  ipcMain.handle('auth:openAccountCenter', async () => {
+    const stored = await loadConfig()
+    const creds = loadTanguCreds()
+    const cloudUrl = (stored.cloudUrl || creds.cloudUrl || '').replace(/\/+$/, '')
+    const token = stored.cloudToken || creds.token || ''
+    if (!cloudUrl) return { ok: false }
+    const url = `${cloudUrl}/account${token ? `?token=${encodeURIComponent(token)}` : ''}`
+    await shell.openExternal(url)
+    return { ok: true }
   })
 
   ipcMain.handle('auth:forsionLogin', async (_e, cloudUrl?: string) => {

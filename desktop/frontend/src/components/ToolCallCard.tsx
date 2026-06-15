@@ -5,6 +5,7 @@
 import React, { useState } from 'react'
 import { ChevronRight, ChevronDown, Loader2, CheckCircle2, XCircle, Wrench } from 'lucide-react'
 import { AnimatedCollapse } from './AnimatedUI'
+import { useI18n } from '../i18n'
 import type { ToolEvent } from '../types'
 
 function argsHint(args?: string): string {
@@ -23,6 +24,7 @@ function argsHint(args?: string): string {
 }
 
 export const ToolCallCard: React.FC<{ ev: ToolEvent }> = ({ ev }) => {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   return (
     <div className={`tool-card${ev.isError ? ' err' : ''}`}>
@@ -39,14 +41,14 @@ export const ToolCallCard: React.FC<{ ev: ToolEvent }> = ({ ev }) => {
         <div className="tool-card-body">
           {ev.arguments && (
             <>
-              <div className="label">参数</div>
+              <div className="label">{t('tool.argsLabel')}</div>
               {formatArgs(ev.arguments)}
             </>
           )}
           {ev.result !== undefined && (
             <>
-              <div className="label">结果</div>
-              {ev.result || '(空)'}
+              <div className="label">{t('tool.resultLabel')}</div>
+              {ev.result || t('tool.empty')}
             </>
           )}
         </div>

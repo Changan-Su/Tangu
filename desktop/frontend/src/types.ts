@@ -263,6 +263,8 @@ export interface AuthStatusInfo {
   loggedIn: boolean
   cloudUrl: string
   username: string | null
+  nickname?: string | null
+  avatar?: string | null
   tokenSource: 'config' | 'tangu-login' | null
 }
 
@@ -281,6 +283,8 @@ declare global {
       forsionLogout?(): Promise<{ ok: boolean }>
       authProviders?(): Promise<Array<{ id: string; loggedIn: boolean }>>
       providerLogin?(id: string): Promise<{ ok: boolean; id: string }>
+      openAccountCenter?(): Promise<{ ok: boolean }>
+      appVersion?(): Promise<string>
       onAuthDevice?(cb: (info: { url: string; userCode: string }) => void): () => void
       pickDirectory?(): Promise<string | null>
       /** 拖入文件 → 绝对路径(本机模式粘贴路径用)。 */
@@ -288,6 +292,12 @@ declare global {
       /** 本机工作区文件浏览(host cwd)。 */
       listDir?(dirPath: string): Promise<Array<{ name: string; isDir: boolean; size: number }>>
       readHostFile?(filePath: string): Promise<{ mimeType: string; content: string; size: number; tooLarge?: boolean }>
+      /** 本机工作区文件操作(host 模式)。 */
+      renameHostPath?(oldPath: string, newName: string): Promise<{ path: string }>
+      mkdirHost?(parentDir: string, name: string): Promise<{ path: string }>
+      trashHostPath?(p: string): Promise<{ ok: boolean }>
+      revealHostPath?(p: string): Promise<{ ok: boolean }>
+      startHostDrag?(filePath: string): void
       listProviders?(): Promise<DirectProviderConfig[]>
       saveProvider?(provider: DirectProviderConfig): Promise<DirectProviderConfig[]>
       deleteProvider?(providerId: string): Promise<DirectProviderConfig[]>

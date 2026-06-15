@@ -17,6 +17,7 @@ import { SettingsModal } from './components/SettingsModal'
 import { RightPanel } from './components/RightPanel'
 import { OnboardingWizard, ONBOARDING_DISMISS_KEY } from './components/OnboardingWizard'
 import { resolveInitialMode, resolveInitialPreset } from './theme/registry'
+import { useI18n } from './i18n'
 
 const UNREAD_KEY = 'forsion_tangu_unread_sessions'
 
@@ -60,6 +61,7 @@ function recordToUi(r: any): UiMessage {
 }
 
 export function App(): React.JSX.Element {
+  const { t } = useI18n()
   const [cfg, setCfg] = useState<TanguDesktopConfig>({ backendUrl: 'http://localhost:8787', token: '', modelId: '' })
   const [cfgLoaded, setCfgLoaded] = useState(false)
   const [connState, setConnState] = useState<'idle' | 'ok' | 'err'>('idle')
@@ -232,7 +234,7 @@ export function App(): React.JSX.Element {
           ...prev,
           [sessionId]: { ...(prev[sessionId] || {}), planMode: false },
         }))
-        if (pl.file) toast(`计划已存档:${pl.file}`)
+        if (pl.file) toast(t('app.planArchived', { file: pl.file }))
         break
       case 'done':
         patchMessage(sessionId, assistantId, (m) => ({
@@ -257,7 +259,7 @@ export function App(): React.JSX.Element {
       default:
         break
     }
-  }, [patchMessage, endRun, toast])
+  }, [patchMessage, endRun, toast, t])
 
   const subscribeRun = useCallback(
     (sessionId: string, runId: string, assistantId: string) => {
@@ -268,11 +270,11 @@ export function App(): React.JSX.Element {
       setRunningBySession((prev) => ({ ...prev, [sessionId]: runId }))
       void subscribeRunEvents(cfgRef.current, runId, (ev) => reduceEvent(sessionId, runId, assistantId, ev), ac.signal)
         .catch((e) => {
-          patchMessage(sessionId, assistantId, (m) => ({ ...m, status: 'error', error: e?.message || '事件流中断' }))
+          patchMessage(sessionId, assistantId, (m) => ({ ...m, status: 'error', error: e?.message || t('app.eventStreamInterrupted') }))
           endRun(sessionId, runId)
         })
     },
-    [reduceEvent, endRun, patchMessage],
+    [reduceEvent, endRun, patchMessage, t],
   )
 
   // ── 启动:配置 → 连接 → 会话列表 ──
@@ -292,13 +294,13 @@ export function App(): React.JSX.Element {
       const act = await refreshSessions(c)
       setActiveId((cur) => (cur && act.some((s) => s.id === cur) ? cur : (act[0]?.id ?? null)))
     } catch (e: any) {
-      toast(`会话列表加载失败:${e?.message || e}`, true)
+      toast(t('app.sessionListLoadFail', { e: e?.message || e }), true)
     }
     // 模型目录(输入栏会话内切换器用);失败静默,选择器自动隐藏。
     void api.listModels(c).then(setModelsResp).catch(() => setModelsResp(null))
     // 技能目录(斜杠命令 /skill:* 用);失败静默。
     void api.listSkills(c).then(setSkillsList).catch(() => setSkillsList(null))
-  }, [refreshSessions, toast])
+  }, [refreshSessions, toast, t])
 
   useEffect(() => {
     void (async () => {
@@ -319,7 +321,7 @@ export function App(): React.JSX.Element {
         // 未就绪别用 stale 默认配置硬连(会误报「未连接」,且后端随后就绪的 ready 事件若错过就一直卡着——
         // 正是「启动后显示未连接、去设置重启才好」的根因);改为显示「启动中」,等下方 onBackendStatus 的 ready。
         if (stored.backendState?.state === 'ready') void connect(merged)
-        else { setConnState('idle'); setConnMessage('托管后端启动中…') }
+        else { setConnState('idle'); setConnMessage(t('app.managedBackendStarting')) }
       } else if (merged.token) {
         void connect(merged)
       }
@@ -348,10 +350,10 @@ export function App(): React.JSX.Element {
         })
       } else if (st.state === 'starting') {
         setConnState('idle')
-        setConnMessage('托管后端启动中…')
+        setConnMessage(t('app.managedBackendStarting'))
       } else if (st.state === 'crashed') {
         setConnState('err')
-        setConnMessage(st.lastError || '托管后端已退出')
+        setConnMessage(st.lastError || t('app.managedBackendExited'))
       }
     })
     return () => off?.()
@@ -403,26 +405,26 @@ export function App(): React.JSX.Element {
         }
       } catch (e: any) {
         loadedHistory.current.delete(activeId)
-        toast(`历史加载失败:${e?.message || e}`, true)
+        toast(t('app.historyLoadFail', { e: e?.message || e }), true)
       }
     })()
-  }, [activeId, connState, subscribeRun, toast])
+  }, [activeId, connState, subscribeRun, toast, t])
 
   // ── 工作区 / 会话操作 ──
   /** 默认本地工作区(Tangu 默认工作区;cwd=defaultWsDir,空时回退主目录)。 */
   const defaultWorkspace = useCallback((): WorkspaceDescriptor => ({
     key: defaultWsDirRef.current || '__default_ws__',
-    name: 'Tangu 默认工作区',
+    name: t('app.defaultWorkspace'),
     kind: 'local',
     path: defaultWsDirRef.current || homeDirRef.current || null,
-  }), [])
+  }), [t])
 
   /** 工作区列表:Cloud + Tangu 默认 常驻(空也在),再并入会话出现过的其它本地目录。 */
   const workspaces = useMemo<WorkspaceDescriptor[]>(() => {
     const defPath = defaultWsDir || homeDirRef.current || null
     const list: WorkspaceDescriptor[] = [
-      { key: CLOUD_WORKSPACE_KEY, name: 'Cloud 工作区', kind: 'cloud', path: null },
-      { key: defaultWsDir || '__default_ws__', name: 'Tangu 默认工作区', kind: 'local', path: defPath },
+      { key: CLOUD_WORKSPACE_KEY, name: t('app.cloudWorkspace'), kind: 'cloud', path: null },
+      { key: defaultWsDir || '__default_ws__', name: t('app.defaultWorkspace'), kind: 'local', path: defPath },
     ]
     const seen = new Set<string>([CLOUD_WORKSPACE_KEY, defaultWsDir || '__default_ws__'])
     for (const s of [...sessions, ...archivedSessions]) {
@@ -430,14 +432,14 @@ export function App(): React.JSX.Element {
         seen.add(s.project_path)
         list.push({
           key: s.project_path,
-          name: s.project_name || s.project_path.split('/').filter(Boolean).pop() || '工作区',
+          name: s.project_name || s.project_path.split('/').filter(Boolean).pop() || t('app.workspace'),
           kind: 'local',
           path: s.project_path,
         })
       }
     }
     return list
-  }, [sessions, archivedSessions, defaultWsDir])
+  }, [sessions, archivedSessions, defaultWsDir, t])
 
   /** 在工作区下新建会话:cloud→云沙箱;本地→host + cwd=工作区目录 + 自动编辑审批档。 */
   const createInWorkspace = useCallback(async (ws: WorkspaceDescriptor) => {
@@ -456,9 +458,9 @@ export function App(): React.JSX.Element {
       setConfigBySession((prev) => ({ ...prev, [s.id]: init }))
       void api.putSessionConfig(cfgRef.current, s.id, init).catch(() => {})
     } catch (e: any) {
-      toast(`新建失败:${e?.message || e}`, true)
+      toast(t('app.createSessionFail', { e: e?.message || e }), true)
     }
-  }, [toast])
+  }, [toast, t])
 
   /** 新建会话(默认进 Tangu 默认工作区;Ctrl/Cmd+N 与输入栏 /new 用)。 */
   const newSession = useCallback(() => {
@@ -483,9 +485,9 @@ export function App(): React.JSX.Element {
     try {
       await api.updateSession(cfgRef.current, id, { title })
     } catch (e: any) {
-      toast(`重命名失败:${e?.message || e}`, true)
+      toast(t('app.renameFail', { e: e?.message || e }), true)
     }
-  }, [toast])
+  }, [toast, t])
 
   const archiveSession = useCallback(async (id: string, archived: boolean) => {
     try {
@@ -493,9 +495,9 @@ export function App(): React.JSX.Element {
       await refreshSessions(cfgRef.current)
       if (archived && activeIdRef.current === id) setActiveId(null)
     } catch (e: any) {
-      toast(`操作失败:${e?.message || e}`, true)
+      toast(t('app.operationFail', { e: e?.message || e }), true)
     }
-  }, [refreshSessions, toast])
+  }, [refreshSessions, toast, t])
 
   const deleteSession = useCallback(async (id: string) => {
     try {
@@ -505,9 +507,9 @@ export function App(): React.JSX.Element {
       loadedHistory.current.delete(id)
       if (activeIdRef.current === id) setActiveId(null)
     } catch (e: any) {
-      toast(`删除失败:${e?.message || e}`, true)
+      toast(t('app.deleteFail', { e: e?.message || e }), true)
     }
-  }, [toast])
+  }, [toast, t])
 
   // ── 发送 / 停止 / 审批 ──
   const send = useCallback(async (text: string, attachments: Attachment[], workspaceFiles?: Attachment[]): Promise<boolean> => {
@@ -517,10 +519,10 @@ export function App(): React.JSX.Element {
       // 无会话直接发送:落进 Tangu 默认工作区(managed)或云沙箱(其余)。
       const path = desktopMode.current === 'managed' ? (defaultWsDirRef.current || homeDirRef.current || null) : null
       const s = await api.createSession(cfgRef.current, path
-        ? { project_path: path, project_name: 'Tangu 默认工作区' }
+        ? { project_path: path, project_name: t('app.defaultWorkspace') }
         : undefined).catch(() => null)
       if (!s) {
-        toast('无法创建会话', true)
+        toast(t('app.cannotCreateSession'), true)
         return false
       }
       setSessions((prev) => [s, ...prev])
@@ -539,9 +541,9 @@ export function App(): React.JSX.Element {
         await api.uploadWorkspaceFiles(cfgRef.current, sessionId, workspaceFiles.map((f) => ({
           path: f.name, content: f.data, encoding: 'base64' as const, mimeType: f.mimeType,
         })))
-        toast(`已上传 ${workspaceFiles.length} 个文件到工作区`)
+        toast(t('app.filesUploaded', { count: workspaceFiles.length }))
       } catch (e: any) {
-        toast(`工作区上传失败:${e?.message || e}`, true)
+        toast(t('app.workspaceUploadFail', { e: e?.message || e }), true)
       }
     }
     // 会话级模型(输入栏切换器持久化在 session.model_id)优先于全局默认。
@@ -564,10 +566,10 @@ export function App(): React.JSX.Element {
       }
       return true
     } catch (e: any) {
-      toast(`发送失败:${e?.message || e}`, true)
+      toast(t('app.sendFail', { e: e?.message || e }), true)
       return false
     }
-  }, [configBySession, sessions, subscribeRun, renameSession, toast])
+  }, [configBySession, sessions, subscribeRun, renameSession, toast, t])
 
   const stop = useCallback(() => {
     const sid = activeIdRef.current
@@ -620,9 +622,9 @@ export function App(): React.JSX.Element {
     setSessions((prev) => prev.map((s) => (s.id === sid ? { ...s, model_id: modelId } : s)))
     setArchivedSessions((prev) => prev.map((s) => (s.id === sid ? { ...s, model_id: modelId } : s)))
     void api.updateSession(cfgRef.current, sid, { model_id: modelId }).catch((e) => {
-      toast(`模型切换保存失败:${e?.message || e}`, true)
+      toast(t('app.modelSwitchSaveFail', { e: e?.message || e }), true)
     })
-  }, [toast])
+  }, [toast, t])
 
   /** 会话内思考深度切换:合并进 agent_config.thinkingLevel(agentLoop 每轮 run 读取)。 */
   const setSessionThinking = useCallback((level: NonNullable<AgentConfig['thinkingLevel']>) => {
@@ -655,10 +657,10 @@ export function App(): React.JSX.Element {
       cur.has(skillId) ? cur.delete(skillId) : cur.add(skillId)
       const next = { ...(prev[sid] || {}), enabledSkillIds: [...cur] }
       void api.putSessionConfig(cfgRef.current, sid, next).catch(() => {})
-      toast(`技能${cur.has(skillId) ? '已启用' : '已停用'}:${skillId}`)
+      toast(cur.has(skillId) ? t('app.skillEnabled', { id: skillId }) : t('app.skillDisabled', { id: skillId }))
       return { ...prev, [sid]: next }
     })
-  }, [toast])
+  }, [toast, t])
 
   /** 兑现询问(ask_user/exit_plan_mode 的询问卡)。 */
   const answerInquiry = useCallback(
@@ -741,6 +743,11 @@ export function App(): React.JSX.Element {
         onArchive={(id, a) => void archiveSession(id, a)}
         onDelete={(id) => void deleteSession(id)}
         onOpenSettings={() => setSettingsOpen(true)}
+        onToast={toast}
+        onAuthChange={() => {
+          // 登录/登出后托管后端会重启(主进程触发);稍候重连 + 刷新会话/模型。
+          setTimeout(() => void connect(cfgRef.current), 1500)
+        }}
       />
       <main className="main">
         <ChatHeader

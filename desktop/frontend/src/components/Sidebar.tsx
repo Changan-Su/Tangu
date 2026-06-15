@@ -7,6 +7,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, MoreHorizontal, Pencil, Archive, ArchiveRestore, Trash2, Settings, ChevronDown, ChevronRight, Folder, Cloud, FolderPlus } from 'lucide-react'
 import { CLOUD_WORKSPACE_KEY, type SessionRecord, type WorkspaceDescriptor } from '../types'
 import { BrandLogo } from './BrandLogo'
+import { AccountCard } from './AccountCard'
+import { LocaleToggle } from './LocaleToggle'
+import { useI18n } from '../i18n'
 
 const COLLAPSE_KEY = 'forsion_tangu_collapsed_projects'
 
@@ -35,6 +38,9 @@ interface SidebarProps {
   onArchive: (id: string, archived: boolean) => void
   onDelete: (id: string) => void
   onOpenSettings: () => void
+  onToast?: (text: string, error?: boolean) => void
+  /** 账号登录/登出后回调(让上层重连托管后端 / 刷新模型)。 */
+  onAuthChange?: () => void
 }
 
 interface MenuState {
@@ -45,6 +51,7 @@ interface MenuState {
 }
 
 export const Sidebar: React.FC<SidebarProps> = (p) => {
+  const { t } = useI18n()
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
@@ -127,8 +134,8 @@ export const Sidebar: React.FC<SidebarProps> = (p) => {
       ) : (
         <span className="session-title">{s.title || 'New Chat'}</span>
       )}
-      {p.runningIds.has(s.id) && <span className="session-dot running" title="运行中" />}
-      {!p.runningIds.has(s.id) && p.unreadIds.has(s.id) && <span className="session-dot unread" title="有新回复" />}
+      {p.runningIds.has(s.id) && <span className="session-dot running" title={t('sidebar.running')} />}
+      {!p.runningIds.has(s.id) && p.unreadIds.has(s.id) && <span className="session-dot unread" title={t('sidebar.unread')} />}
       <span className="session-menu-btn" onClick={(e) => openMenu(e as any, s)}>
         <MoreHorizontal size={14} />
       </span>
@@ -163,7 +170,7 @@ export const Sidebar: React.FC<SidebarProps> = (p) => {
                 </button>
                 <button
                   className="icon-btn ws-add"
-                  title={`在「${ws.name}」新建会话`}
+                  title={t('sidebar.newChatIn', { name: ws.name })}
                   onClick={() => p.onNewInWorkspace(ws)}
                 >
                   <Plus size={14} />
@@ -175,7 +182,7 @@ export const Sidebar: React.FC<SidebarProps> = (p) => {
         })}
 
         <button className="ws-add-workspace" onClick={p.onAddWorkspace}>
-          <FolderPlus size={14} /> 添加本地工作区
+          <FolderPlus size={14} /> {t('sidebar.addLocalWorkspace')}
         </button>
 
         {p.archivedSessions.length > 0 && (
@@ -183,7 +190,7 @@ export const Sidebar: React.FC<SidebarProps> = (p) => {
             <button className="session-item" onClick={() => setShowArchived(!showArchived)}>
               <span className="session-emoji"><Archive size={13} /></span>
               <span className="session-title" style={{ color: 'var(--text-faint)' }}>
-                已归档 ({p.archivedSessions.length})
+                {t('sidebar.archived', { count: p.archivedSessions.length })}
               </span>
             </button>
             {showArchived && p.archivedSessions.map(renderItem)}
@@ -192,8 +199,10 @@ export const Sidebar: React.FC<SidebarProps> = (p) => {
       </div>
 
       <div className="sidebar-footer">
+        <AccountCard onToast={p.onToast} onAuthChange={p.onAuthChange} />
         <span className="grow" />
-        <button className="icon-btn" onClick={p.onOpenSettings} title="设置 (Ctrl+,)">
+        <LocaleToggle compact />
+        <button className="icon-btn" onClick={p.onOpenSettings} title={t('sidebar.settings')}>
           <Settings size={16} />
         </button>
       </div>
@@ -208,7 +217,7 @@ export const Sidebar: React.FC<SidebarProps> = (p) => {
               setMenu(null)
             }}
           >
-            <Pencil size={13} /> 重命名
+            <Pencil size={13} /> {t('sidebar.rename')}
           </button>
           <button
             onClick={() => {
@@ -217,7 +226,7 @@ export const Sidebar: React.FC<SidebarProps> = (p) => {
             }}
           >
             {menu.archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}
-            {menu.archived ? '取消归档' : '归档'}
+            {menu.archived ? t('sidebar.unarchive') : t('sidebar.archive')}
           </button>
           <button
             className="danger"
@@ -226,7 +235,7 @@ export const Sidebar: React.FC<SidebarProps> = (p) => {
               setMenu(null)
             }}
           >
-            <Trash2 size={13} /> 删除
+            <Trash2 size={13} /> {t('sidebar.delete')}
           </button>
         </div>
       )}

@@ -28,6 +28,8 @@ const api = {
   forsionLogout: (): Promise<any> => ipcRenderer.invoke('auth:logout'),
   authProviders: (): Promise<Array<{ id: string; loggedIn: boolean }>> => ipcRenderer.invoke('auth:providers'),
   providerLogin: (id: string): Promise<any> => ipcRenderer.invoke('auth:providerLogin', id),
+  openAccountCenter: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('auth:openAccountCenter'),
+  appVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
   onAuthDevice: (cb: (info: { url: string; userCode: string }) => void): (() => void) => {
     const listener = (_e: unknown, info: { url: string; userCode: string }): void => cb(info)
     ipcRenderer.on('auth:device', listener)
@@ -42,6 +44,15 @@ const api = {
     ipcRenderer.invoke('fs:listDir', dirPath),
   readHostFile: (filePath: string): Promise<{ mimeType: string; content: string; size: number; tooLarge?: boolean }> =>
     ipcRenderer.invoke('fs:readFile', filePath),
+  // ── 本机工作区文件操作:重命名 / 新建文件夹 / 删除到回收站 / 在文件管理器显示 / 原生拖出 ──
+  renameHostPath: (oldPath: string, newName: string): Promise<{ path: string }> =>
+    ipcRenderer.invoke('fs:rename', oldPath, newName),
+  mkdirHost: (parentDir: string, name: string): Promise<{ path: string }> =>
+    ipcRenderer.invoke('fs:mkdir', parentDir, name),
+  trashHostPath: (p: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('fs:trash', p),
+  revealHostPath: (p: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('fs:reveal', p),
+  /** 原生拖出:在元素 onDragStart 里 e.preventDefault() 后调用,主进程接管系统级拖拽。 */
+  startHostDrag: (filePath: string): void => ipcRenderer.send('fs:startDrag', filePath),
   // ── 直连 provider 管理(~/.tangu/providers.json;managed 模式保存后自动重启后端加载)──
   listProviders: (): Promise<any[]> => ipcRenderer.invoke('providers:list'),
   saveProvider: (provider: Record<string, any>): Promise<any[]> => ipcRenderer.invoke('providers:save', provider),

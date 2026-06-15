@@ -9,6 +9,8 @@ import {
   Send, Square, Plus, Mic, ImagePlus, X, Brain, ClipboardList, Check, ChevronDown, FileText,
 } from 'lucide-react'
 import type { AgentConfig, Attachment, ModelInfo, SkillInfo } from '../types'
+import { useI18n } from '../i18n'
+import { groupModelsByProvider } from './ModelGroupList'
 
 /** 斜杠命令项(/ 触发的菜单;参考 hermes 的 slash 命令)。 */
 interface SlashItem {
@@ -27,9 +29,9 @@ const MAX_INPUT_CHARS = 150_000
 // 工作区文件上限(云沙箱:拖入消息区的文件,发送时上传到会话工作区)。
 const MAX_WS_BYTES = 25 * 1024 * 1024
 
-const approvalLabel = { readonly: '只读·全审批', 'auto-edit': '自动编辑', 'full-auto': '全自动' } as const
-const thinkingLabel = { off: '思考·关', low: '思考·浅', medium: '思考·中', high: '思考·深' } as const
-const thinkingShort = { off: '标准', low: '浅', medium: '中', high: '深' } as const
+const approvalLabelKey = { readonly: 'input.approval.readonly', 'auto-edit': 'input.approval.autoEdit', 'full-auto': 'input.approval.fullAuto' } as const
+const thinkingLabelKey = { off: 'input.thinking.off', low: 'input.thinking.low', medium: 'input.thinking.medium', high: 'input.thinking.high' } as const
+const thinkingShortKey = { off: 'input.thinkingShort.off', low: 'input.thinkingShort.low', medium: 'input.thinkingShort.medium', high: 'input.thinkingShort.high' } as const
 
 export const MessageInput: React.FC<{
   disabled: boolean
@@ -61,6 +63,7 @@ export const MessageInput: React.FC<{
   planMode, onPlanModeChange, skills, enabledSkillIds, onToggleSkill, onNewSession, onOpenSettings,
   onExecConfigChange, onSend, onStop,
 }) => {
+  const { t } = useI18n()
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [wsFiles, setWsFiles] = useState<Attachment[]>([]) // 云沙箱待传工作区的文件
@@ -103,26 +106,26 @@ export const MessageInput: React.FC<{
     if (onPlanModeChange) {
       items.push({
         cmd: '/plan',
-        desc: planMode ? '关闭计划模式' : '开启计划模式(只读调研 → 提交计划求批准)',
+        desc: planMode ? t('input.slash.planOff') : t('input.slash.planOn'),
         run: () => { onPlanModeChange(!planMode); close() },
       })
     }
     if (onThinkingChange) {
       for (const lv of ['off', 'low', 'medium', 'high'] as const) {
-        items.push({ cmd: `/think ${lv}`, desc: `思考深度设为 ${lv}${thinkingLevel === lv ? '(当前)' : ''}`, run: () => { onThinkingChange(lv); close() } })
+        items.push({ cmd: `/think ${lv}`, desc: `${t('input.slash.thinkDesc', { level: lv })}${thinkingLevel === lv ? t('input.slash.current') : ''}`, run: () => { onThinkingChange(lv); close() } })
       }
     }
     if (onModelChange && models?.length) {
-      items.push({ cmd: '/model', desc: '选择本会话模型…', run: () => { setDraft('/model '); setSlashSubMenu('model'); setSlashIndex(0) } })
+      items.push({ cmd: '/model', desc: t('input.slash.model'), run: () => { setDraft('/model '); setSlashSubMenu('model'); setSlashIndex(0) } })
     }
-    if (onNewSession) items.push({ cmd: '/new', desc: '新建会话', run: () => { onNewSession(); close() } })
-    if (onOpenSettings) items.push({ cmd: '/skills', desc: '打开设置管理技能', run: () => { onOpenSettings(); close() } })
+    if (onNewSession) items.push({ cmd: '/new', desc: t('input.slash.new'), run: () => { onNewSession(); close() } })
+    if (onOpenSettings) items.push({ cmd: '/skills', desc: t('input.slash.skills'), run: () => { onOpenSettings(); close() } })
     if (onToggleSkill) {
       const enabled = new Set(enabledSkillIds || [])
       for (const s of skills || []) {
         items.push({
           cmd: `/skill:${s.id}`,
-          desc: `${enabled.has(s.id) ? '停用' : '启用'}技能 ${s.name}`,
+          desc: enabled.has(s.id) ? t('input.slash.skillDisable', { name: s.name }) : t('input.slash.skillEnable', { name: s.name }),
           run: () => { onToggleSkill(s.id); close() },
         })
       }
@@ -142,7 +145,7 @@ export const MessageInput: React.FC<{
         .slice(0, 12)
         .map((m) => ({
           cmd: m.id === modelId ? `● ${m.name}` : m.name,
-          desc: `${m.source === 'direct' ? '直连·' : ''}${m.provider} · ${m.id}`,
+          desc: `${m.source === 'direct' ? t('input.directPrefix') : ''}${m.provider} · ${m.id}`,
           run: () => {
             onModelChange?.(m.id)
             setDraft('')
@@ -167,7 +170,7 @@ export const MessageInput: React.FC<{
     const text = draft.trim()
     if (!text || disabled || running) return
     if (text.length > MAX_INPUT_CHARS) {
-      setHint(`消息过长(${text.length.toLocaleString()} 字符,上限 ${MAX_INPUT_CHARS.toLocaleString()})——大段材料请保存为文件,让 agent 用工具按需读取,整段粘贴会按轮数翻倍烧 token。`)
+      setHint(t('input.tooLong', { len: text.length.toLocaleString(), max: MAX_INPUT_CHARS.toLocaleString() }))
       return
     }
     setHint(null)
@@ -187,11 +190,11 @@ export const MessageInput: React.FC<{
     for (const f of Array.from(files)) {
       // 只收图片:非图附件目前不进模型上下文(后端会忽略),收了反而像"已发给 AI"的假象。
       if (!f.type.startsWith('image/')) {
-        skipped.push(`${f.name}(非图片)`)
+        skipped.push(t('input.skip.notImage', { name: f.name }))
         continue
       }
       if (f.size > MAX_ATTACH_BYTES) {
-        skipped.push(`${f.name}(超 ${Math.round(MAX_ATTACH_BYTES / 1024 / 1024)}MB)`)
+        skipped.push(t('input.skip.tooBig', { name: f.name, mb: String(Math.round(MAX_ATTACH_BYTES / 1024 / 1024)) }))
         continue
       }
       const buf = await f.arrayBuffer()
@@ -202,7 +205,7 @@ export const MessageInput: React.FC<{
       }
       next.push({ name: f.name, mimeType: f.type, data: btoa(bin), size: f.size })
     }
-    setHint(skipped.length ? `已跳过:${skipped.join('、')}。图片随消息发给模型;其他文件可直接拖进输入框(发送后进工作区)。` : null)
+    setHint(skipped.length ? t('input.skip.imageHint', { items: skipped.join('、') }) : null)
     setAttachments((prev) => [...prev, ...next])
   }
 
@@ -213,7 +216,7 @@ export const MessageInput: React.FC<{
     const skipped: string[] = []
     for (const f of Array.from(files)) {
       if (f.size > MAX_WS_BYTES) {
-        skipped.push(`${f.name}(超 ${Math.round(MAX_WS_BYTES / 1024 / 1024)}MB)`)
+        skipped.push(t('input.skip.tooBig', { name: f.name, mb: String(Math.round(MAX_WS_BYTES / 1024 / 1024)) }))
         continue
       }
       const buf = await f.arrayBuffer()
@@ -224,7 +227,7 @@ export const MessageInput: React.FC<{
       }
       next.push({ name: f.name, mimeType: f.type || 'application/octet-stream', data: btoa(bin), size: f.size })
     }
-    setHint(skipped.length ? `已跳过:${skipped.join('、')}` : null)
+    setHint(skipped.length ? t('input.skip.simple', { items: skipped.join('、') }) : null)
     setWsFiles((prev) => [...prev, ...next])
   }
 
@@ -234,15 +237,14 @@ export const MessageInput: React.FC<{
     setOpenMenu(null)
   }
 
-  // 模型分组:Forsion 托管 / 各直连 provider
-  const forsionModels = (models || []).filter((m) => m.source === 'forsion')
-  const directModels = (models || []).filter((m) => m.source === 'direct')
+  // 模型分组:按 Provider 分类(与设置页一致)
+  const modelGroups = useMemo(() => groupModelsByProvider(models || []), [models])
   const currentModel = (models || []).find((m) => m.id === modelId)
 
   // chip 文案
-  const modeLabel = planMode ? '计划模式' : (isHost ? approvalLabel[approval] : '常规')
-  const modelLabel = currentModel?.name || modelId || '选择模型'
-  const effortSuffix = thinkingLevel && thinkingLevel !== 'off' ? ` · ${thinkingShort[thinkingLevel]}` : ''
+  const modeLabel = planMode ? t('input.planMode') : (isHost ? t(approvalLabelKey[approval]) : t('input.normal'))
+  const modelLabel = currentModel?.name || modelId || t('input.selectModel')
+  const effortSuffix = thinkingLevel && thinkingLevel !== 'off' ? ` · ${t(thinkingShortKey[thinkingLevel])}` : ''
 
   const showModeChip = !!onPlanModeChange || isHost
   const showModelChip = (!!onModelChange && !!models?.length) || !!onThinkingChange
@@ -296,7 +298,7 @@ export const MessageInput: React.FC<{
                     <img src={`data:${a.mimeType};base64,${a.data}`} alt={a.name} />
                   )}
                   <span>{a.name}</span>
-                  <button title="移除" onClick={() => setAttachments(attachments.filter((_, j) => j !== i))}>
+                  <button title={t('input.remove')} onClick={() => setAttachments(attachments.filter((_, j) => j !== i))}>
                     <X size={12} />
                   </button>
                 </span>
@@ -306,13 +308,13 @@ export const MessageInput: React.FC<{
           {wsFiles.length > 0 && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
               {wsFiles.map((a, i) => (
-                <span className="attach-chip" key={`ws-${a.name}-${i}`} title={`发送后上传到工作区:${a.name}`}>
+                <span className="attach-chip" key={`ws-${a.name}-${i}`} title={t('input.wsUploadTitle', { name: a.name })}>
                   {a.mimeType.startsWith('image/')
                     ? <img src={`data:${a.mimeType};base64,${a.data}`} alt={a.name} />
                     : <FileText size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />}
                   <span>{a.name}</span>
-                  <span style={{ fontSize: 10, color: 'var(--text-faint)', flexShrink: 0 }}>→工作区</span>
-                  <button title="移除" onClick={() => setWsFiles(wsFiles.filter((_, j) => j !== i))}>
+                  <span style={{ fontSize: 10, color: 'var(--text-faint)', flexShrink: 0 }}>{t('input.toWorkspace')}</span>
+                  <button title={t('input.remove')} onClick={() => setWsFiles(wsFiles.filter((_, j) => j !== i))}>
                     <X size={12} />
                   </button>
                 </span>
@@ -323,7 +325,7 @@ export const MessageInput: React.FC<{
             ref={taRef}
             rows={1}
             value={draft}
-            placeholder={disabled ? '先在设置里连接后端…' : '输入消息,输入 / 唤起技能(Enter 发送,Shift+Enter 换行)'}
+            placeholder={disabled ? t('input.placeholderDisabled') : t('input.placeholder')}
             disabled={disabled}
             onChange={(e) => {
               setDraft(e.target.value)
@@ -397,7 +399,7 @@ export const MessageInput: React.FC<{
             <span style={{ position: 'relative', display: 'inline-flex' }} data-cmenu>
               <button
                 className="icon-btn"
-                title="添加内容"
+                title={t('input.addContent')}
                 disabled={disabled}
                 onClick={() => setOpenMenu((m) => (m === 'add' ? null : 'add'))}
               >
@@ -407,10 +409,10 @@ export const MessageInput: React.FC<{
                 <div className="composer-menu left">
                   <button className="menu-item" onClick={() => { fileRef.current?.click(); setOpenMenu(null) }}>
                     <ImagePlus size={14} />
-                    <span className="grow">添加图片</span>
+                    <span className="grow">{t('input.addImage')}</span>
                   </button>
                   <div className="menu-section" style={{ padding: '4px 8px 2px' }}>
-                    其他文件请用右栏工作区上传
+                    {t('input.otherFilesHint')}
                   </div>
                 </div>
               )}
@@ -427,16 +429,16 @@ export const MessageInput: React.FC<{
               }}
             />
             <span className="grow" />
-            <button className="icon-btn composer-mic" title="语音输入即将上线" disabled>
+            <button className="icon-btn composer-mic" title={t('input.micComingSoon')} disabled>
               <Mic size={16} />
             </button>
             {running ? (
               <button className="btn danger sm" onClick={onStop}>
-                <Square size={12} /> 停止
+                <Square size={12} /> {t('input.stop')}
               </button>
             ) : (
               <button className="btn primary sm" onClick={send} disabled={disabled || !draft.trim()}>
-                <Send size={13} /> 发送
+                <Send size={13} /> {t('input.send')}
               </button>
             )}
           </div>
@@ -448,7 +450,7 @@ export const MessageInput: React.FC<{
             <span style={{ position: 'relative', display: 'inline-flex' }} data-cmenu>
               <button
                 className={`composer-chip${planMode ? ' active' : ''}`}
-                title="模式:计划模式(只读调研→提交计划)与审批档(host)"
+                title={t('input.modeChipTitle')}
                 onClick={() => setOpenMenu((m) => (m === 'mode' ? null : 'mode'))}
               >
                 <ClipboardList size={13} />
@@ -459,23 +461,23 @@ export const MessageInput: React.FC<{
                 <div className="composer-menu left">
                   {onPlanModeChange && (
                     <>
-                      <div className="menu-section">计划模式</div>
+                      <div className="menu-section">{t('input.planMode')}</div>
                       <button
                         className={`menu-item${planMode ? ' active' : ''}`}
                         onClick={() => { onPlanModeChange(!planMode); setOpenMenu(null) }}
                       >
                         <ClipboardList size={14} />
-                        <span className="grow">{planMode ? '计划模式·已开' : '开启计划模式'}</span>
+                        <span className="grow">{planMode ? t('input.planModeOn') : t('input.planModeEnable')}</span>
                         {planMode && <Check size={13} />}
                       </button>
                     </>
                   )}
                   {isHost && (
                     <>
-                      <div className="menu-section">审批档</div>
+                      <div className="menu-section">{t('input.approvalSection')}</div>
                       {(['readonly', 'auto-edit', 'full-auto'] as const).map((m) => (
                         <button key={m} className={`menu-item${approval === m ? ' active' : ''}`} onClick={() => setApproval(m)}>
-                          <span className="grow">{approvalLabel[m]}</span>
+                          <span className="grow">{t(approvalLabelKey[m])}</span>
                           {approval === m && <Check size={13} />}
                         </button>
                       ))}
@@ -492,7 +494,7 @@ export const MessageInput: React.FC<{
             <span style={{ position: 'relative', display: 'inline-flex' }} data-cmenu>
               <button
                 className="composer-chip"
-                title="本会话模型与思考深度"
+                title={t('input.modelChipTitle')}
                 onClick={() => setOpenMenu((m) => (m === 'model' ? null : 'model'))}
               >
                 <span className="chip-label">{modelLabel}{effortSuffix}</span>
@@ -502,7 +504,7 @@ export const MessageInput: React.FC<{
                 <div className="composer-menu right">
                   {onThinkingChange && (
                     <>
-                      <div className="menu-section">思考深度</div>
+                      <div className="menu-section">{t('input.thinkingSection')}</div>
                       {(['off', 'low', 'medium', 'high'] as const).map((lv) => (
                         <button
                           key={lv}
@@ -510,7 +512,7 @@ export const MessageInput: React.FC<{
                           onClick={() => { onThinkingChange(lv); setOpenMenu(null) }}
                         >
                           <Brain size={14} />
-                          <span className="grow">{thinkingLabel[lv]}</span>
+                          <span className="grow">{t(thinkingLabelKey[lv])}</span>
                           {(thinkingLevel || 'off') === lv && <Check size={13} />}
                         </button>
                       ))}
@@ -518,33 +520,28 @@ export const MessageInput: React.FC<{
                   )}
                   {onModelChange && !!models?.length && (
                     <>
-                      {forsionModels.length > 0 && <div className="menu-section">Forsion 托管</div>}
-                      {forsionModels.map((m) => (
-                        <button
-                          key={`f-${m.id}`}
-                          className={`menu-item${m.id === modelId ? ' active' : ''}`}
-                          onClick={() => { onModelChange(m.id); setOpenMenu(null) }}
-                        >
-                          <span className="grow">{m.name}</span>
-                          {m.id === modelId && <Check size={13} />}
-                        </button>
-                      ))}
-                      {directModels.length > 0 && <div className="menu-section">直连 Provider</div>}
-                      {directModels.map((m) => (
-                        <button
-                          key={`d-${m.id}`}
-                          className={`menu-item${m.id === modelId ? ' active' : ''}`}
-                          onClick={() => { onModelChange(m.id); setOpenMenu(null) }}
-                        >
-                          <span className="grow">{m.name}</span>
-                          <span className="menu-meta">{m.provider}</span>
-                          {m.id === modelId && <Check size={13} />}
-                        </button>
+                      {modelGroups.map((g) => (
+                        <React.Fragment key={g.provider}>
+                          <div className="menu-section">
+                            {g.provider}
+                            {g.source === 'direct' ? ` · ${t('model.group.direct')}` : g.source === 'forsion' ? ` · ${t('model.group.forsion')}` : ''}
+                          </div>
+                          {g.models.map((m) => (
+                            <button
+                              key={`${m.source}-${m.id}`}
+                              className={`menu-item${m.id === modelId ? ' active' : ''}`}
+                              onClick={() => { onModelChange(m.id); setOpenMenu(null) }}
+                            >
+                              <span className="grow">{m.name}</span>
+                              {m.id === modelId && <Check size={13} />}
+                            </button>
+                          ))}
+                        </React.Fragment>
                       ))}
                     </>
                   )}
                   {onModelChange && !models?.length && (
-                    <div className="menu-section" style={{ padding: '6px 8px' }}>模型加载中…</div>
+                    <div className="menu-section" style={{ padding: '6px 8px' }}>{t('common.loading')}</div>
                   )}
                 </div>
               )}

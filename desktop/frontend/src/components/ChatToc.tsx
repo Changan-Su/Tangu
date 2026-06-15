@@ -10,6 +10,7 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { MessageSquare, Hash } from 'lucide-react'
+import { useI18n } from '../i18n'
 
 interface TocItem {
   id: string
@@ -22,6 +23,7 @@ export const ChatToc: React.FC<{
   containerRef: React.RefObject<HTMLDivElement | null>
   scanTrigger?: number // 变化即强制重扫(传 messages.length 兜底,防 MutationObserver 漏批)
 }> = ({ containerRef, scanTrigger }) => {
+  const { t } = useI18n()
   const [items, setItems] = useState<TocItem[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
 
@@ -114,7 +116,7 @@ export const ChatToc: React.FC<{
   )
 
   if (items.length === 0) {
-    return <div className="panel-note">暂无可跳转的内容。对话开始后,这里会列出每轮提问与回复中的小节标题。</div>
+    return <div className="panel-note">{t('toc.emptyNote')}</div>
   }
 
   return (

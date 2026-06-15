@@ -103,8 +103,11 @@ export async function forsionDeviceLogin(
   }
 }
 
-/** 用 token 查当前用户(显示「已登录为 xxx」);失败返回 null(token 失效/云端不可达)。 */
-export async function forsionWhoami(cloudUrl: string, token: string): Promise<{ username?: string } | null> {
+/** 用 token 查当前用户(账号卡:头像/昵称/用户名);失败返回 null(token 失效/云端不可达)。 */
+export async function forsionWhoami(
+  cloudUrl: string,
+  token: string,
+): Promise<{ username?: string; nickname?: string; avatar?: string } | null> {
   if (!cloudUrl || !token) return null
   try {
     const r = await fetch(`${cloudUrl.replace(/\/+$/, '')}/api/brain/users/me`, {
@@ -113,7 +116,12 @@ export async function forsionWhoami(cloudUrl: string, token: string): Promise<{ 
     })
     if (!r.ok) return null
     const u: any = await r.json()
-    return u ? { username: u.username || u.nickname || undefined } : null
+    if (!u) return null
+    return {
+      username: u.username || u.nickname || undefined,
+      nickname: u.nickname || undefined,
+      avatar: u.avatar || u.avatarUrl || u.avatar_url || undefined,
+    }
   } catch {
     return null
   }

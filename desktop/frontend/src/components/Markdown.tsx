@@ -7,8 +7,10 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import { Copy, Check } from 'lucide-react'
+import { useI18n } from '../i18n'
 
 const CodeBlock: React.FC<React.HTMLAttributes<HTMLPreElement>> = ({ children, ...props }) => {
+  const { t } = useI18n()
   const [copied, setCopied] = useState(false)
   const preRef = React.useRef<HTMLPreElement>(null)
   const copy = () => {
@@ -24,7 +26,7 @@ const CodeBlock: React.FC<React.HTMLAttributes<HTMLPreElement>> = ({ children, .
       <button
         className="icon-btn"
         onClick={copy}
-        title="复制代码"
+        title={t('common.copyCode')}
         style={{ position: 'absolute', top: 6, right: 6, width: 24, height: 24 }}
       >
         {copied ? <Check size={13} /> : <Copy size={13} />}
