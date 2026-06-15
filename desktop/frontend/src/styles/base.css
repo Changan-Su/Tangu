@@ -901,6 +901,28 @@ a:hover { color: var(--accent-hover); }
 .right-panel-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
 .right-panel-body { flex: 1; overflow-y: auto; padding: 10px; font-size: 13px; }
 
+/* 会话目录(TOC) */
+.toc-list { display: flex; flex-direction: column; gap: 1px; }
+.toc-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px 5px 6px;
+  text-align: left;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.35;
+  transition: background var(--duration-fast), color var(--duration-fast);
+}
+.toc-item:hover { background: var(--overlay-light); color: var(--text); }
+.toc-item.user { color: var(--text); font-weight: 500; }
+.toc-item.active { background: var(--accent-light); color: var(--accent-hover); }
+.toc-item.active .toc-ico { color: var(--accent); }
+.toc-ico { flex-shrink: 0; opacity: 0.7; }
+.toc-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .file-row {
   display: flex;
   align-items: center;

@@ -83,6 +83,8 @@ export function App(): React.JSX.Element {
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [rightOpen, setRightOpen] = useState(false)
+  // 聊天滚动容器引用:ChatArea 用它吸底,右侧「目录」用它扫描/跳转(共享同一容器)。
+  const chatScrollRef = useRef<HTMLDivElement>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [onboarding, setOnboarding] = useState(false)
   const [themePreset, setThemePreset] = useState(resolveInitialPreset)
@@ -777,6 +779,7 @@ export function App(): React.JSX.Element {
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                 <ChatArea
                   messages={activeMessages}
+                  containerRef={chatScrollRef}
                   onApproval={(mid, aid, action, args) => void decideApproval(mid, aid, action, args)}
                   onInquiry={(mid, iid, answer) => void answerInquiry(mid, iid, answer)}
                 />
@@ -807,10 +810,8 @@ export function App(): React.JSX.Element {
                   sessionId={activeId}
                   sessionConfig={execConfig}
                   running={running}
-                  onConfigChange={(c) => {
-                    setConfigBySession((prev) => ({ ...prev, [activeId]: c }))
-                    void api.putSessionConfig(cfgRef.current, activeId, c).catch(() => {})
-                  }}
+                  messages={activeMessages}
+                  chatScrollRef={chatScrollRef}
                   onToast={toast}
                 />
               )}

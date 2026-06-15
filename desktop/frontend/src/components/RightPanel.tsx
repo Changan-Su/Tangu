@@ -1,22 +1,24 @@
 /**
- * 右侧面板:工作区文件 / 技能·工具 / 记忆·日志 三个 tab(对标 openhanako Desk 的右栏形态)。
+ * 右侧面板:工作区文件 / 目录(会话大纲) / 记忆·日志 三个 tab(对标 openhanako Desk 的右栏形态)。
  */
 import React, { useCallback, useEffect, useState } from 'react'
 import {
-  FolderOpen, Folder, Wrench, BookOpen, Download, Trash2, Upload, RefreshCw, FileText, Image as ImageIcon, Loader2, ChevronLeft, CornerLeftUp,
+  FolderOpen, Folder, List, BookOpen, Download, Trash2, Upload, RefreshCw, FileText, Image as ImageIcon, Loader2, ChevronLeft, CornerLeftUp,
 } from 'lucide-react'
-import type { AgentConfig, SkillInfo, TanguDesktopConfig, ToolsResponse, WorkspaceFileMeta } from '../types'
+import type { AgentConfig, TanguDesktopConfig, UiMessage, WorkspaceFileMeta } from '../types'
 import * as api from '../services/backendService'
 import { Markdown } from './Markdown'
+import { ChatToc } from './ChatToc'
 
-type Tab = 'workspace' | 'assets' | 'memory'
+type Tab = 'workspace' | 'toc' | 'memory'
 
 export const RightPanel: React.FC<{
   cfg: TanguDesktopConfig
   sessionId: string
   sessionConfig: AgentConfig
   running: boolean
-  onConfigChange: (c: AgentConfig) => void
+  messages: UiMessage[]
+  chatScrollRef: React.RefObject<HTMLDivElement | null>
   onToast: (text: string, error?: boolean) => void
 }> = (p) => {
   const [tab, setTab] = useState<Tab>('workspace')
@@ -26,8 +28,8 @@ export const RightPanel: React.FC<{
         <button className={tab === 'workspace' ? 'active' : ''} onClick={() => setTab('workspace')}>
           <FolderOpen size={13} /> 工作区
         </button>
-        <button className={tab === 'assets' ? 'active' : ''} onClick={() => setTab('assets')}>
-          <Wrench size={13} /> 技能·工具
+        <button className={tab === 'toc' ? 'active' : ''} onClick={() => setTab('toc')}>
+          <List size={13} /> 目录
         </button>
         <button className={tab === 'memory' ? 'active' : ''} onClick={() => setTab('memory')}>
           <BookOpen size={13} /> 记忆
@@ -35,7 +37,7 @@ export const RightPanel: React.FC<{
       </div>
       <div className="right-panel-body">
         {tab === 'workspace' && <WorkspaceTab {...p} />}
-        {tab === 'assets' && <AssetsTab {...p} />}
+        {tab === 'toc' && <ChatToc containerRef={p.chatScrollRef} scanTrigger={p.messages.length} />}
         {tab === 'memory' && <MemoryTab {...p} />}
       </div>
     </aside>
@@ -291,103 +293,6 @@ const SandboxFilesTab: React.FC<{
             >
               <Trash2 size={12} />
             </button>
-          </span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// ── 技能·工具 ────────────────────────────────────────────────────────────────
-
-const AssetsTab: React.FC<{
-  cfg: TanguDesktopConfig
-  sessionConfig: AgentConfig
-  onConfigChange: (c: AgentConfig) => void
-  onToast: (t: string, e?: boolean) => void
-}> = ({ cfg, sessionConfig, onConfigChange, onToast }) => {
-  const [skills, setSkills] = useState<SkillInfo[] | null>(null)
-  const [tools, setTools] = useState<ToolsResponse | null>(null)
-
-  useEffect(() => {
-    void api.listSkills(cfg).then(setSkills).catch(() => setSkills([]))
-    void api.listTools(cfg).then(setTools).catch((e) => onToast(`工具列表加载失败:${e?.message || e}`, true))
-  }, [cfg, onToast])
-
-  const enabledSkills = new Set(sessionConfig.enabledSkillIds || [])
-  const enabledTools = new Set(sessionConfig.enabledToolIds || [])
-
-  const toggleSkill = (id: string) => {
-    const next = new Set(enabledSkills)
-    next.has(id) ? next.delete(id) : next.add(id)
-    onConfigChange({ ...sessionConfig, enabledSkillIds: [...next] })
-  }
-  const toggleTool = (id: string) => {
-    const next = new Set(enabledTools)
-    next.has(id) ? next.delete(id) : next.add(id)
-    onConfigChange({ ...sessionConfig, enabledToolIds: [...next] })
-  }
-
-  return (
-    <div>
-      <div className="panel-section-title">技能(本会话启用)</div>
-      {skills === null && <div className="panel-note">加载中…</div>}
-      {skills?.length === 0 && <div className="panel-note">云端暂无可用技能目录(需要云端 brain-api 支持)。</div>}
-      {skills?.map((s) => (
-        <label className="check-row" key={s.id}>
-          <input type="checkbox" checked={enabledSkills.has(s.id)} onChange={() => toggleSkill(s.id)} />
-          <span style={{ flex: 1 }}>
-            <div className="check-name">
-              {s.icon ? `${s.icon} ` : ''}{s.name}
-              {s.source === 'local' && <span style={{ color: 'var(--accent)', fontSize: 10.5, marginLeft: 5 }}>本地</span>}
-              {s.source === 'user' && <span style={{ color: 'var(--text-ghost)', fontSize: 10.5, marginLeft: 5 }}>已上云</span>}
-            </div>
-            {s.description && <div className="check-desc">{s.description}</div>}
-          </span>
-          {s.source === 'local' && (
-            <button
-              className="icon-btn"
-              title="上传到 Forsion(云端 Tangu 会话可用)"
-              style={{ width: 22, height: 22, flexShrink: 0 }}
-              onClick={(e) => {
-                e.preventDefault()
-                void api.uploadSkillToCloud(cfg, s.id)
-                  .then((r) => {
-                    onToast(`技能「${r.name}」已上传云端(id: ${r.id})`)
-                    void api.listSkills(cfg).then(setSkills).catch(() => {})
-                  })
-                  .catch((err) => onToast(`上传失败:${err?.message || err}`, true))
-              }}
-            >
-              ↑
-            </button>
-          )}
-        </label>
-      ))}
-
-      <div className="panel-section-title" style={{ marginTop: 10 }}>自定义工具</div>
-      {tools?.custom.length === 0 && <div className="panel-note">无自定义工具。</div>}
-      {tools?.custom.map((t) => (
-        <label className="check-row" key={t.id}>
-          <input type="checkbox" checked={enabledTools.has(t.id)} onChange={() => toggleTool(t.id)} />
-          <span>
-            <div className="check-name">{t.name} <span style={{ color: 'var(--text-ghost)', fontSize: 11 }}>({t.executor})</span></div>
-            {t.description && <div className="check-desc">{t.description}</div>}
-          </span>
-        </label>
-      ))}
-
-      <div className="panel-section-title" style={{ marginTop: 10 }}>内置工具(随执行环境自动可用)</div>
-      {tools?.builtins.map((t) => (
-        <div className="check-row" key={t.name} style={{ cursor: 'default' }}>
-          <span style={{ width: 13 }} />
-          <span>
-            <div className="check-name" style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>
-              {t.name}
-              <span style={{ color: 'var(--text-ghost)', fontSize: 10.5, marginLeft: 5 }}>
-                {t.mode === 'sandbox' ? '云沙箱' : t.mode === 'host' ? '本机' : ''}
-              </span>
-            </div>
           </span>
         </div>
       ))}

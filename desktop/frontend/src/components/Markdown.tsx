@@ -33,12 +33,35 @@ const CodeBlock: React.FC<React.HTMLAttributes<HTMLPreElement>> = ({ children, .
   )
 }
 
-export const Markdown: React.FC<{ content: string }> = React.memo(({ content }) => (
-  <ReactMarkdown
-    remarkPlugins={[remarkGfm]}
-    rehypePlugins={[[rehypeHighlight, { ignoreMissing: true, detect: false }]]}
-    components={{ pre: CodeBlock }}
-  >
-    {content}
-  </ReactMarkdown>
-))
+/**
+ * anchorPrefix:传入时给 h1/h2/h3 渲染稳定 id(`${anchorPrefix}-${第n个标题}`)+ data-toc-level,
+ * 供右侧「目录」扫描跳转。不传则零影响(记忆/日志面板等普通渲染)。
+ */
+export const Markdown: React.FC<{ content: string; anchorPrefix?: string }> = React.memo(
+  ({ content, anchorPrefix }) => {
+    const components: Record<string, any> = { pre: CodeBlock }
+    if (anchorPrefix) {
+      const counter = { i: 0 }
+      const heading = (level: 1 | 2 | 3) => {
+        const Tag = `h${level}` as 'h1' | 'h2' | 'h3'
+        return ({ children, node, ...rest }: any) => (
+          <Tag id={`${anchorPrefix}-${counter.i++}`} data-toc-level={String(level)} {...rest}>
+            {children}
+          </Tag>
+        )
+      }
+      components.h1 = heading(1)
+      components.h2 = heading(2)
+      components.h3 = heading(3)
+    }
+    return (
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[[rehypeHighlight, { ignoreMissing: true, detect: false }]]}
+        components={components}
+      >
+        {content}
+      </ReactMarkdown>
+    )
+  },
+)
