@@ -121,8 +121,20 @@ export const ChatArea: React.FC<{
             >
               <div className="msg-user-bubble">
                 {m.attachments?.length ? (
-                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 4 }}>
-                    📎 {m.attachments.map((a) => a.name).join(', ')}
+                  <div className="msg-attach-grid">
+                    {m.attachments.map((a, i) =>
+                      a.mimeType?.startsWith('image/') && a.data ? (
+                        <img
+                          key={i}
+                          className="msg-attach-img"
+                          src={`data:${a.mimeType};base64,${a.data}`}
+                          alt={a.name}
+                          title={a.name}
+                        />
+                      ) : (
+                        <span key={i} className="msg-attach-file" title={a.name}>📎 {a.name}</span>
+                      ),
+                    )}
                   </div>
                 ) : null}
                 {m.content}

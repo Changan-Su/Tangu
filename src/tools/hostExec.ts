@@ -20,6 +20,22 @@ const READ_MAX_LINES = 2000;
 const BASH_OUTPUT_CAP = 100_000; // 单流捕获上限，防爆内存
 const BASH_TIMEOUT_MS = 120_000;
 
+// view_image 支持的位图格式(矢量/异类格式 provider 兼容性差,先不收);单图上限贴近 provider 5-10MB。
+const IMAGE_MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+};
+const VIEW_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+
+/** 按扩展名判定是否受支持的图片;非图片返回 null。 */
+function imageMimeForPath(p: string): string | null {
+  return IMAGE_MIME[path.extname(p).toLowerCase()] ?? null;
+}
+
 /** 把工具路径解析为绝对路径：相对路径相对 cwd，绝对路径原样。 */
 function resolvePath(ctx: ToolContext, p: string): string {
   const cwd = ctx.cwd || process.cwd();
@@ -151,6 +167,12 @@ export const HOST_TOOLS: Record<string, ToolImpl> = {
     },
     execute: async (args, ctx): Promise<string> => {
       const abs = resolvePath(ctx, String(args.path ?? ''));
+      // 图片文件文本读取没有意义(会吐二进制乱码)——引导模型改用 view_image「看」图。
+      const imgMime = imageMimeForPath(abs);
+      if (imgMime) {
+        return `「${relDisplay(ctx, abs)}」是图片文件(${imgMime})。read_file 只返回文本;` +
+          '要查看/识别图像内容,请按同一路径调用 view_image 工具。';
+      }
       const offset = Number.isFinite(Number(args.offset)) && Number(args.offset) >= 0 ? Number(args.offset) : undefined;
       const limit = Number.isFinite(Number(args.limit)) && Number(args.limit) > 0 ? Number(args.limit) : undefined;
       let buf: Buffer;
@@ -338,6 +360,52 @@ export const HOST_TOOLS: Record<string, ToolImpl> = {
         return `Error: ${e?.message || e}`;
       }
       return `applied ${edits.length} edit(s) to ${relDisplay(ctx, abs)}`;
+    },
+  },
+
+  // 注册序末尾追加(append-only):新增工具不打乱既有 host 工具定义顺序,旧会话前缀缓存只在部署边界失效一次。
+  view_image: {
+    mode: 'host',
+    definition: {
+      type: 'function',
+      function: {
+        name: 'view_image',
+        description:
+          '查看本机图片文件:把图片作为图像内容提供给你"看",用于识别截图、分析图表/照片/设计稿/UI 等。' +
+          '支持 png/jpg/jpeg/gif/webp/bmp;路径相对当前工作目录解析。需要"看图/识图"时用本工具,' +
+          '不要用 read_file(它对图片只返回文本提示)。',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: '图片文件路径(相对 cwd 或绝对路径)' },
+          },
+          required: ['path'],
+        },
+      },
+    },
+    execute: async (args, ctx): Promise<string> => {
+      const rawPath = String(args.path ?? '');
+      if (!rawPath) return 'Error: path is required';
+      const abs = resolvePath(ctx, rawPath);
+      const mime = imageMimeForPath(abs);
+      if (!mime) {
+        return `Error: 不支持的图片格式(仅 png/jpg/jpeg/gif/webp/bmp):${rawPath}`;
+      }
+      let buf: Buffer;
+      try {
+        buf = await fs.readFile(abs);
+      } catch {
+        return `Error: file not found: ${rawPath}`;
+      }
+      if (buf.length > VIEW_IMAGE_MAX_BYTES) {
+        return `Error: 图片过大(${(buf.length / 1024 / 1024).toFixed(1)}MB,上限 ${Math.round(VIEW_IMAGE_MAX_BYTES / 1024 / 1024)}MB)。请压缩或裁剪后再查看。`;
+      }
+      if (!ctx.collectImage) {
+        return 'Error: 当前运行环境不支持图像查看(缺少图像回流通道)。';
+      }
+      ctx.collectImage({ url: `data:${mime};base64,${buf.toString('base64')}`, name: path.basename(abs) });
+      return `已加载图片 ${relDisplay(ctx, abs)} (${mime}, ${(buf.length / 1024).toFixed(0)} KB)。` +
+        '图像已作为内容提供给你,请直接根据图像本身回答,不要再尝试用 read_file 读取它。';
     },
   },
 };

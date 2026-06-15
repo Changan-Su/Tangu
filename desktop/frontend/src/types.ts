@@ -265,6 +265,7 @@ export interface AuthStatusInfo {
   username: string | null
   nickname?: string | null
   avatar?: string | null
+  membershipTier?: string | null
   tokenSource: 'config' | 'tangu-login' | null
 }
 

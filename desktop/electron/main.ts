@@ -468,6 +468,7 @@ app.whenReady().then(async () => {
       username: who?.username || null,
       nickname: who?.nickname || null,
       avatar: who?.avatar || null,
+      membershipTier: who?.membershipTier || null,
       tokenSource: stored.cloudToken ? 'config' : creds.token ? 'tangu-login' : null,
     }
   })

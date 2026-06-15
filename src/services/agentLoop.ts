@@ -372,9 +372,18 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
       }
     }
 
+    // view_image 等工具产出的图片回流:工具把 data URL 交回这里,本轮工具跑完后物化成一条
+    // user 图像消息追加到对话尾部(尾部追加 → 不动前缀,缓存安全;复用 toImageParts)。
+    const pendingToolImages: { url: string }[] = [];
+    const MAX_TOOL_IMAGES_PER_ROUND = 8;
     const toolCtx: ToolContext = {
       userId, sessionId, appId, runId, signal: ac.signal, customTools, mcpTools,
       enabledSkillIds, execMode, cwd, approvalMode, profile, modelId, planMode,
+      collectImage: (img) => {
+        if (img && typeof img.url === 'string' && img.url && pendingToolImages.length < MAX_TOOL_IMAGES_PER_ROUND) {
+          pendingToolImages.push({ url: img.url });
+        }
+      },
     };
     const toolDefs = getToolDefinitions(toolCtx);
 
@@ -569,6 +578,15 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
         await publish(runId, 'tool_result', { id: call.id, name: result.name, result: capped, isError: result.isError });
         toolResults.push({ tool_call_id: call.id, name: result.name, content: capped, isError: result.isError });
         workingMessages.push({ role: 'tool', content: capped, tool_call_id: call.id } as ChatMessage);
+      }
+      // 工具(view_image)读到的图片 → 物化成一条 user 图像消息追加到尾部,下一轮模型即可"看见"。
+      // 仅 in-memory(不落库):本 run 内多轮可见即可,避免历史每轮重发多 MB base64(对齐附件物化纪律)。
+      if (pendingToolImages.length) {
+        const imgs = pendingToolImages.splice(0);
+        workingMessages.push({
+          role: 'user',
+          content: toImageParts('(以上工具读取到的图片如下,请据此分析)', imgs),
+        } as ChatMessage);
       }
       allToolResults.push(...toolResults);
 

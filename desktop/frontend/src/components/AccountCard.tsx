@@ -1,21 +1,15 @@
 /**
- * 侧栏左下角 Forsion 账号卡(对齐 AI Studio):
- *  - 已登录:头像(URL 或首字母)+ 昵称/用户名,点击 → 浏览器打开个人中心({cloudUrl}/account?token=);
- *    悬停露出「登出」。
- *  - 未登录:「登录 Forsion」按钮(浏览器设备码登录);不登录 Tangu 也能正常用。
+ * 侧栏左下角 Forsion 账号卡(forsion-ui UserProfileCard 规范):
+ *  - 已登录:36px 头像(URL,或渐变圆+首字母)+ 昵称 + 会员徽章(TierBadge),副标题「用户中心」;
+ *    整行可点击 → 浏览器打开个人中心(IPC auth:openAccountCenter);悬停露出「登出」。
+ *  - 未登录:头像占位 + 「登录 / 注册」+ 副标题「点击登录」;不登录 Tangu 也能正常用。
  * 自管 authStatus(挂载即拉 + 监听 auth:device 推登录链接);登录/登出后回调 onAuthChange 让上层重连。
  */
 import React, { useCallback, useEffect, useState } from 'react'
-import { LogIn, LogOut, Loader2, UserRound } from 'lucide-react'
+import { LogOut, Loader2 } from 'lucide-react'
 import type { AuthStatusInfo } from '../types'
 import { useI18n } from '../i18n'
-
-const AVATAR_COLORS = ['#E8743B', '#1B9E77', '#7570B3', '#D95F8E', '#3B86E8', '#11998E', '#C0392B', '#8E44AD']
-function colorFor(seed: string): string {
-  let h = 0
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0
-  return AVATAR_COLORS[h % AVATAR_COLORS.length]
-}
+import { TierBadge } from './TierBadge'
 
 export const AccountCard: React.FC<{
   onToast?: (text: string, error?: boolean) => void
@@ -24,14 +18,15 @@ export const AccountCard: React.FC<{
   const { t } = useI18n()
   const [auth, setAuth] = useState<AuthStatusInfo | null>(null)
   const [loggingIn, setLoggingIn] = useState(false)
+  const [imgError, setImgError] = useState(false)
 
   const refresh = useCallback(() => {
+    setImgError(false)
     void window.tangu?.authStatus?.().then(setAuth).catch(() => setAuth(null))
   }, [])
 
   useEffect(() => {
     refresh()
-    // 登录设备码:浏览器没弹时把链接 toast 出来。
     const off = window.tangu?.onAuthDevice?.((info) => {
       if (info?.url) onToast?.(`${t('sidebar.account.center')}: ${info.url}${info.userCode ? ` (${info.userCode})` : ''}`)
     })
@@ -58,36 +53,36 @@ export const AccountCard: React.FC<{
   }
   const openCenter = (): void => { void window.tangu?.openAccountCenter?.() }
 
-  if (!auth?.loggedIn) {
-    return (
-      <button className="account-card login" onClick={() => void login()} disabled={loggingIn} title={t('sidebar.account.loginHint')}>
-        {loggingIn ? <Loader2 size={14} className="spin" /> : <LogIn size={14} />}
-        <span className="account-name">{loggingIn ? t('sidebar.account.loggingIn') : t('sidebar.account.login')}</span>
-      </button>
-    )
-  }
+  const loggedIn = !!auth?.loggedIn
+  const display = auth?.nickname || auth?.username || 'Forsion'
+  const initial = display.trim().charAt(0).toUpperCase() || 'F'
 
-  const display = auth.nickname || auth.username || 'Forsion'
   return (
-    <div className="account-card" role="button" tabIndex={0} title={t('sidebar.account.center')}
-      onClick={openCenter}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openCenter() } }}
+    <div
+      className="account-card"
+      role="button"
+      tabIndex={0}
+      title={loggedIn ? t('sidebar.account.center') : t('sidebar.account.loginHint')}
+      onClick={() => (loggedIn ? openCenter() : void login())}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); loggedIn ? openCenter() : void login() } }}
     >
-      {auth.avatar ? (
-        <img className="account-avatar" src={auth.avatar} alt="" />
+      {loggedIn && auth?.avatar && !imgError ? (
+        <img className="account-avatar" src={auth.avatar} alt="" onError={() => setImgError(true)} />
       ) : (
-        <span className="account-avatar fallback" style={{ background: colorFor(display) }}>
-          {display.trim().charAt(0).toUpperCase() || <UserRound size={13} />}
-        </span>
+        <span className="account-avatar fallback">{loggingIn ? <Loader2 size={14} className="spin" /> : initial}</span>
       )}
-      <span className="account-name">{display}</span>
-      <button
-        className="icon-btn account-logout"
-        title={t('sidebar.account.logout')}
-        onClick={(e) => { e.stopPropagation(); void logout() }}
-      >
-        <LogOut size={13} />
-      </button>
+      <span className="account-meta">
+        <span className="account-name-row">
+          <span className="account-name">{loggedIn ? display : (loggingIn ? t('sidebar.account.loggingIn') : t('sidebar.account.login'))}</span>
+          {loggedIn && <TierBadge tier={auth?.membershipTier} />}
+        </span>
+        <span className="account-sub">{loggedIn ? t('sidebar.account.center') : t('sidebar.account.loginSub')}</span>
+      </span>
+      {loggedIn && (
+        <button className="icon-btn account-logout" title={t('sidebar.account.logout')} onClick={(e) => { e.stopPropagation(); void logout() }}>
+          <LogOut size={13} />
+        </button>
+      )}
     </div>
   )
 }

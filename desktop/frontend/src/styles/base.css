@@ -246,26 +246,23 @@ a:hover { color: var(--accent-hover); }
 }
 .sidebar-footer .grow { flex: 1; }
 
-/* 账号卡(侧栏左下角) */
+/* 账号卡(侧栏左下角,forsion-ui UserProfileCard 规范) */
 .account-card {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
+  flex: 1;
   min-width: 0;
-  max-width: 150px;
-  padding: 4px 6px;
+  padding: 5px 6px;
   border-radius: var(--radius-md);
   color: var(--text);
-  background: transparent;
   cursor: pointer;
   transition: background var(--duration-fast);
 }
 .account-card:hover { background: var(--overlay-light); }
-.account-card.login { color: var(--text-muted); }
-.account-card.login:hover { color: var(--accent-hover); background: var(--accent-light); }
 .account-avatar {
-  width: 22px;
-  height: 22px;
+  width: 30px;
+  height: 30px;
   border-radius: 999px;
   flex-shrink: 0;
   object-fit: cover;
@@ -275,12 +272,28 @@ a:hover { color: var(--accent-hover); }
   align-items: center;
   justify-content: center;
   color: #fff;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
 }
-.account-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
-.account-logout { width: 22px; height: 22px; flex-shrink: 0; opacity: 0; }
+.account-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.account-name-row { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.account-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
+.account-sub { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-logout { width: 24px; height: 24px; flex-shrink: 0; opacity: 0; }
 .account-card:hover .account-logout { opacity: 1; }
+.tier-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+}
 .locale-seg { font-size: 11px; }
 .locale-seg button { padding: 3px 8px; }
 
@@ -722,6 +735,26 @@ a:hover { color: var(--accent-hover); }
 .attach-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attach-chip button { color: var(--text-faint); display: inline-flex; }
 .attach-chip button:hover { color: var(--danger); }
+
+/* 聊天气泡内的附件缩略图(用户消息已发送的图片/文件) */
+.msg-attach-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.msg-attach-img {
+  max-width: 180px;
+  max-height: 180px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  border: var(--border-width) solid var(--border);
+  background: var(--overlay-light);
+}
+.msg-attach-file {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  background: var(--overlay-light);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+}
 
 /* 模式选择器(执行环境 / 审批档;保留供其它处复用) */
 .mode-select {

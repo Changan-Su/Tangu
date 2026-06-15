@@ -33,6 +33,12 @@ export interface ToolContext {
   planMode?: boolean;
   /** 本次 run 的模型 id(delegate 子代理沿用父模型)。 */
   modelId?: string;
+  /**
+   * 工具产出图片的回流闸(view_image 用):工具把图片 data URL 交回 loop,
+   * loop 在本轮工具执行完后把它物化成一条 user 图像消息追加到对话尾部,让模型"看见"图片。
+   * 缺省(未装配此闸的运行环境)时工具应优雅降级,不要假定一定可用。
+   */
+  collectImage?: (img: { url: string; name?: string }) => void;
 }
 
 export interface ToolResult {

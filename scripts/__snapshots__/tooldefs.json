@@ -2262,6 +2262,25 @@
     {
       "type": "function",
       "function": {
+        "name": "view_image",
+        "description": "查看本机图片文件:把图片作为图像内容提供给你\"看\",用于识别截图、分析图表/照片/设计稿/UI 等。支持 png/jpg/jpeg/gif/webp/bmp;路径相对当前工作目录解析。需要\"看图/识图\"时用本工具,不要用 read_file(它对图片只返回文本提示)。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "图片文件路径(相对 cwd 或绝对路径)"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "search_files",
         "description": "在工作目录下按正则搜索文件内容(grep 式),返回 文件:行号:内容。支持 include 通配符限定文件(如 *.ts、src/**/*.py)。自动跳过 .git/node_modules/二进制文件。",
         "parameters": {
@@ -2790,6 +2809,25 @@
           "required": [
             "path",
             "edits"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "view_image",
+        "description": "查看本机图片文件:把图片作为图像内容提供给你\"看\",用于识别截图、分析图表/照片/设计稿/UI 等。支持 png/jpg/jpeg/gif/webp/bmp;路径相对当前工作目录解析。需要\"看图/识图\"时用本工具,不要用 read_file(它对图片只返回文本提示)。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "图片文件路径(相对 cwd 或绝对路径)"
+            }
+          },
+          "required": [
+            "path"
           ]
         }
       }
@@ -4032,6 +4070,25 @@
     {
       "type": "function",
       "function": {
+        "name": "view_image",
+        "description": "查看本机图片文件:把图片作为图像内容提供给你\"看\",用于识别截图、分析图表/照片/设计稿/UI 等。支持 png/jpg/jpeg/gif/webp/bmp;路径相对当前工作目录解析。需要\"看图/识图\"时用本工具,不要用 read_file(它对图片只返回文本提示)。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "图片文件路径(相对 cwd 或绝对路径)"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "search_files",
         "description": "在工作目录下按正则搜索文件内容(grep 式),返回 文件:行号:内容。支持 include 通配符限定文件(如 *.ts、src/**/*.py)。自动跳过 .git/node_modules/二进制文件。",
         "parameters": {
@@ -4560,6 +4617,25 @@
           "required": [
             "path",
             "edits"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "view_image",
+        "description": "查看本机图片文件:把图片作为图像内容提供给你\"看\",用于识别截图、分析图表/照片/设计稿/UI 等。支持 png/jpg/jpeg/gif/webp/bmp;路径相对当前工作目录解析。需要\"看图/识图\"时用本工具,不要用 read_file(它对图片只返回文本提示)。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "图片文件路径(相对 cwd 或绝对路径)"
+            }
+          },
+          "required": [
+            "path"
           ]
         }
       }

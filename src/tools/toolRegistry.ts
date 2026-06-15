@@ -32,7 +32,7 @@ const providerIndex = new Map<string, number>();
  */
 const PLAN_MODE_TOOLS = new Set([
   'get_datetime', 'calculator', 'web_search', 'web_fetch',
-  'search_files', 'glob_files', 'list_files', 'read_file', 'list_dir',
+  'search_files', 'glob_files', 'list_files', 'read_file', 'list_dir', 'view_image',
   'read_log', 'use_skill', 'todo_write', 'todo_read',
   'list_processes', 'read_process_output',
   'delegate', 'ask_user', 'exit_plan_mode',

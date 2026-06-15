@@ -6,22 +6,29 @@
 import React, { useEffect, useRef, useState } from 'react'
 import {
   ArrowRight, ArrowLeft, Check, Cloud, KeyRound, Loader2, LogIn, ExternalLink,
-  MonitorCheck, Play, SkipForward, Sparkles,
+  MonitorCheck, Play, SkipForward, Sparkles, Palette, FolderOpen, Sun, Moon, X,
 } from 'lucide-react'
 import { listModels, testProviderConnection } from '../services/backendService'
 import type { EnvProbeResult, ModelsResponse } from '../types'
 import { useI18n } from '../i18n'
+import { listThemes } from '../theme/registry'
+import { applyTheme } from '../theme/loader'
+import { ThemeCard } from './ThemeCard'
 
 export const ONBOARDING_DISMISS_KEY = 'forsion_tangu_onboarding_done'
 
-type Step = 'connect' | 'model' | 'env' | 'done'
-const STEP_ORDER: Step[] = ['connect', 'model', 'env', 'done']
+type Step = 'connect' | 'theme' | 'model' | 'workspace' | 'env' | 'done'
+const STEP_ORDER: Step[] = ['connect', 'theme', 'model', 'workspace', 'env', 'done']
 
 export const OnboardingWizard: React.FC<{
+  /** 当前主题/明暗(与 App 同步;主题步骤即时应用 + 持久化)。 */
+  themePreset: string
+  themeMode: 'light' | 'dark'
+  onThemeChange: (preset: string, mode: 'light' | 'dark') => void
   /** 向导内动作改变了主配置(登录成功/保存 provider)→ App 重连。 */
   onReconnect: () => void
   onFinish: () => void
-}> = ({ onReconnect, onFinish }) => {
+}> = ({ themePreset, themeMode, onThemeChange, onReconnect, onFinish }) => {
   const { t } = useI18n()
   const [step, setStep] = useState<Step>('connect')
   const stepIdx = STEP_ORDER.indexOf(step)
@@ -92,10 +99,16 @@ export const OnboardingWizard: React.FC<{
     }
   }
 
-  // ── ② 默认模型 ──
+  // ── ③ 默认模型 ──
   const [models, setModels] = useState<ModelsResponse | null>(null)
   const [modelsLoading, setModelsLoading] = useState(false)
   const [chosenModel, setChosenModel] = useState('')
+
+  // ── ④ 默认本地工作区目录 ──
+  const [workspaceDir, setWorkspaceDir] = useState('')
+  useEffect(() => {
+    void window.tangu?.getConfig?.().then((c) => setWorkspaceDir(c.defaultWorkspaceDir || '')).catch(() => {})
+  }, [])
 
   const loadStepModels = (): void => {
     setModelsLoading(true)
@@ -250,6 +263,39 @@ export const OnboardingWizard: React.FC<{
             </>
           )}
 
+          {step === 'theme' && (
+            <>
+              <div className="field">
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Palette size={13} /> {t('onboarding.theme.stepLabel')}
+                </label>
+                <div className="theme-grid">
+                  {listThemes().map((th) => (
+                    <ThemeCard
+                      key={th.manifest.id}
+                      entry={th}
+                      mode={themeMode}
+                      active={th.manifest.id === themePreset}
+                      onSelect={() => { applyTheme(th.manifest.id, themeMode); onThemeChange(th.manifest.id, themeMode) }}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div className="field">
+                <label>{t('onboarding.theme.modeLabel')}</label>
+                <div className="seg">
+                  <button className={themeMode === 'light' ? 'active' : ''} onClick={() => { applyTheme(themePreset, 'light'); onThemeChange(themePreset, 'light') }}>
+                    <Sun size={13} style={{ verticalAlign: -2, marginRight: 4 }} />{t('onboarding.theme.light')}
+                  </button>
+                  <button className={themeMode === 'dark' ? 'active' : ''} onClick={() => { applyTheme(themePreset, 'dark'); onThemeChange(themePreset, 'dark') }}>
+                    <Moon size={13} style={{ verticalAlign: -2, marginRight: 4 }} />{t('onboarding.theme.dark')}
+                  </button>
+                </div>
+                <div className="hint" style={{ marginTop: 6 }}>{t('onboarding.theme.hint')}</div>
+              </div>
+            </>
+          )}
+
           {step === 'model' && (
             <>
               <div className="field">
@@ -273,6 +319,36 @@ export const OnboardingWizard: React.FC<{
                     ))}
                   </div>
                 )}
+              </div>
+            </>
+          )}
+
+          {step === 'workspace' && (
+            <>
+              <div className="field">
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <FolderOpen size={13} /> {t('onboarding.workspace.stepLabel')}
+                </label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    type="text"
+                    value={workspaceDir}
+                    onChange={(e) => setWorkspaceDir(e.target.value)}
+                    placeholder={t('onboarding.workspace.placeholder')}
+                  />
+                  <button
+                    className="btn ghost sm"
+                    onClick={() => void window.tangu?.pickDirectory?.().then((d) => { if (d) setWorkspaceDir(d) })}
+                  >
+                    <FolderOpen size={12} /> {t('onboarding.workspace.pick')}
+                  </button>
+                  {workspaceDir && (
+                    <button className="btn ghost sm" onClick={() => setWorkspaceDir('')}>
+                      <X size={12} /> {t('onboarding.workspace.clear')}
+                    </button>
+                  )}
+                </div>
+                <div className="hint" style={{ marginTop: 6 }}>{t('onboarding.workspace.hint')}</div>
               </div>
             </>
           )}
@@ -352,6 +428,9 @@ export const OnboardingWizard: React.FC<{
                 onClick={() => {
                   if (step === 'model' && chosenModel) {
                     void window.tangu?.setConfig({ modelId: chosenModel })
+                  }
+                  if (step === 'workspace') {
+                    void window.tangu?.setConfig({ defaultWorkspaceDir: workspaceDir.trim() })
                   }
                   setStep(STEP_ORDER[stepIdx + 1])
                 }}

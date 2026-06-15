@@ -52,7 +52,9 @@ const zh: Dict = {
   'sidebar.account.logout': '登出',
   'sidebar.account.guest': '未登录',
   'sidebar.account.loginFail': '登录失败:{e}',
+  'sidebar.account.loginSub': '点击登录',
   'sidebar.settings': '设置 (Ctrl+,)',
+  'header.theme': '深浅模式',
 
   // 设置 - 关于
   'settings.tab.about': '关于',
@@ -73,6 +75,34 @@ const zh: Dict = {
   'model.expandAll': '全部展开',
   'model.empty': '暂无模型',
   'model.searchPlaceholder': '搜索模型…',
+
+  // 设置 - 开发者选项(关于页连点版本号 10 次解锁)
+  'settings.tab.developer': '开发者选项',
+  'about.versionClickHint': '再点 {n} 次开启开发者模式',
+  'about.devUnlocked': '开发者模式已开启',
+  'settings.developer.note': '以下选项面向高级用户/调试,一般无需修改。',
+  'settings.developer.cloudUrlLabel': 'Forsion 云端地址',
+  'settings.developer.cloudUrlHint': '大脑服务(记忆/技能/托管模型)的地址。留空则用环境变量 TANGU_CLOUD_URL 或内置默认。托管模式下保存会重启后端使其生效。',
+  'settings.developer.cloudUrlPlaceholder': 'https://api.forsion.app',
+  'settings.developer.saveCloudUrl': '保存',
+  'settings.developer.savedRestarting': '已保存,正在重启后端…',
+  'settings.developer.saved': '已保存',
+  'settings.developer.relaunchLabel': '引导界面',
+  'settings.developer.relaunchHint': '重新进入首次安装的引导流程(主题 / 连接 / 模型 / 工作区)。',
+  'settings.developer.relaunch': '重新进入引导',
+  'settings.developer.disable': '关闭开发者模式',
+
+  // 引导 - 主题 / 工作区(新增步骤)
+  'onboarding.theme.stepLabel': '选择主题外观',
+  'onboarding.theme.modeLabel': '明暗模式',
+  'onboarding.theme.light': '浅色',
+  'onboarding.theme.dark': '深色',
+  'onboarding.theme.hint': '随时可在 设置 → 主题 中更改。',
+  'onboarding.workspace.stepLabel': '选择默认本地文件夹',
+  'onboarding.workspace.hint': 'Agent 新建本机会话时的默认工作目录;留空则使用 ~/Tangu。',
+  'onboarding.workspace.placeholder': '~/Tangu(默认)',
+  'onboarding.workspace.pick': '浏览文件夹',
+  'onboarding.workspace.clear': '清除',
 }
 
 const en: Dict = {
@@ -99,7 +129,10 @@ const en: Dict = {
   'sidebar.account.center': 'Account Center',
   'sidebar.account.logout': 'Log out',
   'sidebar.account.guest': 'Not signed in',
+  'sidebar.account.loginFail': 'Sign-in failed: {e}',
+  'sidebar.account.loginSub': 'Click to sign in',
   'sidebar.settings': 'Settings (Ctrl+,)',
+  'header.theme': 'Light / Dark',
 
   'settings.tab.about': 'About',
   'about.version': 'Version',
@@ -117,6 +150,34 @@ const en: Dict = {
   'model.expandAll': 'Expand all',
   'model.empty': 'No models',
   'model.searchPlaceholder': 'Search models…',
+
+  // Settings - Developer Options (unlocked by tapping the version 10×)
+  'settings.tab.developer': 'Developer',
+  'about.versionClickHint': '{n} more taps to enable developer mode',
+  'about.devUnlocked': 'Developer mode enabled',
+  'settings.developer.note': 'These options are for advanced users / debugging — normally no need to change them.',
+  'settings.developer.cloudUrlLabel': 'Forsion cloud URL',
+  'settings.developer.cloudUrlHint': 'Address of the brain service (memory/skills/hosted models). Leave empty to use the TANGU_CLOUD_URL env var or the built-in default. In managed mode, saving restarts the backend to take effect.',
+  'settings.developer.cloudUrlPlaceholder': 'https://api.forsion.app',
+  'settings.developer.saveCloudUrl': 'Save',
+  'settings.developer.savedRestarting': 'Saved, restarting backend…',
+  'settings.developer.saved': 'Saved',
+  'settings.developer.relaunchLabel': 'Onboarding',
+  'settings.developer.relaunchHint': 'Re-run the first-install setup flow (theme / connection / model / workspace).',
+  'settings.developer.relaunch': 'Re-run onboarding',
+  'settings.developer.disable': 'Disable developer mode',
+
+  // Onboarding - theme / workspace (new steps)
+  'onboarding.theme.stepLabel': 'Choose a theme',
+  'onboarding.theme.modeLabel': 'Light / Dark',
+  'onboarding.theme.light': 'Light',
+  'onboarding.theme.dark': 'Dark',
+  'onboarding.theme.hint': 'You can change this anytime in Settings → Theme.',
+  'onboarding.workspace.stepLabel': 'Choose a default local folder',
+  'onboarding.workspace.hint': 'Default working directory for new local sessions; leave empty to use ~/Tangu.',
+  'onboarding.workspace.placeholder': '~/Tangu (default)',
+  'onboarding.workspace.pick': 'Browse folder',
+  'onboarding.workspace.clear': 'Clear',
 }
 
 const DICTS: Record<Locale, Dict> = { zh, en }

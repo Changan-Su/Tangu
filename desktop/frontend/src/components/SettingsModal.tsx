@@ -3,7 +3,7 @@
  * tabs 形态对齐 AI Studio SettingsModal;连接页的 managed/external 切换在 M6 接 backendManager。
  */
 import React, { useEffect, useState } from 'react'
-import { X, Loader2, RefreshCw, Sun, Moon, RotateCcw, LogIn, LogOut, ExternalLink, KeyRound, Plus, Trash2, Plug, Search, Download } from 'lucide-react'
+import { X, Loader2, RefreshCw, Sun, Moon, RotateCcw, LogIn, LogOut, ExternalLink, KeyRound, Plus, Trash2, Plug, Search, Download, Sparkles, Wrench } from 'lucide-react'
 import { AnimatedModalBackdrop, AnimatedModalContent, AnimatePresence } from './AnimatedUI'
 import { ThemeCard } from './ThemeCard'
 import { listThemes } from '../theme/registry'
@@ -19,7 +19,9 @@ import { LocaleToggle } from './LocaleToggle'
 import { CHANGELOG } from '../changelog'
 import { ModelGroupList } from './ModelGroupList'
 
-type Tab = 'connection' | 'model' | 'mcp' | 'skills' | 'theme' | 'advanced' | 'about'
+type Tab = 'connection' | 'model' | 'mcp' | 'skills' | 'theme' | 'advanced' | 'developer' | 'about'
+
+const DEV_MODE_KEY = 'forsion_tangu_dev_mode'
 
 const ECO_LABEL: Record<string, string> = {
   'claude-code': 'Claude Code',
@@ -57,10 +59,18 @@ export const SettingsModal: React.FC<{
   onGlassChange: (on: boolean) => void
   /** patch 随调用传入:避免「setState 未刷新就重连」的旧值竞态。 */
   onReconnect: (patch?: Partial<TanguDesktopConfig>) => void
+  /** 开发者选项里「重新进入引导」回调(由 App 控制 onboarding 显隐)。 */
+  onRelaunchOnboarding?: () => void
 }> = (p) => {
   const { t, locale } = useI18n()
   const [tab, setTab] = useState<Tab>('connection')
   const [appVersion, setAppVersion] = useState<string>('')
+  // 开发者模式:关于页连点版本号 10 次解锁(持久化);解锁后多出「开发者选项」tab。
+  const [devMode, setDevMode] = useState<boolean>(() => {
+    try { return localStorage.getItem(DEV_MODE_KEY) === '1' } catch { return false }
+  })
+  const [devClicks, setDevClicks] = useState(0)
+  const [devMsg, setDevMsg] = useState('')
   const [draft, setDraft] = useState(p.cfg)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState('')
@@ -330,6 +340,7 @@ export const SettingsModal: React.FC<{
                     ...(isDesktop ? ([['mcp', 'MCP'], ['skills', t('settings.tab.skills')]] as Array<[Tab, string]>) : []),
                     ['theme', t('settings.tab.theme')],
                     ['advanced', t('settings.tab.advanced')],
+                    ...(isDesktop && devMode ? ([['developer', t('settings.tab.developer')]] as Array<[Tab, string]>) : []),
                     ['about', t('settings.tab.about')],
                   ] as Array<[Tab, string]>
                 ).map(([id, label]) => (
@@ -388,18 +399,6 @@ export const SettingsModal: React.FC<{
 
                     {isDesktop && mode === 'managed' && stored && (
                       <>
-                        <div className="field">
-                          <label>{t('settings.cloud.label')}</label>
-                          <input
-                            type="text"
-                            value={stored.cloudUrl || ''}
-                            readOnly
-                            disabled
-                            placeholder={t('settings.cloud.unset')}
-                          />
-                          <div className="hint">{t('settings.cloud.envOnly')}</div>
-                        </div>
-
                         <div className="field-row">
                           <div className="field">
                             <label><KeyRound size={11} style={{ verticalAlign: -1 }} /> {t('settings.token.label')}</label>
@@ -1129,6 +1128,62 @@ export const SettingsModal: React.FC<{
                   </>
                 )}
 
+                {tab === 'developer' && (
+                  <>
+                    <div className="panel-note">{t('settings.developer.note')}</div>
+                    {isDesktop && stored && (
+                      <div className="field">
+                        <label>{t('settings.developer.cloudUrlLabel')}</label>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <input
+                            type="text"
+                            value={stored.cloudUrl}
+                            onChange={(e) => setStored({ ...stored, cloudUrl: e.target.value.trim() })}
+                            placeholder={t('settings.developer.cloudUrlPlaceholder')}
+                          />
+                          <button
+                            className="btn primary sm"
+                            onClick={() => {
+                              setDevMsg('')
+                              // setConfig({cloudUrl}) 在 managed 模式下会自动重启托管后端使其生效(main.ts config:set)。
+                              void window.tangu!.setConfig({ cloudUrl: (stored.cloudUrl || '').trim() }).then((s) => {
+                                setStored(s)
+                                setDevMsg(s.mode === 'managed' ? t('settings.developer.savedRestarting') : t('settings.developer.saved'))
+                              })
+                            }}
+                          >
+                            {t('settings.developer.saveCloudUrl')}
+                          </button>
+                        </div>
+                        <div className="hint">{t('settings.developer.cloudUrlHint')}</div>
+                        {devMsg && <div className="hint" style={{ marginTop: 6 }}>{devMsg}</div>}
+                      </div>
+                    )}
+                    <div className="field">
+                      <label>{t('settings.developer.relaunchLabel')}</label>
+                      <div>
+                        <button className="btn ghost sm" onClick={() => p.onRelaunchOnboarding?.()}>
+                          <Sparkles size={12} /> {t('settings.developer.relaunch')}
+                        </button>
+                      </div>
+                      <div className="hint">{t('settings.developer.relaunchHint')}</div>
+                    </div>
+                    <div className="field">
+                      <button
+                        className="btn ghost sm"
+                        onClick={() => {
+                          try { localStorage.removeItem(DEV_MODE_KEY) } catch { /* ignore */ }
+                          setDevMode(false)
+                          setDevClicks(0)
+                          setTab('about')
+                        }}
+                      >
+                        {t('settings.developer.disable')}
+                      </button>
+                    </div>
+                  </>
+                )}
+
                 {tab === 'about' && (
                   <>
                     <div className="field">
@@ -1138,9 +1193,29 @@ export const SettingsModal: React.FC<{
                     <div className="field" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                       <div>
                         <div style={{ fontWeight: 600 }}>{t('about.builtWith')}</div>
-                        <div className="hint" style={{ marginTop: 2 }}>
+                        <div
+                          className="hint"
+                          style={{ marginTop: 2, cursor: 'pointer', userSelect: 'none' }}
+                          title={devMode ? t('about.devUnlocked') : undefined}
+                          onClick={() => {
+                            if (devMode) return
+                            const n = devClicks + 1
+                            setDevClicks(n)
+                            if (n >= 10) {
+                              setDevMode(true)
+                              try { localStorage.setItem(DEV_MODE_KEY, '1') } catch { /* ignore */ }
+                            }
+                          }}
+                        >
                           {t('about.version')} {appVersion || CHANGELOG[0]?.version || '—'}
                         </div>
+                        {devMode ? (
+                          <div className="hint" style={{ marginTop: 2, color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <Wrench size={11} /> {t('about.devUnlocked')}
+                          </div>
+                        ) : devClicks >= 5 ? (
+                          <div className="hint" style={{ marginTop: 2 }}>{t('about.versionClickHint', { n: 10 - devClicks })}</div>
+                        ) : null}
                       </div>
                       <span className="grow" />
                       <button

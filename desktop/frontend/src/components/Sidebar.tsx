@@ -8,7 +8,6 @@ import { Plus, MoreHorizontal, Pencil, Archive, ArchiveRestore, Trash2, Settings
 import { CLOUD_WORKSPACE_KEY, type SessionRecord, type WorkspaceDescriptor } from '../types'
 import { BrandLogo } from './BrandLogo'
 import { AccountCard } from './AccountCard'
-import { LocaleToggle } from './LocaleToggle'
 import { useI18n } from '../i18n'
 
 const COLLAPSE_KEY = 'forsion_tangu_collapsed_projects'
@@ -200,8 +199,6 @@ export const Sidebar: React.FC<SidebarProps> = (p) => {
 
       <div className="sidebar-footer">
         <AccountCard onToast={p.onToast} onAuthChange={p.onAuthChange} />
-        <span className="grow" />
-        <LocaleToggle compact />
         <button className="icon-btn" onClick={p.onOpenSettings} title={t('sidebar.settings')}>
           <Settings size={16} />
         </button>

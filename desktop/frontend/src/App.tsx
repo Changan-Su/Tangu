@@ -17,6 +17,7 @@ import { SettingsModal } from './components/SettingsModal'
 import { RightPanel } from './components/RightPanel'
 import { OnboardingWizard, ONBOARDING_DISMISS_KEY } from './components/OnboardingWizard'
 import { resolveInitialMode, resolveInitialPreset } from './theme/registry'
+import { applyTheme } from './theme/loader'
 import { useI18n } from './i18n'
 
 const UNREAD_KEY = 'forsion_tangu_unread_sessions'
@@ -757,13 +758,21 @@ export function App(): React.JSX.Element {
           connMessage={connMessage}
           sidebarCollapsed={sidebarCollapsed}
           rightOpen={rightOpen}
+          themeMode={themeMode}
           onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
           onToggleRight={() => setRightOpen(!rightOpen)}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onToggleMode={() => {
+            const m = themeMode === 'dark' ? 'light' : 'dark'
+            applyTheme(themePreset, m) // 切换 + 持久化(forsion_theme)
+            setThemeMode(m)
+          }}
         />
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
           {onboarding ? (
             <OnboardingWizard
+              themePreset={themePreset}
+              themeMode={themeMode}
+              onThemeChange={(preset, mode) => { setThemePreset(preset); setThemeMode(mode) }}
               onReconnect={() => {
                 desktopMode.current = 'managed'
                 void window.tangu?.getConfig().then((c) => {
@@ -774,7 +783,11 @@ export function App(): React.JSX.Element {
               }}
               onFinish={() => {
                 setOnboarding(false)
+                // 引导里可能改了默认工作区目录 → 重读折算值刷新侧栏工作区,再重连。
                 void window.tangu?.getConfig().then((c) => {
+                  homeDirRef.current = c.homeDir
+                  defaultWsDirRef.current = c.defaultWorkspaceDir || ''
+                  setDefaultWsDir(c.defaultWorkspaceDir || '')
                   const eff = { backendUrl: c.backendUrl, token: c.token, modelId: c.modelId }
                   setCfg(eff)
                   void connect(eff)
@@ -849,6 +862,11 @@ export function App(): React.JSX.Element {
         }}
         onGlassChange={onGlassChange}
         onReconnect={(patch) => void connect({ ...cfgRef.current, ...(patch || {}) })}
+        onRelaunchOnboarding={() => {
+          setSettingsOpen(false)
+          try { localStorage.removeItem(ONBOARDING_DISMISS_KEY) } catch { /* ignore */ }
+          setOnboarding(true)
+        }}
       />
 
       <div className="toast-wrap">

@@ -103,24 +103,29 @@ export async function forsionDeviceLogin(
   }
 }
 
-/** 用 token 查当前用户(账号卡:头像/昵称/用户名);失败返回 null(token 失效/云端不可达)。 */
+/** 用 token 查当前用户(账号卡:头像/昵称/用户名/会员等级);失败返回 null(token 失效/云端不可达)。 */
 export async function forsionWhoami(
   cloudUrl: string,
   token: string,
-): Promise<{ username?: string; nickname?: string; avatar?: string } | null> {
+): Promise<{ username?: string; nickname?: string; avatar?: string; membershipTier?: string } | null> {
   if (!cloudUrl || !token) return null
+  const base = cloudUrl.replace(/\/+$/, '')
   try {
-    const r = await fetch(`${cloudUrl.replace(/\/+$/, '')}/api/brain/users/me`, {
+    const r = await fetch(`${base}/api/brain/users/me`, {
       headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(5000),
     })
     if (!r.ok) return null
     const u: any = await r.json()
     if (!u) return null
+    let avatar: string | undefined = u.avatar || u.avatarUrl || u.avatar_url || undefined
+    // 相对路径头像(如 /uploads/...)在桌面 file:// 下无法加载 → 用云端地址补成绝对 URL。
+    if (avatar && /^\/(?!\/)/.test(avatar)) avatar = base + avatar
     return {
       username: u.username || u.nickname || undefined,
       nickname: u.nickname || undefined,
-      avatar: u.avatar || u.avatarUrl || u.avatar_url || undefined,
+      avatar,
+      membershipTier: u.membershipTier || u.membership_tier || undefined,
     }
   } catch {
     return null
