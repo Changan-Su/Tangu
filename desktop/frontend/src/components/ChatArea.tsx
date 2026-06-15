@@ -60,8 +60,25 @@ export const ChatArea: React.FC<{
       }
       setShowJump(!atBottom)
     }
+    // 用户主动滚动(滚轮上滑 / 触摸拖动)是**无歧义**的「我要看历史」信号 —— 程序化滚动绝不会
+    // 触发 wheel/touchmove。据此立刻释放吸底,绕开 sinceProgrammatic 时间窗:流式高频 follow() 每帧
+    // 刷新该时间戳会让窗口长期"热"、令 onScroll 里的上滑判定永远被压制(死锁),表现为「上滑仍被拽回底」。
+    const releaseIfScrolledUp = () => {
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+      if (dist > 80) {
+        followBottom.current = false
+        setShowJump(true)
+      }
+    }
+    const onWheel = (e: WheelEvent) => { if (e.deltaY < 0) releaseIfScrolledUp() }
     el.addEventListener('scroll', onScroll, { passive: true })
-    return () => el.removeEventListener('scroll', onScroll)
+    el.addEventListener('wheel', onWheel, { passive: true })
+    el.addEventListener('touchmove', releaseIfScrolledUp, { passive: true })
+    return () => {
+      el.removeEventListener('scroll', onScroll)
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('touchmove', releaseIfScrolledUp)
+    }
   }, [ref])
 
   // 流式中:用 ResizeObserver 盯住「流式消息节点」的实际布局增长来吸底(而非靠 messages 引用

@@ -40,35 +40,6 @@ const STRAY_TAGS = /<\/?[^<>]*?(?:invoke|parameter|tool_calls)[^<>]*?>/gi;
 
 const MAX_LEN = 200_000;
 
-/** ``` 围栏代码块的区间(用于跳过"举例/文档里"的工具调用语法,避免把示例当真调用执行)。
- *  惰性、单量词、无嵌套 → 线性,无 ReDoS;未闭合围栏吃到文末。 */
-function fenceRanges(s: string): Array<[number, number]> {
-  const ranges: Array<[number, number]> = [];
-  const re = /```[\s\S]*?(?:```|$)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(s)) !== null) {
-    if (m[0].length === 0) {
-      re.lastIndex++;
-      continue;
-    }
-    ranges.push([m.index, m.index + m[0].length]);
-  }
-  return ranges;
-}
-/** ranges 由 fenceRanges 升序、互不重叠产出 → 二分(避免 N 个 open × M 个围栏的 O(N·M))。 */
-function inFence(pos: number, ranges: Array<[number, number]>): boolean {
-  let lo = 0;
-  let hi = ranges.length - 1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    const [a, b] = ranges[mid];
-    if (pos < a) hi = mid - 1;
-    else if (pos >= b) lo = mid + 1;
-    else return true;
-  }
-  return false;
-}
-
 /** 解析单个 invoke body 内的参数(容忍漏写 </parameter>:值取到下一个 parameter 起始或 body 末尾)。 */
 function parseParams(body: string): Record<string, unknown> {
   const args: Record<string, unknown> = {};
@@ -101,16 +72,17 @@ function parseParams(body: string): Record<string, unknown> {
   return args;
 }
 
-/** ① Anthropic <invoke>/<parameter>(前缀容错 + 截断容错 + 围栏跳过);string="false" 的参数按 JSON 解析。 */
+/** ① Anthropic <invoke>/<parameter>(前缀容错 + 截断容错);string="false" 的参数按 JSON 解析。
+ *  注:不跳过代码围栏(```)内的 <invoke> —— 本就用文本工具调用的模型,其调用常与 ```代码块narration
+ *  交错,围栏跳过会因 ``` 配对错乱(未闭合/奇数个)漏掉真实调用、致 loop 静默收尾(2026-06-15 回归)。
+ *  代价:文档里"举例的" <invoke> 也会被当真调用——对文本工具调用模型这是可接受取舍(无法可靠区分)。 */
 function parseAnthropic(content: string): ParseResult | null {
   if (!/invoke\s+name=/i.test(content)) return null;
-  const fences = fenceRanges(content);
-  // 先收集所有 invoke 起始(含位置;围栏内的示例跳过);body 边界 = 最近的 </invoke> 或下一个 <invoke 或 文末。
+  // 先收集所有 invoke 起始(含位置);body 边界 = 最近的 </invoke> 或下一个 <invoke 或 文末。
   INVOKE_OPEN.lastIndex = 0;
   const opens: Array<{ name: string; openStart: number; bodyStart: number }> = [];
   let m: RegExpExecArray | null;
   while ((m = INVOKE_OPEN.exec(content)) !== null) {
-    if (inFence(m.index, fences)) continue;
     opens.push({ name: m[1].trim(), openStart: m.index, bodyStart: INVOKE_OPEN.lastIndex });
   }
   if (!opens.length) return null;
