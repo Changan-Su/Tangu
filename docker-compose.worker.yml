@@ -1,0 +1,40 @@
+# =====================================================
+# Tangu Agent worker（分离式云节点）— 多机横向扩展执行器
+# -----------------------------------------------------
+# 部署步骤：
+#   1) 宿主先构建 run_python 沙箱镜像（worker 经挂载 socket 起兄弟容器执行）：
+#        docker build -t forsion-agent-sandbox:py312 src/sandbox
+#   2) cp .env.worker.example .env.worker 并填好（JWT_SECRET / TANGU_CLOUD_URL / TANGU_DB_URL）
+#        —— JWT_SECRET 必须与 Forsion server 同密钥；TANGU_DB_URL 必须与 server 同一云端 Postgres
+#   3) docker compose -f docker-compose.worker.yml up -d --build
+#   4) Forsion admin →「实例管理」(/api/admin/agent-core/workers) 登记本 worker：
+#        baseUrl = http://<可被 Forsion server 访问到的本机地址>:8790
+#        登记后点「测试」确认 /health 连通；server 即按 session 亲和转发 /api/agent/*
+# 注：未在 admin 注册任何 worker 时，server 的 /api/agent/* 会返回 503 NO_AGENT_WORKERS。
+# =====================================================
+services:
+  tangu-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    image: tangu-worker:latest
+    container_name: tangu-worker
+    restart: unless-stopped
+    env_file:
+      - .env.worker            # JWT_SECRET / TANGU_CLOUD_URL / TANGU_DB_URL / TANGU_APP_ID / TANGU_MODEL / TANGU_SANDBOX
+    environment:
+      # 容器内固定监听 8790；对外端口在下方 ports 调整
+      TANGU_WORKER_HOST: "0.0.0.0"
+      TANGU_WORKER_PORT: "8790"
+    ports:
+      - "8790:8790"            # 左侧宿主端口可改；Forsion server 须能访问到它
+    volumes:
+      # run_python / pip_install 沙箱：worker 经宿主 docker daemon 起隔离的兄弟容器。
+      # 不挂 socket（或 TANGU_SANDBOX=none）则 run_python 降级禁用，其余功能正常。
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8790/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

@@ -1,0 +1,55 @@
+# =====================================================
+# Tangu Agent — worker（分离式云节点）镜像
+# 构建上下文 = apps/Tangu-Agent/
+# -----------------------------------------------------
+# 形态：连「共享云端 Postgres」+ JWT 多用户本地验签；LLM/记忆经 brain-api；计费云端收口。
+# 由 Forsion server 的 agent-core 网关按 session 亲和把 /api/agent/* 转发过来。
+# run_python 沙箱：经挂载的「宿主 docker.sock」起兄弟容器执行（见 docker-compose.worker.yml）。
+#   → 故本镜像只装 docker CLI 客户端，不跑 daemon。
+#   → 宿主需先构建沙箱镜像：docker build -t forsion-agent-sandbox:py312 src/sandbox
+# 启动入口：dist/worker/main.js（bin: tangu-worker）。必填 env：
+#   JWT_SECRET（与 Forsion 同密钥）/ TANGU_CLOUD_URL（brain-api）/ TANGU_DB_URL（共享云库）
+# =====================================================
+
+# 仅取官方 docker CLI 二进制（客户端；沙箱经挂载 socket 起容器，本镜像不含 daemon）
+FROM docker:27-cli AS dockercli
+
+# ---------- 构建 ----------
+FROM node:20-slim AS builder
+# better-sqlite3 等原生模块工具链（worker 用 pg，但 npm ci 仍会装 better-sqlite3）
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build          # tsc -> dist/
+
+# ---------- 生产依赖 ----------
+FROM node:20-slim AS prod-deps
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+# ---------- 运行时 ----------
+FROM node:20-slim AS run
+COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
+WORKDIR /app
+ENV NODE_ENV=production
+ENV TANGU_WORKER_PORT=8790
+ENV TANGU_WORKER_HOST=0.0.0.0
+
+COPY --from=prod-deps /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY package*.json ./
+COPY skills ./skills
+
+EXPOSE 8790
+
+# /health 自描述端点（Forsion 调度端每 15s 探测）
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD node -e "fetch('http://127.0.0.1:'+(process.env.TANGU_WORKER_PORT||8790)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+CMD ["node", "dist/worker/main.js"]

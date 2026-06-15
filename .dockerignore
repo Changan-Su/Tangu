@@ -1,0 +1,8 @@
+# Tangu-Agent 构建上下文裁剪（Dockerfile.worker 用；context = apps/Tangu-Agent/）
+node_modules
+dist
+desktop          # Electron 桌面端，worker 镜像不需要
+.git
+*.log
+.env
+.env.*
