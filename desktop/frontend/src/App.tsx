@@ -638,6 +638,17 @@ export function App(): React.JSX.Element {
     })
   }, [])
 
+  /** 会话内最大循环轮数(/loop <n> 命令):合并进 agent_config.maxIterations(agentLoop 每轮 run 读取,后端 clamp 1-200)。 */
+  const setSessionMaxIterations = useCallback((n: number) => {
+    const sid = activeIdRef.current
+    if (!sid) return
+    setConfigBySession((prev) => {
+      const next = { ...(prev[sid] || {}), maxIterations: n }
+      void api.putSessionConfig(cfgRef.current, sid, next).catch(() => {})
+      return { ...prev, [sid]: next }
+    })
+  }, [])
+
   /** 计划模式开关(输入栏「计划」按钮 / /plan 命令):持久化进 agent_config.planMode。 */
   const setSessionPlanMode = useCallback((on: boolean) => {
     const sid = activeIdRef.current
@@ -728,7 +739,7 @@ export function App(): React.JSX.Element {
   if (!cfgLoaded) return <div className="app" />
 
   return (
-    <div className="app">
+    <div className={`app${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <Sidebar
         collapsed={sidebarCollapsed}
         sessions={sessions}
@@ -812,6 +823,8 @@ export function App(): React.JSX.Element {
                   onModelChange={setSessionModel}
                   thinkingLevel={execConfig.thinkingLevel}
                   onThinkingChange={setSessionThinking}
+                  maxIterations={execConfig.maxIterations}
+                  onMaxIterationsChange={setSessionMaxIterations}
                   planMode={execConfig.planMode}
                   onPlanModeChange={setSessionPlanMode}
                   skills={skillsList}

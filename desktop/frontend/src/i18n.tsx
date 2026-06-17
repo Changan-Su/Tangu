@@ -111,6 +111,8 @@ const zh: Dict = {
   'settings.advanced.exportOk': '已导出到 {path}',
   'settings.advanced.exportCanceled': '已取消导出',
   'settings.advanced.exportFailed': '导出失败:{err}',
+  'input.slash.loop': '最大循环轮数:/loop <轮数>(当前 {current},范围 1-200)',
+  'input.slash.loopSet': '最大循环轮数已设为 {n} 轮',
 }
 
 const en: Dict = {
@@ -194,6 +196,8 @@ const en: Dict = {
   'settings.advanced.exportOk': 'Exported to {path}',
   'settings.advanced.exportCanceled': 'Export canceled',
   'settings.advanced.exportFailed': 'Export failed: {err}',
+  'input.slash.loop': 'Max loop iterations: /loop <n> (currently {current}, range 1-200)',
+  'input.slash.loopSet': 'Max loop iterations set to {n}',
 }
 
 const DICTS: Record<Locale, Dict> = { zh, en }

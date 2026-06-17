@@ -43,6 +43,9 @@ export const MessageInput: React.FC<{
   onModelChange?: (modelId: string) => void
   thinkingLevel?: AgentConfig['thinkingLevel']
   onThinkingChange?: (level: NonNullable<AgentConfig['thinkingLevel']>) => void
+  /** 会话级最大循环轮数(/loop 指令调节;缺省由后端取默认 90)。 */
+  maxIterations?: number
+  onMaxIterationsChange?: (n: number) => void
   /** 计划模式开关(只读调研 → exit_plan_mode 提交计划)。 */
   planMode?: boolean
   onPlanModeChange?: (on: boolean) => void
@@ -60,6 +63,7 @@ export const MessageInput: React.FC<{
 }> = ({
   disabled, running, execConfig,
   models, modelId, onModelChange, thinkingLevel, onThinkingChange,
+  maxIterations, onMaxIterationsChange,
   planMode, onPlanModeChange, skills, enabledSkillIds, onToggleSkill, onNewSession, onOpenSettings,
   onExecConfigChange, onSend, onStop,
 }) => {
@@ -118,6 +122,10 @@ export const MessageInput: React.FC<{
     if (onModelChange && models?.length) {
       items.push({ cmd: '/model', desc: t('input.slash.model'), run: () => { setDraft('/model '); setSlashSubMenu('model'); setSlashIndex(0) } })
     }
+    if (onMaxIterationsChange) {
+      // /loop <n>:设最大循环轮数。run() 仅填前缀,数字由 send() 解析(支持任意数,不止预设)。
+      items.push({ cmd: '/loop', desc: t('input.slash.loop', { current: maxIterations || 90 }), run: () => { setDraft('/loop '); setSlashIndex(0); requestAnimationFrame(autoGrow) } })
+    }
     if (onNewSession) items.push({ cmd: '/new', desc: t('input.slash.new'), run: () => { onNewSession(); close() } })
     if (onOpenSettings) items.push({ cmd: '/skills', desc: t('input.slash.skills'), run: () => { onOpenSettings(); close() } })
     if (onToggleSkill) {
@@ -132,7 +140,7 @@ export const MessageInput: React.FC<{
     }
     return items
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [planMode, thinkingLevel, models, skills, enabledSkillIds, onPlanModeChange, onThinkingChange, onModelChange, onNewSession, onOpenSettings, onToggleSkill])
+  }, [planMode, thinkingLevel, maxIterations, onMaxIterationsChange, models, skills, enabledSkillIds, onPlanModeChange, onThinkingChange, onModelChange, onNewSession, onOpenSettings, onToggleSkill])
 
   const slashActive = draft.startsWith('/') && !draft.includes('\n') && !disabled && !slashDismissed
   const slashMatches = useMemo<SlashItem[]>(() => {
@@ -168,7 +176,22 @@ export const MessageInput: React.FC<{
 
   const send = () => {
     const text = draft.trim()
-    if (!text || disabled || running) return
+    if (!text) return
+    // /loop <n>:会话级最大循环轮数(命令式,不发给 agent;运行中也可改,下一轮 run 生效)。
+    const loopMatch = /^\/loop(?:\s+(\d+))?$/i.exec(text)
+    if (loopMatch && onMaxIterationsChange) {
+      if (loopMatch[1]) {
+        const n = Math.min(Math.max(1, parseInt(loopMatch[1], 10)), 200)
+        onMaxIterationsChange(n)
+        setHint(t('input.slash.loopSet', { n }))
+      } else {
+        setHint(t('input.slash.loop', { current: maxIterations || 90 }))
+      }
+      setDraft('')
+      requestAnimationFrame(autoGrow)
+      return
+    }
+    if (disabled || running) return
     if (text.length > MAX_INPUT_CHARS) {
       setHint(t('input.tooLong', { len: text.length.toLocaleString(), max: MAX_INPUT_CHARS.toLocaleString() }))
       return

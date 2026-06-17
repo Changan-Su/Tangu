@@ -206,8 +206,9 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
   const modelId = run.model_id || '';
   const input = typeof run.input === 'string' ? safeParse(run.input) : run.input || {};
   const agentConfig = input.agentConfig || {};
-  // 默认 20(原 10):重试型模型(命令报错→改写重试)很容易把 10 轮耗光被迫收尾;上限保持 30。
-  const maxIterations = Math.min(Math.max(1, agentConfig.maxIterations || 20), 30);
+  // 默认 90(原 20):重试型模型/多步任务很容易把少量轮数耗光被迫收尾;可经会话级 agentConfig.maxIterations
+  // (桌面/TUI 的 /loop 指令)调节,安全上限 200 防失控。
+  const maxIterations = Math.min(Math.max(1, agentConfig.maxIterations || 90), 200);
   // 文本工具调用「无法解析」的纠正重试预算:模型把工具调用当正文吐(原生 tool_calls 空、
   // 文本兜底也没解出来)时,回灌一次纠正提示让它改用原生函数调用,而非静默收尾。
   const MAX_TOOLCALL_RECOVERY = 2;
@@ -389,6 +390,7 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
     let finalReasoning = '';
     const allToolCalls: ToolCall[] = [];
     const allToolResults: any[] = [];
+    let usedTools = false; // 本 run 是否真的执行过工具(循环耗尽提示的前提:没用工具的纯聊天/单轮 run 不该报"耗尽")
     let tokensTotal = 0;
     let costTotal = 0; // 本 run 累计扣费点数(每-run 成本上限护栏用)
     const runCostLimit = runCostCeiling(); // TANGU_MAX_RUN_COST，<=0 关闭
@@ -530,6 +532,14 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
             ? '(本轮达到最大工具调用次数或工具调用格式异常,已停止。发送"继续"可让我接着操作。)'
             : finalContent;
         }
+        // 循环耗尽提示:仅当 ① 顶到 lastIter ② 本 run 确实在调工具(usedTools,排除纯聊天/maxIterations=1 这类
+        // 一上来就 lastIter 却没用过工具的情况)③ 没走工具调用格式异常兜底(否则与那条提示重复)三者同时成立才追加。
+        // 注:极少数"恰好在最后一轮自然收尾"会误报,故措辞为"可能尚未完成";完全消歧需不强制 toolChoice='none',成本更高,暂不做。
+        if (lastIter && usedTools && !looksLikeToolCallText(res.content)) {
+          const notice = `⚠️ 已达到本会话的最大循环轮数(${maxIterations} 轮)并停止,任务可能尚未完成。发送「继续」可接着操作,或用 \`/loop <轮数>\` 调整上限。`;
+          finalContent = finalContent.trim() ? `${finalContent.trimEnd()}\n\n> ${notice}` : notice;
+          void publish(runId, 'status', { phase: 'loop_exhausted', iteration, maxIterations });
+        }
         await appendStep({
           id: uuidv4(), runId, stepNo: iteration,
           llmResponse: { content: res.content, usage: res.usage },
@@ -550,6 +560,7 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
         tool_calls: res.toolCalls,
       } as ChatMessage);
       allToolCalls.push(...res.toolCalls);
+      usedTools = true; // 到达本行说明这一轮在调工具并继续循环;若后续顶到 lastIter 即为真·循环耗尽
 
       const toolResults: any[] = [];
       for (const call of res.toolCalls) {

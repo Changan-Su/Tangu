@@ -117,6 +117,12 @@ a:hover { color: var(--accent-hover); }
   -webkit-app-region: drag;
 }
 .sidebar-header > * { -webkit-app-region: no-drag; }
+/* macOS:hiddenInset 标题栏的交通灯(关闭/最小化/最大化)浮在窗口左上角,
+   给品牌区让出左侧留白,使 logo + Tangu 右移、不被按钮遮挡。 */
+[data-platform="mac"] .sidebar-header { padding-left: 78px; }
+/* 侧栏收起时交通灯改浮在顶栏左上角,会盖住「展开侧栏」按钮——仅此情形给顶栏让出同样留白
+   (侧栏展开时顶栏在 248px 侧栏右侧、交通灯够不着,故不加,避免多余空隙)。 */
+[data-platform="mac"] .app.sidebar-collapsed .chat-header { padding-left: 78px; }
 .sidebar-brand {
   display: flex;
   align-items: center;

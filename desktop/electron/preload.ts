@@ -12,6 +12,8 @@ export interface BackendStatus {
 }
 
 const api = {
+  /** 宿主平台('darwin' | 'win32' | 'linux');渲染层据此调标题栏/交通灯留白等。 */
+  platform: process.platform as string,
   getConfig: (): Promise<any> => ipcRenderer.invoke('config:get'),
   setConfig: (patch: Record<string, any>): Promise<any> => ipcRenderer.invoke('config:set', patch),
   backendStatus: (): Promise<BackendStatus> => ipcRenderer.invoke('backend:getStatus'),

@@ -273,6 +273,8 @@ export interface AuthStatusInfo {
 declare global {
   interface Window {
     tangu?: {
+      /** 宿主平台('darwin' | 'win32' | 'linux');静态值,渲染层据此调标题栏留白。 */
+      platform?: string
       getConfig(): Promise<StoredDesktopConfig>
       setConfig(patch: Partial<StoredDesktopConfig>): Promise<StoredDesktopConfig>
       backendStatus?(): Promise<BackendStatusInfo>

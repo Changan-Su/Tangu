@@ -3,7 +3,7 @@
  * 负责:建窗 + 配置持久化(IPC)+ 托管内置 tangu-server(managed 模式,backendManager)。
  * agent 调用由 renderer 直连 HTTP/SSE(localhost),不经主进程代理。
  */
-import { app, BrowserWindow, dialog, ipcMain, shell, nativeImage } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, nativeImage } from 'electron'
 import { dirname, join } from 'path'
 import { pathToFileURL } from 'url'
 import { readFile, writeFile, mkdir, chmod, readdir, stat, rename } from 'fs/promises'
@@ -244,12 +244,19 @@ function ensureBackend(): Promise<void> {
 }
 
 function createWindow(): void {
+  // Windows/Linux 默认会渲染 File/Edit/View/Window 菜单条;macOS 菜单在系统栏(不在窗口内)。
+  // 置空菜单让 Windows/Linux 与 macOS 观感一致(无窗口内菜单条);文本框的复制/粘贴等由 Chromium 原生处理,不依赖菜单。
+  if (process.platform !== 'darwin') Menu.setApplicationMenu(null)
+
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 820,
     minWidth: 880,
     minHeight: 600,
-    titleBarStyle: 'hiddenInset',
+    // hiddenInset 是 macOS 专用(交通灯内嵌、无原生标题栏);Windows/Linux 用 default 保留原生
+    // 最小化/最大化/关闭按钮,否则该值被忽略可能导致无窗口控件。菜单条另由 setApplicationMenu(null) 去除。
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    autoHideMenuBar: true, // 即便保留了菜单也不在窗口内显示(Alt 不唤出);与置空菜单双保险
     backgroundColor: '#F5F5F7', // qbird 浅色底(默认主题),避免白屏闪烁
     webPreferences: {
       preload: join(__dirname, '../preload/preload.mjs'),

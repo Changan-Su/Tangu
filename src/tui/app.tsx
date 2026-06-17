@@ -36,6 +36,8 @@ interface MutableConfig {
   tokenBudget?: number;
   thinkingLevel: 'off' | 'low' | 'medium' | 'high';
   seedSystem?: string;
+  /** 最大循环轮数(/loop 调节;缺省由后端取默认 90,后端 clamp 1-200)。 */
+  maxIterations?: number;
   /** 计划模式(/plan 切换):只读工具集 + exit_plan_mode,批准后自动关闭。 */
   planMode?: boolean;
   /** 本会话启用的技能 id(/skill <id> 切换;/skills 列出)。 */
@@ -208,6 +210,7 @@ export function App({ boot, storage }: { boot: TuiConfig; storage: string }): Re
     if (c.seedSystem) agentConfig.systemPrompt = c.seedSystem;
     if (c.tokenBudget) agentConfig.tokenBudget = c.tokenBudget;
     if (c.thinkingLevel && c.thinkingLevel !== 'off') agentConfig.thinkingLevel = c.thinkingLevel;
+    if (c.maxIterations) agentConfig.maxIterations = c.maxIterations;
     if (c.planMode) agentConfig.planMode = true;
     if (c.enabledSkillIds?.length) agentConfig.enabledSkillIds = c.enabledSkillIds;
     createRun({
@@ -316,6 +319,16 @@ export function App({ boot, storage }: { boot: TuiConfig; storage: string }): Re
           notice(`当前思考强度：${cfgRef.current.thinkingLevel}\n用法：/think off|low|medium|high`);
         }
         return;
+      case '/loop': {
+        if (/^\d+$/.test(rest)) {
+          const n = Math.min(Math.max(1, parseInt(rest, 10)), 200);
+          setCfg((c) => ({ ...c, maxIterations: n }));
+          notice(`最大循环轮数已设为 ${n} 轮`, 'success');
+        } else {
+          notice(`当前最大循环轮数：${cfgRef.current.maxIterations || 90}\n用法：/loop <1-200>`);
+        }
+        return;
+      }
       case '/cwd':
         if (rest) {
           const abs = path.resolve(cfgRef.current.cwd, rest);

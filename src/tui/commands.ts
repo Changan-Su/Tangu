@@ -16,6 +16,7 @@ export const COMMANDS: CommandSpec[] = [
   { name: '/resume', desc: '恢复会话并续聊：/resume <id|序号>' },
   { name: '/approval', desc: '切换审批档：/approval readonly|auto-edit|full-auto' },
   { name: '/think', desc: '思考强度：/think off|low|medium|high（思考内容默认折叠）' },
+  { name: '/loop', desc: '最大循环轮数：/loop <1-200>（默认 90；耗尽会提示）' },
   { name: '/plan', desc: '切换计划模式：只读调研 → exit_plan_mode 提交计划求批准' },
   { name: '/cwd', desc: '查看或切换工作目录：/cwd [path]' },
   { name: '/tools', desc: '列出当前模式可用工具' },
