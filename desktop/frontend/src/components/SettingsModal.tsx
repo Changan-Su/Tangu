@@ -9,10 +9,10 @@ import { ThemeCard } from './ThemeCard'
 import { listThemes } from '../theme/registry'
 import { applyTheme } from '../theme/loader'
 import { testConnection } from '../services/agentRunService'
-import { deleteUserCloudSkill, listModels, listSkills, listTools, testProviderConnection, uploadSkillToCloud } from '../services/backendService'
+import { deleteUserCloudSkill, getSessionConfig, listMessages, listModels, listSkills, listTools, testProviderConnection, uploadSkillToCloud } from '../services/backendService'
 import type {
   AuthStatusInfo, BackendStatusInfo, DirectProviderConfig, DiscoveryResult, McpServerConfigEntry, ModelsResponse,
-  SkillInfo, StoredDesktopConfig, TanguDesktopConfig, ToolsResponse,
+  SessionRecord, SkillInfo, StoredDesktopConfig, TanguDesktopConfig, ToolsResponse,
 } from '../types'
 import { useI18n } from '../i18n'
 import { LocaleToggle } from './LocaleToggle'
@@ -61,6 +61,8 @@ export const SettingsModal: React.FC<{
   onReconnect: (patch?: Partial<TanguDesktopConfig>) => void
   /** 开发者选项里「重新进入引导」回调(由 App 控制 onboarding 显隐)。 */
   onRelaunchOnboarding?: () => void
+  /** 当前活跃会话(高级→导出日志用;无活跃会话时禁用导出)。 */
+  activeSession?: SessionRecord | null
 }> = (p) => {
   const { t } = useI18n()
   const [tab, setTab] = useState<Tab>('connection')
@@ -93,6 +95,63 @@ export const SettingsModal: React.FC<{
   const [providerTestMsg, setProviderTestMsg] = useState('')
   const [providerTesting, setProviderTesting] = useState(false)
   const [providerSaveMsg, setProviderSaveMsg] = useState('')
+  // 高级→导出日志:把当前会话的全部对话 + 后端运行日志打包成一个 JSON,便于开发者排障。
+  const [exporting, setExporting] = useState(false)
+  const [exportMsg, setExportMsg] = useState('')
+
+  const exportSessionLogs = async (): Promise<void> => {
+    const session = p.activeSession
+    if (!session) { setExportMsg(t('settings.advanced.exportNoSession')); return }
+    setExporting(true)
+    setExportMsg('')
+    try {
+      // 对话与会话配置走后端 REST(messages 取后端硬上限 500 条);后端日志走主进程托管缓冲(仅 managed 模式有)。
+      const [messages, agentConfig, backendLogs] = await Promise.all([
+        listMessages(p.cfg, session.id, 500).catch(() => []),
+        getSessionConfig(p.cfg, session.id).catch(() => ({})),
+        window.tangu?.backendLogs?.().catch(() => []) ?? Promise.resolve([]),
+      ])
+      // 后端日志仅 managed(本机托管)模式有(主进程 200 行环形缓冲);external 模式恒为空——
+      // 显式标注 backendLogsAvailable,免得开发者把「空日志」当成采集失败。messagesTruncated 标注是否被 500 条上限截断。
+      const connectionMode = stored?.mode || 'external'
+      const payload = {
+        exportedAt: new Date().toISOString(),
+        app: 'Tangu Agent Desktop',
+        appVersion: appVersion || null,
+        connectionMode,
+        backendLogsAvailable: connectionMode === 'managed',
+        session: {
+          id: session.id, title: session.title, model_id: session.model_id,
+          project_path: session.project_path ?? null, project_name: session.project_name ?? null,
+          created_at: session.created_at, updated_at: session.updated_at,
+        },
+        agentConfig,
+        messageCount: messages.length,
+        messagesTruncated: messages.length >= 500,
+        messages,
+        backendLogs,
+      }
+      const json = JSON.stringify(payload, null, 2)
+      const filename = `tangu-session-${session.id.slice(0, 8)}-${new Date().toISOString().slice(0, 10)}.json`
+      if (window.tangu?.saveTextFile) {
+        const r = await window.tangu.saveTextFile(filename, json)
+        setExportMsg(r.ok && r.path ? t('settings.advanced.exportOk', { path: r.path }) : t('settings.advanced.exportCanceled'))
+      } else {
+        // 浏览器调试兜底:走 Blob 下载(无系统保存框)。
+        const blob = new Blob([json], { type: 'application/json' })
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = filename
+        a.click()
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+        setExportMsg(t('settings.advanced.exportOk', { path: filename }))
+      }
+    } catch (e: any) {
+      setExportMsg(t('settings.advanced.exportFailed', { err: e?.message || String(e) }))
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const refreshCustomProviders = (): void => {
     void window.tangu?.listProviders?.().then(setCustomProviders).catch(() => setCustomProviders([]))
@@ -302,7 +361,8 @@ export const SettingsModal: React.FC<{
     if (p.open && tab === 'model' && !models && !modelsLoading) void loadModels()
     if (p.open && tab === 'mcp') refreshMcp()
     if (p.open && tab === 'skills' && !allSkills && !allSkillsLoading) loadAllSkills()
-    if (p.open && tab === 'about' && !appVersion) void window.tangu?.appVersion?.().then((v) => setAppVersion(v || '')).catch(() => {})
+    // appVersion 一打开就取(不只 about tab):高级→导出日志也要带版本号,否则导出里恒为 null。
+    if (p.open && !appVersion) void window.tangu?.appVersion?.().then((v) => setAppVersion(v || '')).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.open, tab])
 
@@ -1125,6 +1185,20 @@ export const SettingsModal: React.FC<{
                       {t('settings.advanced.note')}
                     </div>
 
+                    <div className="field" style={{ marginTop: 14 }}>
+                      <label>{t('settings.advanced.exportLogs')}</label>
+                      <div className="hint" style={{ marginBottom: 8 }}>{t('settings.advanced.exportLogsHint')}</div>
+                      <button
+                        className="btn ghost sm"
+                        onClick={() => void exportSessionLogs()}
+                        disabled={exporting || !p.activeSession}
+                      >
+                        {exporting ? <Loader2 size={13} className="spin" /> : <Download size={13} />}
+                        {t('settings.advanced.exportBtn')}
+                      </button>
+                      {!p.activeSession && <div className="hint" style={{ marginTop: 6 }}>{t('settings.advanced.exportNoSession')}</div>}
+                      {exportMsg && <div className="hint" style={{ marginTop: 6, wordBreak: 'break-all' }}>{exportMsg}</div>}
+                    </div>
                   </>
                 )}
 

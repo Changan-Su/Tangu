@@ -7,7 +7,7 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { query } from '../../core/db.js';
+import { deps } from '../../seams/runtime.js';
 import { requestInquiry } from '../../services/inquiries.js';
 import { publish } from '../../services/eventBus.js';
 import type { ToolProvider } from '../toolRegistry.js';
@@ -97,11 +97,10 @@ export const interactionProvider: ToolProvider = {
         if (answer.startsWith('批准')) {
           // 关掉会话的 planMode(读-改-写 agent_config;本轮 defs 已冻结仍只读,下一轮生效)
           try {
-            const rows = await query<any[]>(`SELECT agent_config FROM chat_sessions WHERE id = ?`, [ctx.sessionId]);
-            const raw = rows?.[0]?.agent_config;
+            const raw = await deps().state.getAgentConfig(ctx.sessionId);
             const cfg = (typeof raw === 'string' ? JSON.parse(raw) : raw) || {};
             cfg.planMode = false;
-            await query(`UPDATE chat_sessions SET agent_config = ? WHERE id = ?`, [JSON.stringify(cfg), ctx.sessionId]);
+            await deps().state.setAgentConfig(ctx.sessionId, JSON.stringify(cfg));
           } catch (e: any) {
             return `用户已批准,但关闭计划模式失败:${e?.message || e}(请手动关闭计划开关)`;
           }

@@ -9,7 +9,8 @@
  * 设计见 server/Documents/Tangu/Tangu_Agent_Architecture_v2.0.md(三层 + 两接缝)。
  */
 import { Router } from 'express';
-import { configureTangu, type TanguDeps } from './seams/runtime.js';
+import { configureTangu, deps, type TanguDeps } from './seams/runtime.js';
+import type { AppProfileOverride } from './seams/appProfile.js';
 import runsRouter from './routes/runs.js';
 import workspaceRouter from './routes/workspace.js';
 import approvalsRouter from './routes/approvals.js';
@@ -46,7 +47,7 @@ export interface TanguModule {
    * 本机无沙箱)传 `{ recoverRuns:false, sandbox:false, historian:true }`。
    * 默认全开,standalone 行为不变。
    */
-  startBackgroundTasks: (opts?: { recoverRuns?: boolean; historian?: boolean; sandbox?: boolean }) => void;
+  startBackgroundTasks: (opts?: { recoverRuns?: boolean; historian?: boolean; sandbox?: boolean; profilePolling?: boolean }) => void;
   /** 卸载/热加载:停掉所有 interval 定时器 + 中止在飞 run(防 interval 泄漏)。 */
   dispose: () => void;
 }
@@ -70,7 +71,7 @@ export function createTanguModule(d: TanguDeps): TanguModule {
   dataRouter.use(memoryRouter);
   dataRouter.use(assetsRouter);
 
-  const startBackgroundTasks = (opts?: { recoverRuns?: boolean; historian?: boolean; sandbox?: boolean }): void => {
+  const startBackgroundTasks = (opts?: { recoverRuns?: boolean; historian?: boolean; sandbox?: boolean; profilePolling?: boolean }): void => {
     // 进程重启自愈:遗留 running 标 failed → 重新入队仍在飞的 run(顺序不可颠倒)。
     // 共享云库的 worker 集群必须关掉(opts.recoverRuns=false),否则跨 worker 互相干扰。
     // 纯调度网关(Forsion server)三个全关:loop 不在该进程跑,沙箱也不在该机。
@@ -98,12 +99,17 @@ export function createTanguModule(d: TanguDeps): TanguModule {
       loadHistorianConfig().catch(() => {});
       startHistorian();
     }
+
+    // 配置驱动 profile:启动 app_profile_overrides 轮询(admin panel 改 → 本进程 ≤刷新窗口收敛)。
+    // thin worker 无本地 DB(host.query 抛)→ 传 profilePolling:false,用基线 profile(admin 覆盖暂不下达,后续可经 state-API 取)。
+    if (opts?.profilePolling !== false) deps().profileStore.start();
   };
 
   const dispose = (): void => {
     stopCacheJanitor();
     stopSessionReaper();
     stopHistorian();
+    deps().profileStore.dispose();
     abortAllRuns();
     disposeAllProcesses(); // run_background 的子进程(防热加载/退出泄漏)
   };
@@ -129,9 +135,45 @@ export type {
   StreamResult,
 } from './seams/cloudBrain.js';
 export type { BillingServices } from './seams/billing.js';
-export type { AppProfile, PromptSectionCtx, PromptSections } from './seams/appProfile.js';
+export type { AppProfile, AppProfileOverride, PromptSectionCtx, PromptSections } from './seams/appProfile.js';
 export { resolveProfile } from './seams/appProfile.js';
 export { createAiStudioProfile, createTanguProfile } from './profiles/index.js';
+export { createProfileStore } from './profiles/profileStore.js';
+export type { ProfileStore, ProfileEntry, ProfileView } from './profiles/profileStore.js';
+export { getKnownToolNames } from './profiles/mergeProfile.js';
+
+// ── 配置驱动 profile 的 admin 辅助(server agent-core 的 adminProfiles 路由调用,薄封装 profileStore)──
+/** 列全部已知 app + 生效视图 + 原始覆盖(面板渲染用)。 */
+export function listAppProfiles() {
+  return deps().profileStore.describe();
+}
+/** 已注册内置工具名(面板白名单清单)。 */
+export function knownToolNames(): string[] {
+  return deps().profileStore.knownTools();
+}
+/** upsert 一个 app 的 DB 覆盖(写表 + 本进程立即刷新)。 */
+export function upsertAppProfile(appId: string, override: AppProfileOverride): Promise<void> {
+  return deps().profileStore.upsert(appId, override);
+}
+/** 删一个 app 的 DB 覆盖行(回落文件/基线 + 立即刷新)。 */
+export function deleteAppProfile(appId: string): Promise<void> {
+  return deps().profileStore.remove(appId);
+}
+/** 立即重建快照(admin 写后即时生效)。 */
+export function refreshAppProfiles(): Promise<void> {
+  return deps().profileStore.refreshNow();
+}
 export type { ToolDef, ToolProvider } from './tools/toolRegistry.js';
 export type { ToolContext, ToolResult, ToolImpl } from './tools/toolTypes.js';
 export * from './core/types.js';
+
+// ── 插件契约（外部插件经 dist/index.d.ts 只读 import type;运行时全走 ctx.sdk，见 src/plugins/types.ts）──
+export { TANGU_PLUGIN_API } from './plugins/types.js';
+export type {
+  TanguPlugin,
+  TanguPluginContext,
+  TanguPluginManifest,
+  PluginCommand,
+  PluginRouters,
+  TanguSdk,
+} from './plugins/types.js';

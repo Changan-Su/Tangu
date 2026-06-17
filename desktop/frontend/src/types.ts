@@ -288,10 +288,12 @@ declare global {
       appVersion?(): Promise<string>
       onAuthDevice?(cb: (info: { url: string; userCode: string }) => void): () => void
       pickDirectory?(): Promise<string | null>
+      /** 另存为文本文件(导出日志等);取消返回 { ok:false }。 */
+      saveTextFile?(defaultName: string, content: string): Promise<{ ok: boolean; path: string | null }>
       /** 拖入文件 → 绝对路径(本机模式粘贴路径用)。 */
       getPathForFile?(file: File): string
       /** 本机工作区文件浏览(host cwd)。 */
-      listDir?(dirPath: string): Promise<Array<{ name: string; isDir: boolean; size: number }>>
+      listDir?(dirPath: string): Promise<Array<{ name: string; isDir: boolean; size: number; path: string }>>
       readHostFile?(filePath: string): Promise<{ mimeType: string; content: string; size: number; tooLarge?: boolean }>
       /** 本机工作区文件操作(host 模式)。 */
       renameHostPath?(oldPath: string, newName: string): Promise<{ path: string }>

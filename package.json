@@ -13,8 +13,7 @@
   },
   "bin": {
     "tangu": "./dist/tui/main.js",
-    "tangu-server": "./dist/standalone/main.js",
-    "tangu-worker": "./dist/worker/main.js"
+    "tangu-server": "./dist/standalone/main.js"
   },
   "files": [
     "dist",
@@ -24,10 +23,11 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "tui": "node dist/tui/main.js",
     "server": "node dist/standalone/main.js",
     "standalone": "node dist/standalone/main.js",
-    "worker": "node dist/worker/main.js",
     "clean": "rm -rf dist",
     "desktop:install": "cd desktop && npm install",
     "desktop:dev": "cd desktop && npm run dev",
@@ -55,6 +55,7 @@
     "@types/pg": "^8.11.0",
     "@types/react": "^18.3.12",
     "@types/uuid": "^9.0.7",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^3.2.4"
   }
 }

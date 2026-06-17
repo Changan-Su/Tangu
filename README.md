@@ -33,7 +33,7 @@ Tangu = **Agent Core 运行时 + 一套 App 适配规范 + 一个云端共享大
 | **microserver**(进程内) | Forsion `server/microserver/agent-core` | Forsion 进程内 | `forsionSeams`(直连) | 真实计费 | 与 AI Studio 等部署在一起,云端多租户 |
 | **TUI / CLI**(终端 agent) | `dist/tui/main.js`(`tangu`) | `sqliteHost`(SQLite/WAL,**零安装**) | `httpBrain` | noop | 成熟终端 agent(Ink,hermes/codex 形);进程内跑 loop、**无端口**;**host-exec** 直接操作本机 FS/shell + 三档审批;Markdown/工具卡片/状态栏/slash 命令 |
 | **standalone**(server/云端大脑客户端) | `dist/standalone/main.js`(`tangu-server`) | `sqliteHost`(SQLite/WAL,**零安装**)/ `localHost`(外部 PG) | `httpBrain`(→ brain-api) | noop | headless HTTP/SSE 服务,给 desktop / 远程 / 脚本用;可 BYO-key 直连 LLM |
-| **worker**(分离式云节点) | `dist/worker/main.js`(`tangu-worker`) | `cloudWorkerHost`(共享云库 + JWT 多用户) | `httpBrain`(per-user token) | noop(计费收口云端) | 多机横向扩展,支撑大规模在线 agent 服务 |
+| **worker**(分离式云节点,**插件**) | `tangu worker`(插件 `plugins/forsion-worker`) | `cloudWorkerHost`(共享云库 + JWT 多用户) | `httpBrain`(per-user token) | noop(计费收口云端) | 多机横向扩展;**不在开源核心**,作为 `./plugins` 插件加载,后续独立成项目 |
 | **desktop**(GUI) | `desktop/`(Electron) | — | renderer 直连 standalone HTTP/SSE | — | 本地桌面客户端(壳) |
 
 三种服务端形态**共用同一份 Core**;run 接口契约一致:`POST /agent/runs` + SSE `GET /agent/runs/:id/events`。
@@ -54,14 +54,18 @@ src/
 ├── services/           # agentLoop / eventBus / runStore / approvals(host-exec 审批闸门)/ historian
 ├── llm/                # 多 provider:openaiCompat(直连)+ providerRegistry
 ├── adapters/
-│   ├── cloudWorkerHost.ts        # worker 的 host(共享云库 + JWT 多用户验签)
 │   └── standalone/               # localHost / httpBrain / multiBrain / noopBilling
+├── plugins/            # 插件宿主系统:types(契约)/ loader(./plugins 发现)/ bootstrap(ctx.sdk 装配)
 ├── tui/                # Ink 终端 UI(`tangu`):main/app/events/commands/sessions + components/*
 ├── standalone/         # standalone 入口(main + config;`tangu-server`)
-├── worker/             # 分离式 worker 入口(main;`tangu-worker`)
 └── db/                 # 迁移 + standalone schema
 desktop/                # Electron + React 本地 GUI(构建隔离,自带 electron-vite)
+plugins/                # 运行时 drop-in 插件目录(git/docker 忽略);worker 模式即 plugins/forsion-worker
 ```
+
+> **插件系统**:核心从 `./plugins/` 发现并加载插件(`src/plugins/loader.ts`),经 `tangu` 子命令触发。
+> 插件以独立模块图运行,**仅 `import type` 核心**、运行时全走传入的 `ctx.sdk`(契约见 `src/plugins/types.ts`)。
+> worker 模式即首个插件 `plugins/forsion-worker`(`tangu worker`),不在开源核心、独立分发。`tangu plugins` 列出已加载插件。
 
 ---
 
@@ -153,14 +157,20 @@ node dist/standalone/main.js --cloud-url … --token … --db … \
 
 `--help` 查看全部参数/环境变量。
 
-### worker(分离式云节点,多机横向扩展)
+### worker(分离式云节点,多机横向扩展)——**外置插件**
 
-连**共享云端 Postgres**,用 `JWT_SECRET`(与 Forsion 同一密钥)本地验签 forsion_token 服务多用户;
-LLM/记忆经 brain-api,计费在云端收口。
+worker 模式**不在开源核心**,以插件形式存在(`plugins/forsion-worker`,git/docker 忽略,后续独立成项目),
+经 `tangu worker` 触发。连**共享云端 Postgres**,用 `JWT_SECRET`(与 Forsion 同一密钥)本地验签 forsion_token
+服务多用户;LLM/记忆经 brain-api,计费在云端收口。
 
 ```bash
+# 先构建核心与插件(插件 import type 核心,故须核心先 build 出 dist/index.d.ts)
+npm run build                                                  # 核心 → dist/
+( cd plugins/forsion-worker && npm install && npm run build )  # 插件 → plugins/forsion-worker/dist/
+
+# 启动(经 tangu CLI 的插件命令分发)
 JWT_SECRET=<与 Forsion 同一密钥> \
-node dist/worker/main.js \
+tangu worker \
   --cloud-url https://api.forsion.app \   # brain-api
   --db postgres://cloud-host/forsion \    # 共享云库
   --app-id ai-studio \                    # 一个 fleet 服务一个 app

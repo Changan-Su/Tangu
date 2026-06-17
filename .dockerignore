@@ -1,7 +1,9 @@
-# Tangu-Agent 构建上下文裁剪（Dockerfile.worker 用；context = apps/Tangu-Agent/）
+# Tangu-Agent 构建上下文裁剪（context = apps/Tangu-Agent/）
 node_modules
 dist
-desktop          # Electron 桌面端，worker 镜像不需要
+desktop
+# 插件 drop-in 目录（worker 等）：运行时加载，不烘焙进核心镜像。
+plugins
 .git
 *.log
 .env

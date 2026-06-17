@@ -22,9 +22,32 @@ import { loadTanguEnv } from '../core/tanguHome.js';
 import { parseTuiConfig, TUI_HELP } from './config.js';
 import { printBanner } from './components/Banner.js';
 import { App } from './app.js';
+import { dispatchPluginCommand, listPlugins, activateAllPlugins } from '../plugins/bootstrap.js';
 
 async function main(): Promise<void> {
   loadTanguEnv(); // ~/.tangu/.env → process.env(不覆盖真实环境);须先于 parseTuiConfig
+
+  // 插件命令分发：置于 parseTuiConfig **之前**——worker 等子命令及其专属 flag 不应被 TUI 配置解析误判。
+  // `tangu plugins` 列出已发现插件;`tangu <plugin-cmd> ...` 仅激活命中的那一个插件并运行。
+  const sub = process.argv[2];
+  if (sub === 'plugins') {
+    const list = listPlugins();
+    if (!list.length) {
+      console.log('未发现插件（./plugins 为空或不存在）。');
+    } else {
+      console.log('已发现插件：');
+      for (const p of list) {
+        const cmds = p.commands.length ? `  命令: ${p.commands.map((c) => `tangu ${c}`).join(', ')}` : '';
+        console.log(`  ${p.id}@${p.version}  ${p.name}${cmds}`);
+      }
+    }
+    return;
+  }
+  if (sub && !sub.startsWith('-') && sub !== 'login') {
+    const handled = await dispatchPluginCommand(sub, process.argv.slice(3));
+    if (handled !== null) return; // 插件已处理;进程存活与否由其打开的句柄决定（如 worker 的 listening server）
+  }
+
   const cfg = parseTuiConfig(process.argv.slice(2));
   if (cfg.showHelp) {
     process.stdout.write(TUI_HELP);
@@ -92,6 +115,10 @@ async function main(): Promise<void> {
   // MCP(~/.tangu/mcp.json):启动连一次,进程级冻结;与 standalone server 同语义。
   const mcp = createMcpManager();
   await mcp.start();
+
+  // 插件:进入交互 TUI 才激活全部插件（注册其工具 provider）;login/--help/worker 等路径不付此开销。
+  // TUI 无 express，忽略返回的路由挂载器（仅 standalone 用）。
+  await activateAllPlugins();
 
   const mod = createTanguModule({
     host,

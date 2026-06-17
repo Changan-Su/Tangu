@@ -8,7 +8,7 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { authMiddleware, AuthRequest } from '../core/http.js';
-import { query } from '../core/db.js';
+import { deps } from '../seams/runtime.js';
 import { resolveProfile } from '../seams/appProfile.js';
 import { createRun, getRunForUser, listActiveRunsBySession, listEventsFrom } from '../services/runStore.js';
 import { enqueueRun, abortRun } from '../services/agentLoop.js';
@@ -41,22 +41,14 @@ router.post('/agent/runs', authMiddleware, async (req: AuthRequest, res) => {
 
     // session 可能尚未从客户端同步到服务端（AI Studio 客户端建 session、懒同步）。
     // 存在且属他人 → 拒绝；不存在 → 自动建一条（agent 端自给自足，避免新会话首条消息 404）。
-    const sess = await query<any[]>(
-      `SELECT user_id FROM chat_sessions WHERE id = ? LIMIT 1`,
-      [session_id],
-    );
-    if (sess[0] && sess[0].user_id !== userId) {
+    const owner = await deps().state.getSessionOwner(session_id);
+    if (owner && owner !== userId) {
       return res.status(404).json({ detail: 'Session not found' });
     }
-    if (!sess[0]) {
+    if (!owner) {
       const title =
         typeof message === 'string' && message.trim() ? message.trim().slice(0, 60) : 'New Chat';
-      await query(
-        `INSERT INTO chat_sessions (id, user_id, app_id, title, model_id)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO NOTHING`,
-        [session_id, userId, profile.appId, title, modelId],
-      );
+      await deps().state.autoCreateSession({ id: session_id, userId, appId: profile.appId, title, modelId });
     }
 
     // user 消息不在此落库，改由 runLoop 在 run 真正开始时插入（见 agentLoop），

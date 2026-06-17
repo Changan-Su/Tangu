@@ -30,8 +30,12 @@ const ACTIVE = "status IN ('queued','running')";
 router.get('/sessions', async (_req, res) => {
   try {
     const rows = await query<any[]>(
+      // ⏱ 相对时长在 SQL 内算(EXTRACT EPOCH of CURRENT_TIMESTAMP - col):created_at/updated_at 是
+      //   TIMESTAMP(无时区),由 node-pg 按进程本地时区解析,与 DB 会话时区不一致时整体偏移。SQL 内做
+      //   时间差则两侧同会话时区一致折算,得到的秒龄与部署时区无关(绝对时间戳仍原样返回供 tooltip)。
       `SELECT s.session_id, s.user_id, s.app_id, s.runs, s.tokens, s.steps, s.active_runs,
-              s.started_at, s.last_activity, s.model_id, lr.status AS last_status, u.username
+              s.started_at, s.last_activity, s.started_age_sec, s.last_activity_age_sec,
+              s.model_id, lr.status AS last_status, u.username
        FROM (
          SELECT session_id,
                 MAX(user_id) AS user_id, MAX(app_id) AS app_id,
@@ -40,6 +44,8 @@ router.get('/sessions', async (_req, res) => {
                 COALESCE(SUM(current_step),0) AS steps,
                 COUNT(*) FILTER (WHERE ${ACTIVE})::int AS active_runs,
                 MIN(created_at) AS started_at, MAX(updated_at) AS last_activity,
+                EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - MIN(created_at)))::bigint AS started_age_sec,
+                EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - MAX(updated_at)))::bigint AS last_activity_age_sec,
                 MAX(model_id) AS model_id
          FROM agent_runs GROUP BY session_id
        ) s
@@ -63,6 +69,8 @@ router.get('/sessions', async (_req, res) => {
       status: Number(r.active_runs) > 0 ? 'running' : String(r.last_status || 'idle'),
       startedAt: r.started_at,
       lastActivity: r.last_activity,
+      startedAgeSec: r.started_age_sec == null ? null : Number(r.started_age_sec),
+      lastActivityAgeSec: r.last_activity_age_sec == null ? null : Number(r.last_activity_age_sec),
     }));
     res.json({ sessions });
   } catch (e: any) {
@@ -80,7 +88,9 @@ router.get('/sessions/:sid', async (req, res) => {
                 COUNT(*)::int AS runs, COALESCE(SUM(tokens_total),0) AS tokens,
                 COALESCE(SUM(current_step),0) AS steps,
                 COUNT(*) FILTER (WHERE ${ACTIVE})::int AS active_runs,
-                MIN(created_at) AS started_at, MAX(updated_at) AS last_activity
+                MIN(created_at) AS started_at, MAX(updated_at) AS last_activity,
+                EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - MIN(created_at)))::bigint AS started_age_sec,
+                EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - MAX(updated_at)))::bigint AS last_activity_age_sec
          FROM agent_runs WHERE session_id = ? GROUP BY session_id
        ) s LEFT JOIN users u ON u.id = s.user_id`,
       [sid],
@@ -88,7 +98,11 @@ router.get('/sessions/:sid', async (req, res) => {
     if (!sumRows[0]) return res.status(404).json({ detail: 'session not found' });
     const s = sumRows[0];
     const runs = await query<any[]>(
-      `SELECT id, status, current_step, model_id, sandbox_id, tokens_total, error, created_at, updated_at
+      // duration_sec / *_age_sec 同样在 SQL 内算,免受 node-pg 时区解析影响。
+      `SELECT id, status, current_step, model_id, sandbox_id, tokens_total, error, created_at, updated_at,
+              EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at))::bigint AS created_age_sec,
+              EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - updated_at))::bigint AS updated_age_sec,
+              EXTRACT(EPOCH FROM (updated_at - created_at))::bigint AS duration_sec
        FROM agent_runs WHERE session_id = ? ORDER BY created_at ASC`,
       [sid],
     );
@@ -104,6 +118,8 @@ router.get('/sessions/:sid', async (req, res) => {
         activeRuns: Number(s.active_runs) || 0,
         startedAt: s.started_at,
         lastActivity: s.last_activity,
+        startedAgeSec: s.started_age_sec == null ? null : Number(s.started_age_sec),
+        lastActivityAgeSec: s.last_activity_age_sec == null ? null : Number(s.last_activity_age_sec),
       },
       runs: runs.map((r) => ({
         id: r.id,
@@ -115,6 +131,9 @@ router.get('/sessions/:sid', async (req, res) => {
         error: r.error || null,
         createdAt: r.created_at,
         updatedAt: r.updated_at,
+        createdAgeSec: r.created_age_sec == null ? null : Number(r.created_age_sec),
+        updatedAgeSec: r.updated_age_sec == null ? null : Number(r.updated_age_sec),
+        durationSec: r.duration_sec == null ? null : Number(r.duration_sec),
       })),
     });
   } catch (e: any) {
@@ -246,6 +265,15 @@ router.get('/runs/:id/transcript', async (req, res) => {
     const input = typeof r.input === 'string' ? safeParse(r.input) : r.input;
     const result = typeof r.result === 'string' ? safeParse(r.result) : r.result;
     const steps = await listSteps(req.params.id);
+    // 相对时长在 SQL 内算,免受 node-pg 时区解析影响。
+    const ageRows = await query<any[]>(
+      `SELECT EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at))::bigint AS created_age_sec,
+              EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - updated_at))::bigint AS updated_age_sec,
+              EXTRACT(EPOCH FROM (updated_at - created_at))::bigint AS duration_sec
+       FROM agent_runs WHERE id = ? LIMIT 1`,
+      [req.params.id],
+    );
+    const ar = ageRows[0] || {};
     res.json({
       run: {
         id: r.id,
@@ -257,6 +285,9 @@ router.get('/runs/:id/transcript', async (req, res) => {
         error: r.error || null,
         createdAt: r.created_at || null,
         updatedAt: r.updated_at || null,
+        createdAgeSec: ar.created_age_sec == null ? null : Number(ar.created_age_sec),
+        updatedAgeSec: ar.updated_age_sec == null ? null : Number(ar.updated_age_sec),
+        durationSec: ar.duration_sec == null ? null : Number(ar.duration_sec),
       },
       userMessage: (input && input.message) || null,
       finalContent: (result && result.content) || null,

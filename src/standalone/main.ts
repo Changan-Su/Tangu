@@ -18,6 +18,7 @@ import { loadOAuthDirectProviders } from '../llm/providerOAuth.js';
 import { resolveSandboxMode, setupHost, buildBrain, fixLegacyAppIds } from './assemble.js';
 import { createMcpManager } from '../mcp/manager.js';
 import { loadTanguEnv } from '../core/tanguHome.js';
+import { activateAllPlugins } from '../plugins/bootstrap.js';
 
 async function main(): Promise<void> {
   loadTanguEnv(); // ~/.tangu/.env → process.env(不覆盖真实环境);须先于 parseConfig
@@ -50,6 +51,10 @@ async function main(): Promise<void> {
   const mcp = createMcpManager();
   await mcp.start();
 
+  // 插件:激活全部（tool provider 全局注册 + 收集路由挂载器）。tool provider 注册无需 deps()，先于
+  // createTanguModule 安全;路由挂载须**在 createTanguModule 之后**（彼时 configureTangu/deps() 才就绪）。
+  const mountPluginRoutes = await activateAllPlugins();
+
   const mod = createTanguModule({
     host,
     brain,
@@ -57,6 +62,7 @@ async function main(): Promise<void> {
     profile: createTanguProfile({ sandboxMode, defaultModelId: cfg.defaultModelId || undefined }),
     mcp,
   });
+  mountPluginRoutes({ userRouter: mod.userRouter, dataRouter: mod.dataRouter, adminRouter: mod.adminRouter });
 
   await mod.runMigration();
   await fixLegacyAppIds(); // 修正 runs.ts 硬编码时期误标 'ai-studio' 的本地会话(仅 standalone 本地库)

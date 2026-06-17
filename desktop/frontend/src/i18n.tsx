@@ -104,6 +104,13 @@ const zh: Dict = {
   'onboarding.workspace.placeholder': '~/Tangu(默认)',
   'onboarding.workspace.pick': '浏览文件夹',
   'onboarding.workspace.clear': '清除',
+  'settings.advanced.exportLogs': '导出会话日志',
+  'settings.advanced.exportLogsHint': '将当前会话的全部对话内容与后端运行日志打包成一个 JSON 文件,便于开发者排查问题。',
+  'settings.advanced.exportBtn': '导出为 JSON',
+  'settings.advanced.exportNoSession': '当前没有打开的会话,请先选择一个会话再导出。',
+  'settings.advanced.exportOk': '已导出到 {path}',
+  'settings.advanced.exportCanceled': '已取消导出',
+  'settings.advanced.exportFailed': '导出失败:{err}',
 }
 
 const en: Dict = {
@@ -180,6 +187,13 @@ const en: Dict = {
   'onboarding.workspace.placeholder': '~/Tangu (default)',
   'onboarding.workspace.pick': 'Browse folder',
   'onboarding.workspace.clear': 'Clear',
+  'settings.advanced.exportLogs': 'Export session logs',
+  'settings.advanced.exportLogsHint': 'Bundle this session’s full conversation and the backend runtime logs into one JSON file for developer debugging.',
+  'settings.advanced.exportBtn': 'Export as JSON',
+  'settings.advanced.exportNoSession': 'No active session — open a session first, then export.',
+  'settings.advanced.exportOk': 'Exported to {path}',
+  'settings.advanced.exportCanceled': 'Export canceled',
+  'settings.advanced.exportFailed': 'Export failed: {err}',
 }
 
 const DICTS: Record<Locale, Dict> = { zh, en }

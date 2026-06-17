@@ -37,10 +37,13 @@ const api = {
   },
   /** 本机模式工作目录选择;取消返回 null。 */
   pickDirectory: (): Promise<string | null> => ipcRenderer.invoke('dialog:pickDirectory'),
+  /** 另存为文本文件(导出日志等);取消返回 { ok:false }。 */
+  saveTextFile: (defaultName: string, content: string): Promise<{ ok: boolean; path: string | null }> =>
+    ipcRenderer.invoke('dialog:saveTextFile', defaultName, content),
   /** 拖入文件 → 绝对路径(Electron≥32 File.path 已移除,必须 webUtils 在渲染层取)。 */
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   /** 本机工作区文件浏览:列目录 / 读文件(主进程 fs)。 */
-  listDir: (dirPath: string): Promise<Array<{ name: string; isDir: boolean; size: number }>> =>
+  listDir: (dirPath: string): Promise<Array<{ name: string; isDir: boolean; size: number; path: string }>> =>
     ipcRenderer.invoke('fs:listDir', dirPath),
   readHostFile: (filePath: string): Promise<{ mimeType: string; content: string; size: number; tooLarge?: boolean }> =>
     ipcRenderer.invoke('fs:readFile', filePath),

@@ -8,6 +8,7 @@
  */
 import { EventEmitter } from 'events';
 import { query } from '../core/db.js';
+import { deps } from '../seams/runtime.js';
 
 export interface AgentEvent {
   seq: number;
@@ -48,8 +49,21 @@ export function subscribe(runId: string, listener: (ev: AgentEvent) => void): ()
   return () => e.off('event', listener);
 }
 
-/** 发布一个事件：分配 seq → 立即 emit → 串行落库。返回 seq。 */
-export async function publish(runId: string, type: string, payload: any): Promise<number> {
+/** 发布一个事件(对外):路由到 deps().state.appendEvent —— SqlStateStore 走本地机制,HttpStateStore 走 NDJSON 上报。 */
+export function publish(runId: string, type: string, payload: any): Promise<number> {
+  return deps().state.appendEvent(runId, type, payload);
+}
+
+/** 等待该 run 已发布事件全部落库/上报(对外):路由到 deps().state.drain。 */
+export function drain(runId: string): Promise<void> {
+  return deps().state.drain(runId);
+}
+
+/**
+ * 本地事件发布(seq 播种 + emit + per-run 写链落库)——SqlStateStore.appendEvent 透传到此。
+ * 仅持库进程(microserver/standalone/TUI/网关/server 状态端点)走这里;worker 经 HttpStateStore 上报。
+ */
+export async function appendEventLocal(runId: string, type: string, payload: any): Promise<number> {
   if (!seqCounters.has(runId)) {
     const base = await seedSeq(runId);
     if (!seqCounters.has(runId)) seqCounters.set(runId, base);
@@ -77,8 +91,8 @@ export async function publish(runId: string, type: string, payload: any): Promis
   return seq;
 }
 
-/** 等待该 run 已发布事件全部落库（finalize / done 前调用）。 */
-export async function drain(runId: string): Promise<void> {
+/** 本地写链 drain(finalize / done 前)——SqlStateStore.drain 透传到此。 */
+export async function drainLocal(runId: string): Promise<void> {
   await (writeChains.get(runId) || Promise.resolve());
 }
 

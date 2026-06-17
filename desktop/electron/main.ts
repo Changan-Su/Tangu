@@ -296,17 +296,33 @@ app.whenReady().then(async () => {
     return r.canceled || !r.filePaths.length ? null : r.filePaths[0]
   })
 
+  // 另存为文本文件(导出日志等):弹系统保存框,用户选位置后写盘。canceled → { ok:false }。
+  ipcMain.handle('dialog:saveTextFile', async (_e, defaultName: string, content: string) => {
+    if (typeof content !== 'string') return { ok: false, path: null }
+    const win = BrowserWindow.getFocusedWindow() ?? mainWindow
+    const opts = {
+      title: '导出',
+      defaultPath: typeof defaultName === 'string' && defaultName ? defaultName : 'export.json',
+      filters: [{ name: 'JSON', extensions: ['json'] }, { name: 'All Files', extensions: ['*'] }],
+    }
+    const r = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts)
+    if (r.canceled || !r.filePath) return { ok: false, path: null }
+    await writeFile(r.filePath, content, 'utf8')
+    return { ok: true, path: r.filePath }
+  })
+
   // ── 本机工作区文件浏览(host 模式右栏:直接读 cwd 真实目录)──
   ipcMain.handle('fs:listDir', async (_e, dirPath: string) => {
     if (!dirPath || typeof dirPath !== 'string') return []
     const entries = await readdir(dirPath, { withFileTypes: true }).catch(() => [])
-    const out: Array<{ name: string; isDir: boolean; size: number }> = []
+    const out: Array<{ name: string; isDir: boolean; size: number; path: string }> = []
     for (const e of entries.slice(0, 2000)) {
       let size = 0
       if (e.isFile()) {
         try { size = (await stat(join(dirPath, e.name))).size } catch { /* ignore */ }
       }
-      out.push({ name: e.name, isDir: e.isDirectory(), size })
+      // path 必须随条目返回:渲染层(HostFilesTab)按 en.path 做预览/进目录/重命名/删除,缺失则全部操作拿到 undefined 而报错。
+      out.push({ name: e.name, isDir: e.isDirectory(), size, path: join(dirPath, e.name) })
     }
     // 目录在前,各自按名排序
     out.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1))

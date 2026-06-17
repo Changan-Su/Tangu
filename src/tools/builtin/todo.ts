@@ -4,7 +4,7 @@
  * 持久化在 chat_sessions.todos(JSONB,migrate.ts 幂等加列);写入即向 run 事件总线发
  * `todo` 事件,TUI/桌面可实时渲染清单。
  */
-import { query } from '../../core/db.js';
+import { deps } from '../../seams/runtime.js';
 import { publish } from '../../services/eventBus.js';
 import type { ToolProvider } from '../toolRegistry.js';
 
@@ -23,8 +23,7 @@ function renderTodos(todos: TodoItem[]): string {
 }
 
 async function loadTodos(sessionId: string): Promise<TodoItem[]> {
-  const rows = await query<any[]>(`SELECT todos FROM chat_sessions WHERE id = ?`, [sessionId]);
-  const raw = rows?.[0]?.todos;
+  const raw = await deps().state.loadTodos(sessionId);
   const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
   return Array.isArray(parsed) ? parsed : [];
 }
@@ -69,7 +68,7 @@ export const todoProvider: ToolProvider = {
           content: String(t?.content ?? '').slice(0, MAX_CONTENT_CHARS),
           status: (['pending', 'in_progress', 'completed'].includes(t?.status) ? t.status : 'pending') as TodoItem['status'],
         })).filter((t: TodoItem) => t.content);
-        await query(`UPDATE chat_sessions SET todos = ? WHERE id = ?`, [JSON.stringify(todos), ctx.sessionId]);
+        await deps().state.writeTodos(ctx.sessionId, JSON.stringify(todos));
         if (ctx.runId) void publish(ctx.runId, 'todo', { todos });
         const done = todos.filter((t) => t.status === 'completed').length;
         return `todo list updated (${done}/${todos.length} done)\n${renderTodos(todos)}`;

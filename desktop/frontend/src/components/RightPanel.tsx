@@ -85,7 +85,7 @@ const HostFilesTab: React.FC<{
     if (!window.tangu?.listDir) return
     setLoading(true)
     try {
-      setEntries((await window.tangu.listDir(curDir)) as any)
+      setEntries(await window.tangu.listDir(curDir))
     } catch (e: any) {
       onToast(t('panel.toast.listDirFail', { err: e?.message || e }), true)
     } finally {

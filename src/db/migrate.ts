@@ -59,6 +59,24 @@ export async function runMigration(): Promise<void> {
   `));
   await query(`CREATE INDEX IF NOT EXISTS idx_agent_events_run ON agent_run_events(run_id)`);
 
+  // 配置驱动 profile：per-app 覆盖(admin panel 可改;DB > 文件 > 基线)。所有方言都建(经 ddl()
+  // 把 JSONB 转 SQLite TEXT),故 server / 远程 worker / standalone 共享同一表语义。
+  // 故意不含 hostExec/historian/sandboxMode 列——部署级强制,绝不可经覆盖授予(红线)。
+  await query(ddl(`
+    CREATE TABLE IF NOT EXISTS app_profile_overrides (
+      app_id VARCHAR(50) PRIMARY KEY,
+      enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      display_name VARCHAR(255),
+      default_model_id VARCHAR(128),
+      tool_builtins JSONB,
+      capabilities JSONB,
+      features JSONB,
+      prompt_guidance JSONB,
+      prompt_environment JSONB,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `));
+
   // 以下迁移仅对共享云库 / 外部 Postgres 生效：standalone(SQLite) 的 base schema(STANDALONE_SCHEMA)
   // 已完整建好 chat_sessions/chat_messages 的全部列，且 SQLite 的 ALTER ADD COLUMN 不支持
   // IF NOT EXISTS、也无 pg_constraint 目录，故 sqlite 形态在此提前返回，跳过整段 PG-only 迁移。

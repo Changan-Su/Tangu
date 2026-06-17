@@ -843,6 +843,7 @@ export function App(): React.JSX.Element {
       <SettingsModal
         open={settingsOpen}
         cfg={cfg}
+        activeSession={(activeId && sessions.find((s) => s.id === activeId)) || null}
         themePreset={themePreset}
         themeMode={themeMode}
         glassOn={glassOn}
