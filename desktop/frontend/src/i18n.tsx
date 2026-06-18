@@ -175,6 +175,12 @@ const zh: Dict = {
   'settings.special.m.folders': '授权可读本地文件夹（每行一个绝对路径）',
   'settings.special.saved': '已保存',
   'settings.special.saveFail': '保存失败：{e}',
+  'settings.special.on': '启用',
+  'settings.special.off': '关闭',
+  'settings.special.custom': '自定义',
+  'settings.special.sectionTitle': '后台智能体（Special Agents）',
+  'settings.agents.sectionTitle': 'Normal Agent（自定义人格）',
+  'settings.agents.starterTemplate': '你是……（在此描述这个智能体的身份、专长与说话风格，以及它应如何完成任务）。',
 
   // 侧栏 Special Agents 入口 + 工作视图
   'sidebar.special.title': '后台智能体',
@@ -341,6 +347,12 @@ const en: Dict = {
   'settings.special.m.folders': 'Authorized readable folders (one absolute path per line)',
   'settings.special.saved': 'Saved',
   'settings.special.saveFail': 'Save failed: {e}',
+  'settings.special.on': 'On',
+  'settings.special.off': 'Off',
+  'settings.special.custom': 'Custom',
+  'settings.special.sectionTitle': 'Background Agents (Special)',
+  'settings.agents.sectionTitle': 'Normal Agents (custom personas)',
+  'settings.agents.starterTemplate': 'You are … (describe this agent\'s identity, expertise, tone, and how it should approach tasks).',
 
   'sidebar.special.title': 'Background Agents',
   'special.historian.title': 'Historian workspace',

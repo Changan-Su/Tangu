@@ -16,7 +16,7 @@ import { deps } from '../seams/runtime.js';
 import { query } from '../core/db.js';
 import { createRun } from '../services/runStore.js';
 import { enqueueRun } from '../services/agentLoop.js';
-import { loadSpecialAgentsConfig, saveSpecialAgentsConfig } from '../services/specialAgentsConfig.js';
+import { loadSpecialAgentsConfig, saveSpecialAgentsConfig, DEFAULT_HISTORIAN_PROMPT, DEFAULT_MUSE_PROMPT } from '../services/specialAgentsConfig.js';
 import { museStatus } from '../services/muse.js';
 
 const router = Router();
@@ -32,7 +32,11 @@ function ensureLocal(res: any): boolean {
 router.get('/agent/special/config', authMiddleware, async (_req: AuthRequest, res) => {
   if (!ensureLocal(res)) return;
   try {
-    res.json({ config: loadSpecialAgentsConfig() });
+    res.json({
+      config: loadSpecialAgentsConfig(),
+      // 默认提示词随配置下发,供前端预填进「可修改框」(留空=用默认)。
+      defaults: { historianPrompt: DEFAULT_HISTORIAN_PROMPT, musePrompt: DEFAULT_MUSE_PROMPT },
+    });
   } catch (e: any) {
     res.status(500).json({ detail: e?.message || 'load config failed' });
   }

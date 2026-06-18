@@ -1,6 +1,7 @@
 /**
  * 设置 → 后台智能体（Special Agents：Historian / Muse）。默认关闭、开启需选模型。
  * 改动即存（POST /agent/special/config 合并）。仅本地后端可用。
+ * UI 对齐 Tangu 设计系统:卡片 + .seg 分段开关 + .field/.field-row;默认提示词预填进可改框。
  */
 import React, { useEffect, useMemo, useState } from 'react'
 import { History, Sparkles, FolderPlus } from 'lucide-react'
@@ -8,14 +9,24 @@ import { getSpecialConfig, saveSpecialConfig, listModels } from '../services/bac
 import type { HistorianConfig, ModelInfo, MuseConfig, SpecialAgentsConfig, TanguDesktopConfig } from '../types'
 import { useI18n } from '../i18n'
 
+/** 分段开关(对齐 .seg):关 | 开。canOn=false 时禁用「开」。 */
+const Seg: React.FC<{ value: boolean; onChange: (b: boolean) => void; onLabel: string; offLabel: string; canOn?: boolean }> =
+  ({ value, onChange, onLabel, offLabel, canOn = true }) => (
+    <div className="seg seg-sm">
+      <button type="button" className={!value ? 'active' : ''} onClick={() => onChange(false)}>{offLabel}</button>
+      <button type="button" className={value ? 'active' : ''} disabled={!canOn && !value} onClick={() => (canOn || value) && onChange(true)}>{onLabel}</button>
+    </div>
+  )
+
 export const SpecialAgentsTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg }) => {
   const { t } = useI18n()
   const [conf, setConf] = useState<SpecialAgentsConfig | null>(null)
+  const [defaults, setDefaults] = useState<{ historianPrompt: string; musePrompt: string }>({ historianPrompt: '', musePrompt: '' })
   const [models, setModels] = useState<ModelInfo[]>([])
   const [msg, setMsg] = useState('')
 
   useEffect(() => {
-    void getSpecialConfig(cfg).then(setConf).catch(() => setConf(null))
+    void getSpecialConfig(cfg).then((r) => { setConf(r.config); if (r.defaults) setDefaults(r.defaults) }).catch(() => setConf(null))
     void listModels(cfg).then((r) => setModels(r.models)).catch(() => setModels([]))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -38,6 +49,7 @@ export const SpecialAgentsTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg })
   if (!conf) return <div className="hint">{t('common.loading')}</div>
   const h = conf.historian
   const m = conf.muse
+
   const modelSelect = (value: string, onChange: (v: string) => void) => (
     <select value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="">{t('settings.special.pickModelFirst')}</option>
@@ -53,47 +65,43 @@ export const SpecialAgentsTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg })
 
   return (
     <>
-      <div className="hint" style={{ marginBottom: 10 }}>{t('settings.special.hint')}</div>
+      <div className="hint" style={{ marginBottom: 12 }}>{t('settings.special.hint')}</div>
 
       {/* Historian */}
-      <div className="field" style={{ borderTop: 'var(--border-width) solid var(--border)', paddingTop: 10 }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <History size={14} /> {t('settings.special.historian')}
+      <div className={`agent-card${h.enabled ? '' : ' disabled'}`}>
+        <div className="agent-card-head">
+          <span className="ac-title"><History size={15} /> {t('settings.special.historian')}</span>
           <span className="grow" />
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 400, fontSize: 13 }}>
-            <input type="checkbox" checked={h.enabled} disabled={!h.modelId}
-              onChange={(e) => saveHistorian({ enabled: e.target.checked })} />
-            {t('settings.special.enable')}
-          </label>
-        </label>
-        <div className="hint" style={{ marginBottom: 8 }}>{t('settings.special.historianDesc')}</div>
+          <Seg value={h.enabled} canOn={!!h.modelId} onChange={(v) => saveHistorian({ enabled: v })}
+            onLabel={t('settings.special.on')} offLabel={t('settings.special.off')} />
+        </div>
+        <p className="ac-desc">{t('settings.special.historianDesc')}{!h.modelId && ` · ${t('settings.special.pickModelFirst')}`}</p>
         <div className="field"><label>{t('settings.special.model')}</label>{modelSelect(h.modelId, (v) => saveHistorian({ modelId: v }))}</div>
         <div className="field-row">
           {numField(t('settings.special.h.titleRounds'), h.everyTitleRounds, (n) => saveHistorian({ everyTitleRounds: n }), 1, 100)}
           {numField(t('settings.special.h.memoryRounds'), h.everyMemoryRounds, (n) => saveHistorian({ everyMemoryRounds: n }), 1, 100)}
           <div className="field">
             <label>{t('settings.special.h.firstRound')}</label>
-            <input type="checkbox" checked={h.firstRoundTrigger} onChange={(e) => saveHistorian({ firstRoundTrigger: e.target.checked })} />
+            <Seg value={h.firstRoundTrigger} onChange={(v) => saveHistorian({ firstRoundTrigger: v })}
+              onLabel={t('settings.special.on')} offLabel={t('settings.special.off')} />
           </div>
         </div>
         <div className="field">
           <label>{t('settings.special.h.prompt')}</label>
-          <textarea rows={2} value={h.prompt} onChange={(e) => saveHistorian({ prompt: e.target.value })} />
+          <textarea rows={3} value={h.prompt || defaults.historianPrompt}
+            onChange={(e) => saveHistorian({ prompt: e.target.value === defaults.historianPrompt ? '' : e.target.value })} />
         </div>
       </div>
 
       {/* Muse */}
-      <div className="field" style={{ borderTop: 'var(--border-width) solid var(--border)', paddingTop: 10 }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Sparkles size={14} /> {t('settings.special.muse')}
+      <div className={`agent-card${m.enabled ? '' : ' disabled'}`}>
+        <div className="agent-card-head">
+          <span className="ac-title"><Sparkles size={15} /> {t('settings.special.muse')}</span>
           <span className="grow" />
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 400, fontSize: 13 }}>
-            <input type="checkbox" checked={m.enabled} disabled={!m.modelId}
-              onChange={(e) => saveMuse({ enabled: e.target.checked })} />
-            {t('settings.special.enable')}
-          </label>
-        </label>
-        <div className="hint" style={{ marginBottom: 8 }}>{t('settings.special.museDesc')}</div>
+          <Seg value={m.enabled} canOn={!!m.modelId} onChange={(v) => saveMuse({ enabled: v })}
+            onLabel={t('settings.special.on')} offLabel={t('settings.special.off')} />
+        </div>
+        <p className="ac-desc">{t('settings.special.museDesc')}{!m.modelId && ` · ${t('settings.special.pickModelFirst')}`}</p>
         <div className="field"><label>{t('settings.special.model')}</label>{modelSelect(m.modelId, (v) => saveMuse({ modelId: v }))}</div>
         <div className="field-row">
           {numField(t('settings.special.m.restartWindow'), m.restartWindowHours, (n) => saveMuse({ restartWindowHours: n }), 1, 24)}
@@ -106,19 +114,17 @@ export const SpecialAgentsTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg })
         </div>
         <div className="field">
           <label>{t('settings.special.m.activeHours')}</label>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-              <input type="checkbox" checked={!m.activeHours} onChange={(e) => saveMuse({ activeHours: e.target.checked ? null : { start: 9, end: 22 } })} />
-              {t('settings.special.m.activeAllDay')}
-            </label>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <Seg value={!!m.activeHours} onChange={(v) => saveMuse({ activeHours: v ? { start: 9, end: 22 } : null })}
+              onLabel={t('settings.special.custom')} offLabel={t('settings.special.m.activeAllDay')} />
             {m.activeHours && (
-              <>
-                <input type="number" min={0} max={23} value={m.activeHours.start} style={{ width: 64 }}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input type="number" min={0} max={23} value={m.activeHours.start} style={{ width: 60 }}
                   onChange={(e) => saveMuse({ activeHours: { start: Math.max(0, Math.min(23, Number(e.target.value) || 0)), end: m.activeHours!.end } })} />
-                <span>–</span>
-                <input type="number" min={0} max={23} value={m.activeHours.end} style={{ width: 64 }}
+                <span style={{ color: 'var(--text-muted)' }}>–</span>
+                <input type="number" min={0} max={23} value={m.activeHours.end} style={{ width: 60 }}
                   onChange={(e) => saveMuse({ activeHours: { start: m.activeHours!.start, end: Math.max(0, Math.min(23, Number(e.target.value) || 0)) } })} />
-              </>
+              </div>
             )}
           </div>
         </div>
@@ -135,9 +141,10 @@ export const SpecialAgentsTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg })
           <textarea rows={2} value={m.allowedFolders.join('\n')}
             onChange={(e) => saveMuse({ allowedFolders: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) })} />
         </div>
-        <div className="field">
+        <div className="field" style={{ marginBottom: 0 }}>
           <label>{t('settings.special.m.prompt')}</label>
-          <textarea rows={2} value={m.prompt} onChange={(e) => saveMuse({ prompt: e.target.value })} />
+          <textarea rows={3} value={m.prompt || defaults.musePrompt}
+            onChange={(e) => saveMuse({ prompt: e.target.value === defaults.musePrompt ? '' : e.target.value })} />
         </div>
       </div>
       {msg && <div className="hint" style={{ color: 'var(--danger)' }}>{msg}</div>}

@@ -123,7 +123,7 @@ export const deleteAgentDef = (cfg: TanguDesktopConfig, slug: string) =>
 
 // ── Special Agents（Historian / Muse;本地后端）──
 export const getSpecialConfig = (cfg: TanguDesktopConfig) =>
-  request<{ config: SpecialAgentsConfig }>(cfg, '/agent/special/config').then((r) => r.config)
+  request<{ config: SpecialAgentsConfig; defaults?: { historianPrompt: string; musePrompt: string } }>(cfg, '/agent/special/config')
 
 export const saveSpecialConfig = (cfg: TanguDesktopConfig, patch: Partial<SpecialAgentsConfig>) =>
   request<{ config: SpecialAgentsConfig }>(cfg, '/agent/special/config', { method: 'POST', body: JSON.stringify(patch) }).then((r) => r.config)

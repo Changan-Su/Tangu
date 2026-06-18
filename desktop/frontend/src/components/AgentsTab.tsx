@@ -24,7 +24,7 @@ const emptyDraft = (): Draft => ({
   thinkingLevel: '', maxIterations: '', approvalMode: '',
 })
 
-export const AgentsTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg }) => {
+export const AgentsTab: React.FC<{ cfg: TanguDesktopConfig; onEditingChange?: (editing: boolean) => void }> = ({ cfg, onEditingChange }) => {
   const { t } = useI18n()
   const [agents, setAgents] = useState<NormalAgentDef[] | null>(null)
   const [models, setModels] = useState<ModelInfo[]>([])
@@ -40,6 +40,7 @@ export const AgentsTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg }) => {
     void listModels(cfg).then((r) => setModels(r.models)).catch(() => setModels([]))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+  useEffect(() => { onEditingChange?.(!!editing) }, [editing, onEditingChange])
 
   const startEdit = (a: NormalAgentDef): void => setEditing({
     slug: a.slug, name: a.name, description: a.description, model: a.model,
@@ -160,7 +161,7 @@ export const AgentsTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg }) => {
           ))}
         </div>
       )}
-      <button className="btn ghost sm" onClick={() => { setMsg(''); setEditing(emptyDraft()) }}>
+      <button className="btn ghost sm" onClick={() => { setMsg(''); setEditing({ ...emptyDraft(), systemPrompt: t('settings.agents.starterTemplate') }) }}>
         <Plus size={13} /> {t('settings.agents.new')}
       </button>
     </div>

@@ -7,7 +7,7 @@
  * 仅 standalone/TUI/desktop（本地）形态；microserver/worker 不触本模块。mtime 缓存，改文件即时生效。
  */
 import { promises as fs } from 'node:fs';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { agentsDir } from '../core/tanguHome.js';
 
@@ -130,7 +130,66 @@ async function dirStamp(dir: string): Promise<string> {
   return parts.sort().join('|');
 }
 
+/** 内置默认 Normal Agent 预设(首启播种进 ~/.tangu/agents,可改可删;marker 防删后复活)。 */
+export const DEFAULT_AGENTS: Array<Pick<NormalAgentDef, 'slug' | 'name' | 'description' | 'systemPrompt'> & Partial<NormalAgentDef>> = [
+  {
+    slug: 'general-assistant',
+    name: '通用助手',
+    description: '严谨可靠的全能助手,适合日常问答与多步任务',
+    thinkingLevel: 'low',
+    systemPrompt:
+      '你是一个乐于助人、严谨可靠的通用助手。回答力求准确、清晰、有条理;不确定时如实说明而非编造。' +
+      '面对多步任务,先简述思路再动手,必要时用工具核实。中文用户默认用中文回答。',
+  },
+  {
+    slug: 'code-reviewer',
+    name: '代码审查员',
+    description: '专注质量、安全与可维护性的代码审查',
+    thinkingLevel: 'medium',
+    systemPrompt:
+      '你是一位资深代码审查员。审查代码时聚焦:正确性与边界条件、安全漏洞、并发与性能、可读性与命名、' +
+      '错误处理与测试覆盖。按「严重 / 建议 / 提示」分级给出可操作的具体修改,并解释原因;先读懂上下文与既有风格再评。' +
+      '不臆测、不空泛表扬,只在确有问题时指出。',
+  },
+  {
+    slug: 'writing-polish',
+    name: '写作润色',
+    description: '把文字改得清晰、流畅、有力,保留原意与语气',
+    thinkingLevel: 'low',
+    systemPrompt:
+      '你是一位中文写作编辑。任务是在保留作者原意与语气的前提下,让文字更清晰、流畅、有说服力:' +
+      '删冗余、理逻辑、统一术语、修语病。除非要求,否则不改变事实与观点;给出修改后的版本,并可附一两条关键改动说明。',
+  },
+];
+
+let seedChecked = false;
+/** 首启把默认 agent 播种进 agents 目录(marker 守护:删了不复活)。幂等、绝不抛。 */
+async function seedDefaultAgentsOnce(): Promise<void> {
+  if (seedChecked) return;
+  seedChecked = true;
+  const dir = agentsDir();
+  const marker = path.join(dir, '.seeded');
+  if (existsSync(marker)) return;
+  try {
+    mkdirSync(dir, { recursive: true });
+    for (const a of DEFAULT_AGENTS) {
+      const file = path.join(dir, `${a.slug}.md`);
+      if (existsSync(file)) continue;
+      const def: NormalAgentDef = {
+        slug: a.slug, name: a.name, description: a.description || '', model: a.model || '',
+        tools: a.tools || [], thinkingLevel: a.thinkingLevel || '', maxIterations: a.maxIterations ?? null,
+        approvalMode: a.approvalMode || '', createdBy: 'user', createdAt: new Date().toISOString(),
+        systemPrompt: a.systemPrompt,
+      };
+      await fs.writeFile(file, serializeAgent(def), 'utf-8');
+    }
+    await fs.writeFile(marker, new Date().toISOString(), 'utf-8');
+    cache = null;
+  } catch { /* 播种失败不阻断 */ }
+}
+
 export async function listAgents(): Promise<NormalAgentDef[]> {
+  await seedDefaultAgentsOnce();
   const dir = agentsDir();
   const stamp = await dirStamp(dir);
   if (cache && cache.stamp === stamp) return cache.defs;
