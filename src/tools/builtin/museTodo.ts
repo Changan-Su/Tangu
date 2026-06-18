@@ -46,17 +46,14 @@ export const museTodoProvider: ToolProvider = {
         } catch { /* 用默认 */ }
         if (maxPerWindow <= 0) return '已达本时段 TODO 上限（0），暂不能新增。请专注思考、择机再提。';
         try {
-          const since = Date.now() - windowHours * 3600_000;
-          // created_at 用 CURRENT_TIMESTAMP(文本/时间戳两方言)；窗口判断改用 id 无法，故按 created_at 比较。
+          // 方言无关的窗口计数:把「now - windowHours」格式化成 'YYYY-MM-DD HH:MM:SS'(UTC,与 SQLite
+          // CURRENT_TIMESTAMP 同格式)按字符串比较——SQLite(文本列,ISO 字典序)与 Postgres(转 timestamp)
+          // 皆成立。**绝不**用 `::int` / `make_interval`(PG 专有,SQLite 报 unrecognized token)。
+          const cutoff = new Date(Date.now() - windowHours * 3600_000).toISOString().slice(0, 19).replace('T', ' ');
           const cntRows = await query<any[]>(
-            `SELECT COUNT(*)::int AS n FROM muse_todos
-             WHERE user_id = ? AND created_at >= CURRENT_TIMESTAMP - make_interval(hours => ?)`,
-            [ctx.userId, windowHours],
-          ).catch(async () =>
-            // SQLite 无 make_interval：退回不限窗的总 pending 计数兜底（仍受 maxPerWindow 约束）。
-            query<any[]>(`SELECT COUNT(*)::int AS n FROM muse_todos WHERE user_id = ? AND status = 'pending'`, [ctx.userId]),
+            `SELECT COUNT(*) AS n FROM muse_todos WHERE user_id = ? AND created_at >= ?`,
+            [ctx.userId, cutoff],
           );
-          void since;
           const n = Number(cntRows?.[0]?.n) || 0;
           if (n >= maxPerWindow) {
             return `已达本时段 TODO 上限（${maxPerWindow} 条）。请暂停提交、继续观察，下个时段再提最有价值的。`;

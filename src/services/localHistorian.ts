@@ -103,8 +103,9 @@ export async function onUserRunDone(sessionId: string, userId: string): Promise<
     const sk = skRows[0];
     if (!sk || (sk.kind && sk.kind !== 'user')) return;
 
+    // 注意:不能用 `COUNT(*)::int`(PG cast)——standalone 是 SQLite,`::` 会报 unrecognized token。
     const cntRows = await query<any[]>(
-      `SELECT COUNT(*)::int AS n FROM agent_runs WHERE session_id = ? AND status = 'done'`,
+      `SELECT COUNT(*) AS n FROM agent_runs WHERE session_id = ? AND status = 'done'`,
       [sessionId],
     );
     const roundN = Number(cntRows[0]?.n) || 0;
