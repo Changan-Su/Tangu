@@ -17,7 +17,7 @@ import { query } from '../core/db.js';
 import { createRun } from '../services/runStore.js';
 import { enqueueRun } from '../services/agentLoop.js';
 import { loadSpecialAgentsConfig, saveSpecialAgentsConfig, DEFAULT_HISTORIAN_PROMPT, DEFAULT_MUSE_PROMPT } from '../services/specialAgentsConfig.js';
-import { museStatus } from '../services/muse.js';
+import { museStatus, kickMuse } from '../services/muse.js';
 
 const router = Router();
 
@@ -46,7 +46,10 @@ router.post('/agent/special/config', authMiddleware, async (req: AuthRequest, re
   if (!ensureLocal(res)) return;
   try {
     const patch = req.body && typeof req.body === 'object' ? req.body : {};
-    res.json({ config: saveSpecialAgentsConfig(patch) });
+    const config = saveSpecialAgentsConfig(patch);
+    // 刚启用 Muse → 催一次巡检,免得等满一个周期。
+    if (config.muse.enabled && config.muse.modelId) kickMuse();
+    res.json({ config });
   } catch (e: any) {
     res.status(400).json({ detail: e?.message || 'save config failed' });
   }

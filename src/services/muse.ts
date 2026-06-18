@@ -17,6 +17,7 @@ import { enqueueRun } from './agentLoop.js';
 import { loadSpecialAgentsConfig, DEFAULT_MUSE_PROMPT, isWithinActiveHours, type MuseConfig } from './specialAgentsConfig.js';
 
 let timer: ReturnType<typeof setInterval> | null = null;
+let kickTimer: ReturnType<typeof setTimeout> | null = null;
 let windowStartMs = 0;
 let restartsThisWindow = 0;
 let lastCycleAt = 0;
@@ -24,6 +25,9 @@ let lastError: string | null = null;
 let lastRunning = false;
 let currentSessionId: string | null = null;
 
+function log(msg: string): void {
+  try { deps().host.log(`[muse] ${msg}`); } catch { console.log(`[muse] ${msg}`); }
+}
 function isLocal(): boolean {
   try { return !!deps().profile.capabilities.hostExec; } catch { return false; }
 }
@@ -142,8 +146,9 @@ async function tick(): Promise<void> {
   try {
     if (!isLocal()) return;
     const cfg = loadSpecialAgentsConfig().muse;
-    if (!cfg.enabled || !cfg.modelId) { lastRunning = false; return; }
-    if (!isWithinActiveHours(cfg, nowHour())) return;
+    if (!cfg.enabled) { lastRunning = false; return; }
+    if (!cfg.modelId) { lastRunning = false; log('已启用但未选模型,跳过'); return; }
+    if (!isWithinActiveHours(cfg, nowHour())) { log(`不在运行时段(当前 ${nowHour()} 时),跳过`); return; }
     rollWindow(cfg);
 
     const userId = museUserId();
@@ -151,27 +156,41 @@ async function tick(): Promise<void> {
     if (sid && (await isRunning(sid))) { lastRunning = true; return; }
     lastRunning = false;
 
-    if (restartsThisWindow >= cfg.maxRestartsPerWindow) return; // 本窗口预算用尽
+    if (restartsThisWindow >= cfg.maxRestartsPerWindow) { log(`本窗口预算用尽(${restartsThisWindow}/${cfg.maxRestartsPerWindow})`); return; }
     restartsThisWindow += 1;
+    log(`启动第 ${restartsThisWindow}/${cfg.maxRestartsPerWindow} 个思考周期(模型 ${cfg.modelId})`);
     await startCycle(cfg);
   } catch (e: any) {
     lastError = e?.message || String(e);
+    log(`tick 失败:${lastError}`);
   }
 }
 
-/** 启动 Muse supervisor（幂等）。间隔取配置的 supervisorPollMinutes（首启读一次；改配置下个 tick 生效）。 */
+/** 启动 Muse supervisor（幂等）。间隔取配置的 supervisorPollMinutes；首次 ~15s 后即跑(不必等满一个周期)。 */
 export function startMuseSupervisor(): void {
   if (timer) return;
   if (!isLocal()) return;
   let pollMin = 5;
   try { pollMin = loadSpecialAgentsConfig().muse.supervisorPollMinutes; } catch { /* 默认 */ }
+  log(`supervisor 启动(每 ${pollMin} 分钟巡检;15s 后首次)`);
   timer = setInterval(() => { void tick(); }, Math.max(1, pollMin) * 60_000);
   (timer as any).unref?.();
-  // 首次延迟一个轮询周期再跑（避免开机即抢资源）；不立即 tick。
+  // 首次延迟 15s 即跑(开机不抢资源、但开启后很快就能起来,不必等满一个 poll 周期)。
+  kickTimer = setTimeout(() => { void tick(); }, 15_000);
+  (kickTimer as any).unref?.();
+}
+
+/** 配置变更(如刚启用 Muse)后催一次 tick——免得等满一个巡检周期。 */
+export function kickMuse(): void {
+  if (!timer) return; // supervisor 未起则不催(boot 时会起)
+  if (kickTimer) clearTimeout(kickTimer);
+  kickTimer = setTimeout(() => { void tick(); }, 1500);
+  (kickTimer as any).unref?.();
 }
 
 export function stopMuseSupervisor(): void {
   if (timer) { clearInterval(timer); timer = null; }
+  if (kickTimer) { clearTimeout(kickTimer); kickTimer = null; }
 }
 
 export interface MuseStatus {

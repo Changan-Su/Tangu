@@ -79,6 +79,9 @@ async function logActivity(userId: string, action: string, detail: string, sessi
   ).catch(() => {});
 }
 
+function log(msg: string): void {
+  try { deps().host.log(`[historian] ${msg}`); } catch { console.log(`[historian] ${msg}`); }
+}
 /** 是否本地形态(host-exec profile)。云端 baseline 无 hostExec → Historian 整体 no-op。 */
 function isLocal(): boolean {
   try { return !!deps().profile.capabilities.hostExec; } catch { return false; }
@@ -110,9 +113,10 @@ export async function onUserRunDone(sessionId: string, userId: string): Promise<
     const titleDue = isRoundDue(roundN, cfg.everyTitleRounds, cfg.firstRoundTrigger);
     const memoryDue = isRoundDue(roundN, cfg.everyMemoryRounds, cfg.firstRoundTrigger);
     if (!titleDue && !memoryDue) return;
+    log(`第 ${roundN} 轮触发(标题:${titleDue} 记忆:${memoryDue},模型 ${cfg.modelId})`);
 
     const transcript = await recentTranscript(sessionId);
-    if (!transcript.trim()) return;
+    if (!transcript.trim()) { log('无可用对话内容,跳过'); return; }
 
     if (titleDue) {
       const title = (await complete(cfg.modelId, TITLE_PROMPT, transcript, userId, 40))
