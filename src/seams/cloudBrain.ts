@@ -83,6 +83,8 @@ export interface MemoryBrain {
     text: string,
     opts?: { dedup?: boolean; cap?: number },
   ): Promise<AppendMemoryResult>;
+  /** 整体覆盖用户长期记忆(读-改-写:Historian 据现有记忆做增量或修订)。可选——旧 brain 未实现时调用方降级为 append。 */
+  setMemory?(userId: string, content: string): Promise<{ content: string; updatedAt: any }>;
   appendLogEntry(
     userId: string,
     text: string,

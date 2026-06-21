@@ -23,6 +23,16 @@ export interface ManagedBackendSettings {
   cloudToken: string
   modelId?: string
   sandbox: 'auto' | 'docker' | 'none'
+  browserEnabled?: boolean
+  browserEngine?: 'auto' | 'chrome' | 'lightpanda'
+  browserSearchEngine?: 'duckduckgo' | 'bing' | 'google' | 'baidu'
+  browserAllowPrivateUrls?: boolean
+  browserCommandTimeoutMs?: number
+  wechatEnabled?: boolean
+  wechatRemoteApprovalMode?: 'readonly' | 'auto-edit' | 'full-auto'
+  wechatStateDir?: string
+  /** Forsion/Tangu 默认工作区目录(~/Tangu 或用户自定义);注入后端作微信远程会话的 cwd。 */
+  defaultWorkspaceDir?: string
 }
 
 export interface BackendStatus {
@@ -144,6 +154,16 @@ export class BackendManager {
       else delete env.ELECTRON_RUN_AS_NODE
       // 凭证走 env,不出现在 ps 输出;留空让子进程回退 ~/.tangu/auth.json(tangu login)。
       if (this.token) env.TANGU_TOKEN = this.token
+      env.TANGU_BROWSER_ENABLED = s.browserEnabled === false ? '0' : '1'
+      env.TANGU_BROWSER_ENGINE = s.browserEngine || 'auto'
+      env.TANGU_BROWSER_SEARCH_ENGINE = s.browserSearchEngine || 'duckduckgo'
+      env.TANGU_BROWSER_ALLOW_PRIVATE_URLS = s.browserAllowPrivateUrls ? '1' : '0'
+      env.TANGU_BROWSER_COMMAND_TIMEOUT_MS = String(s.browserCommandTimeoutMs || 30000)
+      env.TANGU_WECHAT_ENABLED = s.wechatEnabled === false ? '0' : '1'
+      env.TANGU_WECHAT_REMOTE_APPROVAL_MODE = s.wechatRemoteApprovalMode || 'readonly'
+      if (s.wechatStateDir) env.TANGU_WECHAT_STATE_DIR = s.wechatStateDir
+      // 让后端的微信远程会话落到桌面默认工作区(host 执行 cwd);兜底 ~/Tangu。
+      env.TANGU_DEFAULT_WORKSPACE = s.defaultWorkspaceDir?.trim() || join(homedir(), 'Tangu')
       const child = spawn(cmd, args, {
         env,
         stdio: ['ignore', 'pipe', 'pipe'],

@@ -4,7 +4,7 @@
  * 释放期间右下角浮出「跳到底部」按钮,点一下平滑回底并重新吸附。
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, Copy, Check, Pencil, RefreshCw } from 'lucide-react'
+import { ArrowDown, Copy, Check, Pencil, RefreshCw, Quote } from 'lucide-react'
 import type { UiMessage } from '../types'
 import { Markdown } from './Markdown'
 import { ThinkingBlock } from './ThinkingBlock'
@@ -25,9 +25,14 @@ export const ChatArea: React.FC<{
   onRegenerate?: (messageId: string) => void
   /** 是否有在飞 run:为真时禁用编辑/重生成(避免截断正在跑的会话)。 */
   running?: boolean
-}> = ({ messages, containerRef, onApproval, onInquiry, onEditResend, onRegenerate, running }) => {
+  /** 划线引用:在聊天区选中文字 → 浮出「引用」→ 回调把选中文本提升到输入框。 */
+  onQuote?: (text: string) => void
+}> = ({ messages, containerRef, onApproval, onInquiry, onEditResend, onRegenerate, running, onQuote }) => {
   const { t } = useI18n()
   const internalRef = useRef<HTMLDivElement>(null)
+  // 划线引用浮动按钮:坐标相对外层 .chat-area(不随聊天滚动漂移)。
+  const areaRef = useRef<HTMLDivElement>(null)
+  const [quoteBtn, setQuoteBtn] = useState<{ x: number; y: number; text: string } | null>(null)
   // 复制反馈(2s 回弹);内联编辑用户消息(editingId + 草稿)。
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -122,6 +127,35 @@ export const ChatArea: React.FC<{
     el.scrollTop = el.scrollHeight
   }, [messages, streamingId, ref])
 
+  // 划线引用:在聊天滚动容器内监听 mouseup → 取选区文本 + 位置 → 浮出「引用」按钮。
+  // 依赖 messages.length:空态早返回时容器未挂载,有内容后需重新挂监听。
+  useEffect(() => {
+    const el = ref.current
+    const area = areaRef.current
+    if (!el || !area || !onQuote) return
+    const onUp = () => {
+      const sel = window.getSelection()
+      if (!sel || sel.isCollapsed) { setQuoteBtn(null); return }
+      const text = sel.toString().trim()
+      if (!text) { setQuoteBtn(null); return }
+      const range = sel.getRangeAt(0)
+      if (!el.contains(range.commonAncestorContainer)) { setQuoteBtn(null); return }
+      const rect = range.getBoundingClientRect()
+      const host = area.getBoundingClientRect()
+      setQuoteBtn({ x: rect.right - host.left, y: rect.bottom - host.top + 6, text })
+    }
+    const onSelChange = () => { const s = window.getSelection(); if (!s || s.isCollapsed) setQuoteBtn(null) }
+    const clear = () => setQuoteBtn(null)
+    el.addEventListener('mouseup', onUp)
+    document.addEventListener('selectionchange', onSelChange)
+    el.addEventListener('scroll', clear, { passive: true })
+    return () => {
+      el.removeEventListener('mouseup', onUp)
+      document.removeEventListener('selectionchange', onSelChange)
+      el.removeEventListener('scroll', clear)
+    }
+  }, [ref, onQuote, messages.length])
+
   if (!messages.length) {
     return (
       <div className="empty-state">
@@ -133,11 +167,15 @@ export const ChatArea: React.FC<{
   }
 
   return (
-    <div className="chat-area">
+    <div className="chat-area" ref={areaRef}>
       <div className="chat-stream" ref={ref}>
         <div className="stream-inner">
         {messages.map((m) =>
-          m.role === 'user' ? (
+          m.role === 'system' ? (
+            <div className="msg-row msg-system" key={m.id}>
+              <span className="msg-system-text">{m.content}</span>
+            </div>
+          ) : m.role === 'user' ? (
             <div
               className="msg-row user"
               key={m.id}
@@ -271,6 +309,24 @@ export const ChatArea: React.FC<{
       {showJump && (
         <button className="jump-bottom" title={t('chat.jumpToBottom')} onClick={() => scrollToBottom(true)}>
           <ArrowDown size={16} />
+        </button>
+      )}
+      {quoteBtn && onQuote && (
+        <button
+          className="quote-float"
+          // onMouseDown.preventDefault:点击前别折叠选区,否则 onClick 读不到 text。
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => { onQuote(quoteBtn.text); setQuoteBtn(null); window.getSelection()?.removeAllRanges() }}
+          style={{
+            position: 'absolute', left: quoteBtn.x, top: quoteBtn.y, transform: 'translateX(-100%)', zIndex: 20,
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            padding: '4px 9px', fontSize: 12, lineHeight: 1, whiteSpace: 'nowrap',
+            background: 'var(--bg-card)', color: 'var(--text)',
+            border: 'var(--border-width) solid var(--border)', borderRadius: 'var(--radius-md)',
+            boxShadow: '0 2px 10px rgba(0,0,0,0.16)', cursor: 'pointer',
+          }}
+        >
+          <Quote size={13} /> {t('chat.action.quote')}
         </button>
       )}
     </div>

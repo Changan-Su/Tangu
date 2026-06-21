@@ -1,4 +1,4 @@
-/** 顶栏:侧栏开关 + 会话标题 + 模型 + 连接状态 + 右上角(语言/深浅模式/右栏开关)。整条可拖拽(Electron hiddenInset)。 */
+/** 顶栏:侧栏开关 + 会话标题 + 模型 + 右上角(语言/深浅模式/右栏开关)。整条可拖拽(Electron hiddenInset)。 */
 import React from 'react'
 import { PanelLeft, PanelRight } from 'lucide-react'
 import { useI18n } from '../i18n'
@@ -25,10 +25,13 @@ export const ChatHeader: React.FC<{
       </button>
       <div className="chat-title">{p.title}</div>
       {p.modelId ? <span className="conn-pill" title={t('header.currentModel')}>{p.modelId}</span> : null}
-      <span className={`conn-pill ${p.connState}`} title={p.connMessage}>
-        <span className="dot" />
-        {p.connState === 'ok' ? t('header.online') : p.connState === 'err' ? t('header.offline') : t('header.notConnected')}
-      </span>
+      {/* Host/微信/浏览器/在线 等状态胶囊已移除;仅在掉线时保留一个错误提示。 */}
+      {p.connState === 'err' && (
+        <span className="conn-pill err" title={p.connMessage}>
+          <span className="dot" />
+          {t('header.offline')}
+        </span>
+      )}
       {/* 右上角:语言 / 深浅模式 / 右栏开关 */}
       <LocaleToggle compact />
       <ModeToggle mode={p.themeMode} onToggle={p.onToggleMode} />

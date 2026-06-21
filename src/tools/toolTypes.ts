@@ -48,6 +48,19 @@ export interface ToolResult {
   name: string;
   result: string;
   isError: boolean;
+  artifactPath?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface ToolCapabilities {
+  /** 副作用类别；unknown/write/system/browser 均默认串行。 */
+  sideEffect?: 'none' | 'read' | 'network' | 'browser' | 'write' | 'system' | 'unknown';
+  /** 仅显式声明 true 的工具可被 agentLoop 并发执行。 */
+  parallel?: boolean;
+  /** 同一 key 的调用应串行；浏览器等有会话态的工具使用固定 key。 */
+  concurrencyKey?: string;
+  /** 默认超时；executeTool 会把它并入 ctx.signal。 */
+  defaultTimeoutMs?: number;
 }
 
 export interface ToolImpl {
@@ -55,4 +68,5 @@ export interface ToolImpl {
   execute: (args: Record<string, any>, ctx: ToolContext) => Promise<string> | string;
   /** 工具可见性域：'sandbox'=仅云沙箱模式，'host'=仅本地直连模式，缺省='both'=两者皆可。 */
   mode?: 'sandbox' | 'host' | 'both';
+  capabilities?: ToolCapabilities;
 }

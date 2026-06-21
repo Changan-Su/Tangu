@@ -64,6 +64,20 @@ export function createHttpBrain(cfg: HttpBrainConfig): CloudBrainServices {
     return (await r.json()) as T;
   }
 
+  async function putJson<T>(path: string, body: any): Promise<T> {
+    const r = await fetch(`${base}${path}`, {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify(body),
+      signal: reqSignal(),
+    });
+    if (!r.ok) {
+      const detail = await r.text().catch(() => '');
+      throw new LlmError(r.status, detail || `brain ${path} ${r.status}`);
+    }
+    return (await r.json()) as T;
+  }
+
   // ── LLM 流式:读 SSE,逐条转回 onToken/onReasoning/onToolCallDelta,done 时返回累积结果 ──
   async function streamProviderCompletion(opts: StreamOpts): Promise<StreamResult> {
     const modelId = String((opts.payload as any)?.__forsion_model_id ?? '');
@@ -162,6 +176,8 @@ export function createHttpBrain(cfg: HttpBrainConfig): CloudBrainServices {
       getMemory: async (_userId: string) => getJson<{ content: string; updatedAt: any }>('/api/brain/memory'),
       appendMemoryEntry: async (_userId: string, text: string, opts) =>
         postJson('/api/brain/memory', { text, dedup: opts?.dedup, cap: opts?.cap }),
+      setMemory: async (_userId: string, content: string) =>
+        putJson<{ content: string; updatedAt: any }>('/api/brain/memory', { content }),
       appendLogEntry: async (_userId: string, text: string) =>
         postJson('/api/brain/log', { text }),
       getLog: async (_userId: string, date?: string) =>

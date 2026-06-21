@@ -1,15 +1,19 @@
 /**
- * 设置模态:连接 / 模型 / 主题(ThemeCard 网格 + 明暗 + 毛玻璃) / 高级。
- * tabs 形态对齐 AI Studio SettingsModal;连接页的 managed/external 切换在 M6 接 backendManager。
+ * 设置页:连接 / 模型 / MCP / Browser / WeChat / 主题 / 高级。
+ * 在 Desktop 主界面内替换 Chat/Inspector 区域，而不是覆盖式弹窗。
  */
 import React, { useEffect, useState } from 'react'
-import { X, Loader2, RefreshCw, Sun, Moon, RotateCcw, LogIn, LogOut, ExternalLink, KeyRound, Plus, Trash2, Plug, Search, Download, Sparkles, Wrench } from 'lucide-react'
-import { AnimatedModalBackdrop, AnimatedModalContent, AnimatePresence } from './AnimatedUI'
+import { X, Loader2, RefreshCw, Sun, Moon, RotateCcw, LogIn, LogOut, ExternalLink, KeyRound, Plus, Trash2, Plug, Search, Download, Sparkles, Wrench, Check, Globe2, QrCode, Smartphone } from 'lucide-react'
 import { ThemeCard } from './ThemeCard'
 import { listThemes } from '../theme/registry'
 import { applyTheme } from '../theme/loader'
 import { testConnection } from '../services/agentRunService'
-import { deleteUserCloudSkill, getSessionConfig, listMessages, listModels, listSkills, listTools, testProviderConnection, uploadSkillToCloud } from '../services/backendService'
+import {
+  deleteUserCloudSkill, disconnectWechat as disconnectWechatAccount, fetchProviderModels, getSessionConfig,
+  getWechatStatus, listMessages, listModels, listSkills, listTools, pollWechatLogin, startWechatLogin,
+  testProviderConnection, uploadSkillToCloud,
+} from '../services/backendService'
+import type { WechatStatusResponse } from '../services/backendService'
 import type {
   AuthStatusInfo, BackendStatusInfo, DirectProviderConfig, DiscoveryResult, McpServerConfigEntry, ModelsResponse,
   SessionRecord, SkillInfo, StoredDesktopConfig, TanguDesktopConfig, ToolsResponse,
@@ -19,8 +23,9 @@ import { LocaleToggle } from './LocaleToggle'
 import { CHANGELOG } from '../changelog'
 import { ModelGroupList } from './ModelGroupList'
 import { AgentsSettings } from './AgentsSettings'
+import { QrImage } from './QrImage'
 
-type Tab = 'connection' | 'model' | 'mcp' | 'skills' | 'agents' | 'theme' | 'advanced' | 'developer' | 'about'
+type Tab = 'connection' | 'model' | 'mcp' | 'skills' | 'agents' | 'browser' | 'wechat' | 'theme' | 'advanced' | 'developer' | 'about'
 
 const DEV_MODE_KEY = 'forsion_tangu_dev_mode'
 
@@ -96,9 +101,18 @@ export const SettingsModal: React.FC<{
   const [providerTestMsg, setProviderTestMsg] = useState('')
   const [providerTesting, setProviderTesting] = useState(false)
   const [providerSaveMsg, setProviderSaveMsg] = useState('')
+  // 「拉取模型」:后端代拉 baseUrl/models → 可搜索多选 → 勾选写回 modelsCsv。
+  const [fetchedModels, setFetchedModels] = useState<string[] | null>(null)
+  const [modelSearch, setModelSearch] = useState('')
+  const [fetchingModels, setFetchingModels] = useState(false)
+  const [fetchModelsMsg, setFetchModelsMsg] = useState('')
   // 高级→导出日志:把当前会话的全部对话 + 后端运行日志打包成一个 JSON,便于开发者排障。
   const [exporting, setExporting] = useState(false)
   const [exportMsg, setExportMsg] = useState('')
+  const [wechatStatus, setWechatStatus] = useState<WechatStatusResponse | null>(null)
+  const [wechatBusy, setWechatBusy] = useState(false)
+  const [wechatMsg, setWechatMsg] = useState('')
+  const [wechatLogin, setWechatLogin] = useState<{ loginId: string; qrcodeImg: string; expiresAt: number; status?: string } | null>(null)
 
   const exportSessionLogs = async (): Promise<void> => {
     const session = p.activeSession
@@ -346,6 +360,75 @@ export const SettingsModal: React.FC<{
     }).then(setStored)
   }
 
+  const refreshWechat = (): void => {
+    if (!isDesktop) return
+    void getWechatStatus(p.cfg)
+      .then((r) => {
+        setWechatStatus(r)
+        setWechatMsg('')
+      })
+      .catch((e) => {
+        setWechatStatus(null)
+        setWechatMsg(t('settings.wechat.statusUnavailable', { e: e?.message || e }))
+      })
+  }
+
+  const saveRemoteSettings = async (): Promise<void> => {
+    if (!stored || !window.tangu?.setConfig) return
+    setWechatBusy(true)
+    setWechatMsg('')
+    try {
+      const next = await window.tangu.setConfig({
+        browserEnabled: stored.browserEnabled !== false,
+        browserEngine: stored.browserEngine || 'auto',
+        browserSearchEngine: stored.browserSearchEngine || 'duckduckgo',
+        browserAllowPrivateUrls: !!stored.browserAllowPrivateUrls,
+        browserCommandTimeoutMs: Number(stored.browserCommandTimeoutMs || 30000),
+        wechatEnabled: stored.wechatEnabled !== false,
+        wechatDefaultSessionId: stored.wechatDefaultSessionId || p.activeSession?.id || '',
+        wechatRemoteApprovalMode: stored.wechatRemoteApprovalMode || 'readonly',
+        wechatAllowedPeers: stored.wechatAllowedPeers || [],
+      })
+      setStored(next)
+      setWechatMsg(t('settings.remote.saved'))
+    } catch (e: any) {
+      setWechatMsg(`${t('settings.toast.saveFailed')}${e?.message || e}`)
+    } finally {
+      setWechatBusy(false)
+    }
+  }
+
+  const startWechatBind = async (): Promise<void> => {
+    setWechatBusy(true)
+    setWechatMsg('')
+    try {
+      const r = await startWechatLogin(p.cfg, {
+        session_id: stored?.wechatDefaultSessionId || undefined,
+        model_id: p.activeSession?.model_id || draft.modelId || p.cfg.modelId,
+        approval_mode: stored?.wechatRemoteApprovalMode || 'readonly',
+      })
+      setWechatLogin({ loginId: r.loginId, qrcodeImg: r.qrcodeImg, expiresAt: r.expiresAt, status: 'pending' })
+    } catch (e: any) {
+      setWechatMsg(t('settings.wechat.startFailed', { e: e?.message || e }))
+    } finally {
+      setWechatBusy(false)
+    }
+  }
+
+  const disconnectWechat = async (accountId: string): Promise<void> => {
+    setWechatBusy(true)
+    setWechatMsg('')
+    try {
+      await disconnectWechatAccount(p.cfg, accountId)
+      setWechatMsg(t('settings.wechat.disconnected'))
+      refreshWechat()
+    } catch (e: any) {
+      setWechatMsg(t('settings.wechat.disconnectFailed', { e: e?.message || e }))
+    } finally {
+      setWechatBusy(false)
+    }
+  }
+
   const loadModels = async () => {
     setModelsLoading(true)
     try {
@@ -362,10 +445,48 @@ export const SettingsModal: React.FC<{
     if (p.open && tab === 'model' && !models && !modelsLoading) void loadModels()
     if (p.open && tab === 'mcp') refreshMcp()
     if (p.open && tab === 'skills' && !allSkills && !allSkillsLoading) loadAllSkills()
+    if (p.open && tab === 'wechat') refreshWechat()
     // appVersion 一打开就取(不只 about tab):高级→导出日志也要带版本号,否则导出里恒为 null。
     if (p.open && !appVersion) void window.tangu?.appVersion?.().then((v) => setAppVersion(v || '')).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.open, tab])
+
+  useEffect(() => {
+    if (!p.open || tab !== 'wechat' || !wechatLogin) return
+    let canceled = false
+    let timer = 0
+    const tick = async (): Promise<void> => {
+      try {
+        const r = await pollWechatLogin(p.cfg, wechatLogin.loginId)
+        if (canceled) return
+        setWechatLogin((cur) => (cur && cur.loginId === wechatLogin.loginId ? { ...cur, status: r.status } : cur))
+        if (r.status === 'confirmed') {
+          setWechatMsg(t('settings.wechat.connectedMsg'))
+          setWechatLogin(null)
+          if (r.sessionId && window.tangu?.setConfig) {
+            void window.tangu.setConfig({ wechatDefaultSessionId: r.sessionId }).then(setStored).catch(() => {})
+          }
+          refreshWechat()
+          window.clearInterval(timer)
+        } else if (r.status === 'expired' || r.status === 'failed') {
+          setWechatMsg(r.detail || t('settings.wechat.loginStatus', { status: r.status }))
+          setWechatLogin(null)
+          window.clearInterval(timer)
+        }
+      } catch (e: any) {
+        if (canceled) return
+        setWechatMsg(t('settings.wechat.pollFailed', { e: e?.message || e }))
+        window.clearInterval(timer)
+      }
+    }
+    timer = window.setInterval(() => void tick(), 2000)
+    void tick()
+    return () => {
+      canceled = true
+      window.clearInterval(timer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.open, tab, wechatLogin?.loginId])
 
   const test = async () => {
     setTesting(true)
@@ -380,37 +501,43 @@ export const SettingsModal: React.FC<{
     p.onReconnect(patch)
   }
 
+  const tabItems = [
+    ['connection', t('settings.tab.connection')],
+    ['model', t('settings.tab.model')],
+    ...(isDesktop ? ([['mcp', 'MCP'], ['skills', t('settings.tab.skills')], ['agents', t('settings.tab.agents')], ['browser', t('settings.tab.browser')], ['wechat', t('settings.tab.wechat')]] as Array<[Tab, string]>) : []),
+    ['theme', t('settings.tab.theme')],
+    ['advanced', t('settings.tab.advanced')],
+    ...(isDesktop && devMode ? ([['developer', t('settings.tab.developer')]] as Array<[Tab, string]>) : []),
+    ['about', t('settings.tab.about')],
+  ] as Array<[Tab, string]>
+  const activeTabLabel = tabItems.find(([id]) => id === tab)?.[1] || t('settings.title')
+
+  if (!p.open) return null
+
   return (
-    <AnimatePresence>
-      {p.open && (
-        <AnimatedModalBackdrop onClose={p.onClose}>
-          <AnimatedModalContent>
-            <div className="modal">
-              <div className="modal-head">
-                {t('settings.title')}
-                <span className="grow" />
-                <button className="icon-btn" onClick={p.onClose}>
-                  <X size={16} />
-                </button>
-              </div>
-              <div className="modal-tabs">
-                {(
-                  [
-                    ['connection', t('settings.tab.connection')],
-                    ['model', t('settings.tab.model')],
-                    ...(isDesktop ? ([['mcp', 'MCP'], ['skills', t('settings.tab.skills')], ['agents', t('settings.tab.agents')]] as Array<[Tab, string]>) : []),
-                    ['theme', t('settings.tab.theme')],
-                    ['advanced', t('settings.tab.advanced')],
-                    ...(isDesktop && devMode ? ([['developer', t('settings.tab.developer')]] as Array<[Tab, string]>) : []),
-                    ['about', t('settings.tab.about')],
-                  ] as Array<[Tab, string]>
-                ).map(([id, label]) => (
-                  <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <div className="modal-body">
+    <div className="settings-page">
+      <aside className="settings-nav" aria-label="Settings navigation">
+        <div className="settings-nav-kicker">Tangu Agent</div>
+        <div className="settings-nav-title">{t('settings.title')}</div>
+        <div className="settings-nav-list">
+          {tabItems.map(([id, label]) => (
+            <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </aside>
+      <section className="settings-main">
+        <div className="settings-main-head">
+          <div>
+            <div className="settings-main-kicker">{t('settings.title')}</div>
+            <div className="settings-main-title">{activeTabLabel}</div>
+          </div>
+          <button className="icon-btn" onClick={p.onClose} title={t('settings.btn.cancel')}>
+            <X size={16} />
+          </button>
+        </div>
+        <div className="settings-body">
                 {tab === 'connection' && (
                   <>
                     {isDesktop && (
@@ -665,6 +792,7 @@ export const SettingsModal: React.FC<{
                                   setEditProvider({ ...cp, modelsCsv: (cp.modelIds || []).join(', ') })
                                   setProviderTestMsg('')
                                   setProviderSaveMsg('')
+                                  setFetchedModels(null); setModelSearch(''); setFetchModelsMsg('')
                                 }}
                               >
                                 <KeyRound size={13} />
@@ -693,6 +821,7 @@ export const SettingsModal: React.FC<{
                             setEditProvider({ providerId: '', baseUrl: '', apiKey: '', modelIds: [], modelsCsv: '' })
                             setProviderTestMsg('')
                             setProviderSaveMsg('')
+                            setFetchedModels(null); setModelSearch(''); setFetchModelsMsg('')
                           }}
                         >
                           <Plus size={13} /> {t('settings.customProvider.add')}
@@ -766,6 +895,27 @@ export const SettingsModal: React.FC<{
                             {providerTesting ? <Loader2 size={12} className="spin" /> : <Plug size={12} />} {t('settings.btn.testConnection')}
                           </button>
                           <button
+                            className="btn ghost sm"
+                            disabled={fetchingModels || !editProvider.baseUrl}
+                            onClick={() => {
+                              setFetchingModels(true)
+                              setFetchModelsMsg('')
+                              void fetchProviderModels(p.cfg, {
+                                baseUrl: editProvider.baseUrl,
+                                apiKey: editProvider.apiKey || undefined,
+                              })
+                                .then((ms) => {
+                                  setFetchedModels(ms.map((m) => m.id))
+                                  setModelSearch('')
+                                  if (!ms.length) setFetchModelsMsg(t('settings.customProvider.fetchEmpty'))
+                                })
+                                .catch((e) => { setFetchedModels([]); setFetchModelsMsg(`✗ ${e?.message || e}`) })
+                                .finally(() => setFetchingModels(false))
+                            }}
+                          >
+                            {fetchingModels ? <Loader2 size={12} className="spin" /> : <Download size={12} />} {t('settings.customProvider.fetchModels')}
+                          </button>
+                          <button
                             className="btn primary sm"
                             disabled={!editProvider.providerId || !editProvider.baseUrl}
                             onClick={() => {
@@ -785,9 +935,50 @@ export const SettingsModal: React.FC<{
                           >
                             {t('settings.btn.save')}
                           </button>
-                          <button className="btn ghost sm" onClick={() => setEditProvider(null)}>{t('settings.btn.cancel')}</button>
+                          <button className="btn ghost sm" onClick={() => { setEditProvider(null); setFetchedModels(null); setModelSearch(''); setFetchModelsMsg('') }}>{t('settings.btn.cancel')}</button>
                           <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{providerTestMsg}</span>
                         </div>
+
+                        {/* 「拉取模型」结果:可搜索多选,勾选写回 modelsCsv(让用户无需手记模型名)。 */}
+                        {fetchedModels && (() => {
+                          const selected = new Set(editProvider.modelsCsv.split(',').map((s) => s.trim()).filter(Boolean))
+                          const mq = modelSearch.trim().toLowerCase()
+                          const shown = mq ? fetchedModels.filter((id) => id.toLowerCase().includes(mq)) : fetchedModels
+                          const toggle = (id: string) => {
+                            const next = new Set(selected)
+                            next.has(id) ? next.delete(id) : next.add(id)
+                            setEditProvider({ ...editProvider, modelsCsv: [...next].join(', ') })
+                          }
+                          return (
+                            <div className="field" style={{ marginTop: 8 }}>
+                              {fetchedModels.length > 0 ? (
+                                <>
+                                  <span className="model-search" style={{ marginBottom: 6 }}>
+                                    <Search size={12} />
+                                    <input value={modelSearch} placeholder={t('model.searchPlaceholder')} onChange={(e) => setModelSearch(e.target.value)} />
+                                  </span>
+                                  <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                    {shown.map((id) => (
+                                      <button
+                                        key={id}
+                                        className={`file-row${selected.has(id) ? ' active' : ''}`}
+                                        onClick={() => toggle(id)}
+                                      >
+                                        <span className="file-name" style={{ color: selected.has(id) ? 'var(--accent)' : undefined }}>{id}</span>
+                                        {selected.has(id) && <Check size={12} style={{ color: 'var(--accent)' }} />}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </>
+                              ) : (
+                                <div className="hint">{fetchModelsMsg || t('settings.customProvider.fetchEmpty')}</div>
+                              )}
+                            </div>
+                          )
+                        })()}
+                        {fetchModelsMsg && fetchedModels && fetchedModels.length > 0 && (
+                          <div className="hint" style={{ marginTop: 4 }}>{fetchModelsMsg}</div>
+                        )}
                       </>
                     )}
 
@@ -971,6 +1162,190 @@ export const SettingsModal: React.FC<{
                 )}
 
                 {tab === 'agents' && <AgentsSettings cfg={p.cfg} />}
+
+                {tab === 'browser' && stored && (
+                  <>
+                    <div className="settings-section-title">
+                      <Globe2 size={14} /> {t('settings.browser.title')}
+                    </div>
+                    <div className="field">
+                      <label>{t('settings.browser.agentBrowser')}</label>
+                      <div className="seg">
+                        <button
+                          className={stored.browserEnabled !== false ? 'active' : ''}
+                          onClick={() => setStored({ ...stored, browserEnabled: true })}
+                        >
+                          {t('common.enabled')}
+                        </button>
+                        <button
+                          className={stored.browserEnabled === false ? 'active' : ''}
+                          onClick={() => setStored({ ...stored, browserEnabled: false })}
+                        >
+                          {t('common.disabled')}
+                        </button>
+                      </div>
+                      <div className="hint">
+                        {t('settings.browser.hint')}
+                      </div>
+                    </div>
+                    <div className="field-row">
+                      <div className="field">
+                        <label>{t('settings.browser.engine')}</label>
+                        <select
+                          value={stored.browserEngine || 'auto'}
+                          onChange={(e) => setStored({ ...stored, browserEngine: e.target.value as StoredDesktopConfig['browserEngine'] })}
+                        >
+                          <option value="auto">Auto</option>
+                          <option value="chrome">Chrome</option>
+                          <option value="lightpanda">Lightpanda</option>
+                        </select>
+                      </div>
+                      <div className="field">
+                        <label>{t('settings.browser.searchEngine')}</label>
+                        <select
+                          value={stored.browserSearchEngine || 'duckduckgo'}
+                          onChange={(e) => setStored({ ...stored, browserSearchEngine: e.target.value as StoredDesktopConfig['browserSearchEngine'] })}
+                        >
+                          <option value="duckduckgo">DuckDuckGo</option>
+                          <option value="bing">Bing</option>
+                          <option value="google">Google</option>
+                          <option value="baidu">Baidu</option>
+                        </select>
+                      </div>
+                      <div className="field" style={{ maxWidth: 160 }}>
+                        <label>{t('settings.browser.timeout')}</label>
+                        <input
+                          type="text"
+                          value={String(stored.browserCommandTimeoutMs || 30000)}
+                          onChange={(e) => setStored({ ...stored, browserCommandTimeoutMs: Number(e.target.value.replace(/[^\d]/g, '')) || 30000 })}
+                        />
+                      </div>
+                    </div>
+                    <div className="field">
+                      <label className="inline-check">
+                        <input
+                          type="checkbox"
+                          checked={!!stored.browserAllowPrivateUrls}
+                          onChange={(e) => setStored({ ...stored, browserAllowPrivateUrls: e.target.checked })}
+                        />
+                        {t('settings.browser.allowPrivate')}
+                      </label>
+                      <div className="hint">{t('settings.browser.allowPrivateHint')}</div>
+                    </div>
+                    <button className="btn primary sm" disabled={wechatBusy} onClick={() => void saveRemoteSettings()}>
+                      {wechatBusy ? <Loader2 size={12} className="spin" /> : null}
+                      {t('settings.btn.save')}
+                    </button>
+                    {wechatMsg && <div className="hint" style={{ marginTop: 8 }}>{wechatMsg}</div>}
+                  </>
+                )}
+
+                {tab === 'wechat' && stored && (
+                  <>
+                    <div className="settings-section-title">
+                      <Smartphone size={14} /> {t('settings.wechat.title')}
+                    </div>
+                    <div className="field">
+                      <label>{t('settings.wechat.channel')}</label>
+                      <div className="seg">
+                        <button
+                          className={stored.wechatEnabled !== false ? 'active' : ''}
+                          onClick={() => setStored({ ...stored, wechatEnabled: true })}
+                        >
+                          {t('common.enabled')}
+                        </button>
+                        <button
+                          className={stored.wechatEnabled === false ? 'active' : ''}
+                          onClick={() => setStored({ ...stored, wechatEnabled: false })}
+                        >
+                          {t('common.disabled')}
+                        </button>
+                      </div>
+                      <div className="hint">
+                        {t('settings.wechat.hint')}
+                      </div>
+                    </div>
+                    <div className="field-row">
+                      <div className="field">
+                        <label>{t('settings.wechat.defaultSession')}</label>
+                        <input
+                          type="text"
+                          value={stored.wechatDefaultSessionId || p.activeSession?.id || ''}
+                          onChange={(e) => setStored({ ...stored, wechatDefaultSessionId: e.target.value.trim() })}
+                          placeholder={p.activeSession?.id || t('settings.wechat.defaultSessionPlaceholder')}
+                        />
+                      </div>
+                      <div className="field" style={{ maxWidth: 220 }}>
+                        <label>{t('settings.wechat.approvalMode')}</label>
+                        <select
+                          value={stored.wechatRemoteApprovalMode || 'readonly'}
+                          onChange={(e) => setStored({ ...stored, wechatRemoteApprovalMode: e.target.value as StoredDesktopConfig['wechatRemoteApprovalMode'] })}
+                        >
+                          <option value="readonly">{t('approval.mode.readonly')}</option>
+                          <option value="auto-edit">{t('approval.mode.autoEdit')}</option>
+                          <option value="full-auto">{t('approval.mode.fullAuto')}</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+                      <button className="btn primary sm" disabled={wechatBusy} onClick={() => void saveRemoteSettings()}>
+                        {wechatBusy ? <Loader2 size={12} className="spin" /> : null}
+                        {t('settings.btn.save')}
+                      </button>
+                      <button className="btn ghost sm" disabled={wechatBusy || stored.wechatEnabled === false} onClick={() => void startWechatBind()}>
+                        {wechatBusy ? <Loader2 size={12} className="spin" /> : <QrCode size={12} />}
+                        {t('settings.wechat.startQr')}
+                      </button>
+                      <button className="btn ghost sm" onClick={refreshWechat}>
+                        <RefreshCw size={12} /> {t('common.refresh')}
+                      </button>
+                      {wechatStatus && (
+                        <span className={`conn-pill ${wechatStatus.enabled ? 'ok' : ''}`}>
+                          <span className="dot" />
+                          {wechatStatus.enabled ? t('settings.wechat.runtimeOn') : t('settings.wechat.runtimeOff')}
+                        </span>
+                      )}
+                    </div>
+                    {wechatLogin && (
+                      <div className="wechat-login-box">
+                        <QrImage className="wechat-qr" value={wechatLogin.qrcodeImg} size={132} alt={t('settings.wechat.qrAlt')} />
+                        <div>
+                          <div style={{ fontWeight: 600, marginBottom: 4 }}>{t('settings.wechat.scanTitle')}</div>
+                          <div className="hint">{t('settings.wechat.statusLine', { status: wechatLogin.status || 'pending', time: new Date(wechatLogin.expiresAt).toLocaleTimeString() })}</div>
+                        </div>
+                      </div>
+                    )}
+                    {wechatStatus?.bindings.length ? (
+                      <div className="field">
+                        <label>{t('settings.wechat.bindings')}</label>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          {wechatStatus.bindings.map((b) => (
+                            <div key={b.id} className="file-row" style={{ cursor: 'default' }}>
+                              <span className="file-name">
+                                <b>{b.wx_user_id || b.account_id}</b>
+                                <span style={{ color: 'var(--text-muted)', marginLeft: 8, fontSize: 12 }}>
+                                  {b.peer_id ? t('settings.wechat.peer', { peer: b.peer_id }) : t('settings.wechat.waitingPeer')}
+                                </span>
+                              </span>
+                              <span className="file-size">{b.session_title || b.session_id} · {b.remote_approval_mode}</span>
+                              <button
+                                className="icon-btn"
+                                disabled={wechatBusy}
+                                title={t('settings.wechat.disconnect')}
+                                onClick={() => void disconnectWechat(b.account_id)}
+                              >
+                                <LogOut size={13} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="hint">{t('settings.wechat.noBinding')}</div>
+                    )}
+                    {wechatMsg && <div className="hint" style={{ marginTop: 8 }}>{wechatMsg}</div>}
+                  </>
+                )}
 
                 {tab === 'theme' && (
                   <>
@@ -1321,11 +1696,8 @@ export const SettingsModal: React.FC<{
                     </div>
                   </>
                 )}
-              </div>
-            </div>
-          </AnimatedModalContent>
-        </AnimatedModalBackdrop>
-      )}
-    </AnimatePresence>
+        </div>
+      </section>
+    </div>
   )
 }

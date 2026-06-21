@@ -121,6 +121,36 @@ export async function runMigration(): Promise<void> {
   `));
   await query(`CREATE INDEX IF NOT EXISTS idx_session_summaries_session ON session_summaries(session_id)`);
 
+  // WeChat Remote 绑定表：iLink bot token 只保存在本地 ~/.tangu/wechat/accounts.json，
+  // DB 仅记录账号、peer 与 Tangu session 的绑定关系。
+  await query(ddl(`
+    CREATE TABLE IF NOT EXISTS tangu_wechat_accounts (
+      id VARCHAR(128) PRIMARY KEY,
+      user_id VARCHAR(36) NOT NULL,
+      wx_user_id VARCHAR(128),
+      status VARCHAR(24) NOT NULL DEFAULT 'active',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `));
+  await query(`CREATE INDEX IF NOT EXISTS idx_tangu_wechat_accounts_user ON tangu_wechat_accounts(user_id, status)`);
+
+  await query(ddl(`
+    CREATE TABLE IF NOT EXISTS tangu_wechat_bindings (
+      id VARCHAR(36) PRIMARY KEY,
+      user_id VARCHAR(36) NOT NULL,
+      account_id VARCHAR(128) NOT NULL,
+      peer_id VARCHAR(128),
+      session_id VARCHAR(36) NOT NULL,
+      remote_approval_mode VARCHAR(24) NOT NULL DEFAULT 'readonly',
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `));
+  await query(`CREATE INDEX IF NOT EXISTS idx_tangu_wechat_bindings_user ON tangu_wechat_bindings(user_id, is_active)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_tangu_wechat_bindings_account_peer ON tangu_wechat_bindings(account_id, peer_id, is_active)`);
+
   // 以下迁移仅对共享云库 / 外部 Postgres 生效：standalone(SQLite) 的 base schema(STANDALONE_SCHEMA)
   // 已完整建好 chat_sessions/chat_messages 的全部列，且 SQLite 的 ALTER ADD COLUMN 不支持
   // IF NOT EXISTS、也无 pg_constraint 目录，故 sqlite 形态在此提前返回，跳过整段 PG-only 迁移。

@@ -3,7 +3,7 @@
  * 展开/状态逻辑对齐 AI Studio ToolCallBlock,标记层为 token CSS。
  */
 import React, { useState } from 'react'
-import { ChevronRight, ChevronDown, Loader2, CheckCircle2, XCircle, Wrench } from 'lucide-react'
+import { ChevronRight, ChevronDown, Loader2, CheckCircle2, XCircle, Wrench, Globe2, Clock3, FileDown } from 'lucide-react'
 import { AnimatedCollapse } from './AnimatedUI'
 import { useI18n } from '../i18n'
 import type { ToolEvent } from '../types'
@@ -26,19 +26,32 @@ function argsHint(args?: string): string {
 export const ToolCallCard: React.FC<{ ev: ToolEvent }> = ({ ev }) => {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
+  const isBrowser = ev.name.startsWith('browser_')
+  const elapsed = typeof ev.elapsedMs === 'number'
+    ? ev.elapsedMs >= 1000 ? `${(ev.elapsedMs / 1000).toFixed(1)}s` : `${ev.elapsedMs}ms`
+    : ''
   return (
     <div className={`tool-card${ev.isError ? ' err' : ''}`}>
       <button className="tool-card-head" onClick={() => setOpen(!open)}>
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        <Wrench size={12} />
+        {isBrowser ? <Globe2 size={12} /> : <Wrench size={12} />}
         <span className="tool-name">{ev.name}</span>
         <span className="tool-hint">{argsHint(ev.arguments)}</span>
+        {ev.parallelGroup && <span className="tool-chip">parallel</span>}
+        {elapsed && <span className="tool-chip"><Clock3 size={11} />{elapsed}</span>}
         {!ev.done && <Loader2 size={13} className="spin" />}
         {ev.done && !ev.isError && <CheckCircle2 size={13} style={{ color: 'var(--green)' }} />}
         {ev.done && ev.isError && <XCircle size={13} style={{ color: 'var(--danger)' }} />}
       </button>
       <AnimatedCollapse open={open}>
         <div className="tool-card-body">
+          {(elapsed || ev.outputChars || ev.artifactPath) && (
+            <div className="tool-meta">
+              {elapsed && <span>{elapsed}</span>}
+              {typeof ev.outputChars === 'number' && <span>{ev.outputChars.toLocaleString()} chars</span>}
+              {ev.artifactPath && <span><FileDown size={11} /> {ev.artifactPath}</span>}
+            </div>
+          )}
           {ev.arguments && (
             <>
               <div className="label">{t('tool.argsLabel')}</div>

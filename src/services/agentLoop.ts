@@ -12,7 +12,7 @@ import { publish, drain, cleanup } from './eventBus.js';
 import { gateToolCall } from './approvals.js';
 import { enterRunContext } from '../seams/runContext.js';
 import { getRun, updateRunStatus, appendStep, listPendingRunsForRecovery } from './runStore.js';
-import { getToolDefinitions, executeTool, type ToolContext } from '../tools/registry.js';
+import { getToolDefinitions, executeTool, getToolCapabilities, type ToolContext } from '../tools/registry.js';
 import { loadSkillLoadout } from './skillLoadout.js';
 import { loadCustomTools, type LoadedCustomTool } from '../tools/customTools.js';
 import { snapshotSession } from '../sandbox/sessionSandbox.js';
@@ -346,7 +346,7 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
       systemParts.push(
         '## 计划模式(Plan Mode)\n' +
           '当前处于计划模式:你只有只读工具,**不能**写文件/执行命令/调用外部工具。流程:\n' +
-          '1. 用只读工具(read_file/search_files/glob_files/web_search 等)充分调研\n' +
+          '1. 用只读工具(read_file/search_files/glob_files/browser_search/web_search 等)充分调研\n' +
           '2. 需求有歧义或方案需取舍时用 ask_user 问清楚\n' +
           '3. 产出完整实施计划(目标/步骤/涉及文件/验证方式),调用 exit_plan_mode 提交审批\n' +
           '4. 用户批准前不要承诺"已完成"任何改动;被要求修改就完善计划后重新提交',
@@ -402,6 +402,121 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
       },
     };
     const toolDefs = getToolDefinitions(toolCtx);
+
+    type ExecutedToolCall = {
+      toolResult: any;
+      toolMessage: ChatMessage;
+    };
+    const MAX_PARALLEL_TOOL_CALLS = Math.max(1, Number(process.env.TANGU_TOOL_PARALLELISM) || 4);
+    const canRunToolInParallel = (call: ToolCall): boolean => {
+      const caps = getToolCapabilities(call.function.name, toolCtx);
+      return caps.parallel === true && caps.sideEffect !== 'write' && caps.sideEffect !== 'system' && caps.sideEffect !== 'browser';
+    };
+    const artifactPathFromText = (text: string, explicit?: string): string | undefined => {
+      if (explicit) return explicit;
+      const jsonish = text.match(/"screenshot_path"\s*:\s*"([^"]+)"/) || text.match(/"artifactPath"\s*:\s*"([^"]+)"/);
+      if (jsonish?.[1]) return jsonish[1];
+      const line = text.split('\n').find((l) => /(?:saved|wrote|path|文件|输出).*\/[^ \n]+/i.test(l));
+      return line?.match(/(\/[^\s"'<>]+)/)?.[1];
+    };
+    const executeOneToolCall = async (call: ToolCall, parallelGroup?: string): Promise<ExecutedToolCall> => {
+      if (ac.signal.aborted) throw new AbortLikeError();
+      const startedAt = Date.now();
+      const basePayload = {
+        id: call.id,
+        name: call.function.name,
+        arguments: call.function.arguments,
+        startedAt,
+        parallelGroup,
+      };
+      await publish(runId, 'tool_call', basePayload);
+
+      // host-exec 审批闸门：execMode!=='host' 时立即放行（无 await、无事件）→ server/worker 零影响。
+      const decision = await gateToolCall(runId, call, { sessionId, execMode, approvalMode }, ac.signal);
+      if (ac.signal.aborted) throw new AbortLikeError();
+      if (decision.action === 'reject') {
+        const rejected = '用户拒绝了该操作。';
+        const elapsedMs = Date.now() - startedAt;
+        await publish(runId, 'tool_result', {
+          id: call.id,
+          name: call.function.name,
+          result: rejected,
+          isError: true,
+          startedAt,
+          elapsedMs,
+          outputChars: rejected.length,
+          parallelGroup,
+        });
+        return {
+          toolResult: { tool_call_id: call.id, name: call.function.name, content: rejected, isError: true, startedAt, elapsedMs, outputChars: rejected.length, parallelGroup },
+          toolMessage: { role: 'tool', content: rejected, tool_call_id: call.id } as ChatMessage,
+        };
+      }
+      // 审批时用户改了参数（如修订 bash 命令）→ 用覆盖后的参数执行。
+      const execCall = decision.argsOverride
+        ? { ...call, function: { ...call.function, arguments: JSON.stringify(decision.argsOverride) } }
+        : call;
+      const result = await executeTool(execCall, toolCtx);
+      // 入列硬帽(写入即定型,append-only):各工具自有更小的帽,这里兜未封顶路径
+      // (host list_dir 大目录、custom provider 等),保证单条结果不可能把上下文炸穿。
+      const capped = capToolResult(result.result);
+      const elapsedMs = Date.now() - startedAt;
+      const artifactPath = artifactPathFromText(capped, result.artifactPath);
+      const payload = {
+        id: call.id,
+        name: result.name,
+        result: capped,
+        isError: result.isError,
+        startedAt,
+        elapsedMs,
+        outputChars: capped.length,
+        parallelGroup,
+        artifactPath,
+        metadata: result.metadata,
+      };
+      await publish(runId, 'tool_result', payload);
+      return {
+        toolResult: {
+          tool_call_id: call.id,
+          name: result.name,
+          content: capped,
+          isError: result.isError,
+          startedAt,
+          elapsedMs,
+          outputChars: capped.length,
+          parallelGroup,
+          artifactPath,
+          metadata: result.metadata,
+        },
+        toolMessage: { role: 'tool', content: capped, tool_call_id: call.id } as ChatMessage,
+      };
+    };
+    const executeToolCallsInOrder = async (calls: ToolCall[]): Promise<any[]> => {
+      const toolResults: any[] = [];
+      for (let i = 0; i < calls.length;) {
+        if (!canRunToolInParallel(calls[i])) {
+          const single = await executeOneToolCall(calls[i]);
+          toolResults.push(single.toolResult);
+          workingMessages.push(single.toolMessage);
+          i += 1;
+          continue;
+        }
+        const batch: ToolCall[] = [];
+        while (i + batch.length < calls.length && batch.length < MAX_PARALLEL_TOOL_CALLS && canRunToolInParallel(calls[i + batch.length])) {
+          batch.push(calls[i + batch.length]);
+        }
+        const parallelGroup = batch.length > 1 ? uuidv4() : undefined;
+        const executed = batch.length > 1
+          ? await Promise.all(batch.map((call) => executeOneToolCall(call, parallelGroup)))
+          : [await executeOneToolCall(batch[0])];
+        for (const item of executed) {
+          toolResults.push(item.toolResult);
+          workingMessages.push(item.toolMessage);
+        }
+        i += batch.length;
+      }
+      return toolResults;
+    };
 
     const user = await getUserById(userId);
     if (!user) throw new LlmError(404, 'User not found');
@@ -605,33 +720,7 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
       allToolCalls.push(...res.toolCalls);
       usedTools = true; // 到达本行说明这一轮在调工具并继续循环;若后续顶到 lastIter 即为真·循环耗尽
 
-      const toolResults: any[] = [];
-      for (const call of res.toolCalls) {
-        if (ac.signal.aborted) throw new AbortLikeError();
-        await publish(runId, 'tool_call', { id: call.id, name: call.function.name, arguments: call.function.arguments });
-
-        // host-exec 审批闸门：execMode!=='host' 时立即放行（无 await、无事件）→ server/worker 零影响。
-        const decision = await gateToolCall(runId, call, { sessionId, execMode, approvalMode }, ac.signal);
-        if (ac.signal.aborted) throw new AbortLikeError();
-        if (decision.action === 'reject') {
-          const rejected = '用户拒绝了该操作。';
-          await publish(runId, 'tool_result', { id: call.id, name: call.function.name, result: rejected, isError: true });
-          toolResults.push({ tool_call_id: call.id, name: call.function.name, content: rejected, isError: true });
-          workingMessages.push({ role: 'tool', content: rejected, tool_call_id: call.id } as ChatMessage);
-          continue;
-        }
-        // 审批时用户改了参数（如修订 bash 命令）→ 用覆盖后的参数执行。
-        const execCall = decision.argsOverride
-          ? { ...call, function: { ...call.function, arguments: JSON.stringify(decision.argsOverride) } }
-          : call;
-        const result = await executeTool(execCall, toolCtx);
-        // 入列硬帽(写入即定型,append-only):各工具自有更小的帽,这里兜未封顶路径
-        // (host list_dir 大目录、custom provider 等),保证单条结果不可能把上下文炸穿。
-        const capped = capToolResult(result.result);
-        await publish(runId, 'tool_result', { id: call.id, name: result.name, result: capped, isError: result.isError });
-        toolResults.push({ tool_call_id: call.id, name: result.name, content: capped, isError: result.isError });
-        workingMessages.push({ role: 'tool', content: capped, tool_call_id: call.id } as ChatMessage);
-      }
+      const toolResults = await executeToolCallsInOrder(res.toolCalls);
       // 工具(view_image)读到的图片 → 物化成一条 user 图像消息追加到尾部,下一轮模型即可"看见"。
       // 仅 in-memory(不落库):本 run 内多轮可见即可,避免历史每轮重发多 MB base64(对齐附件物化纪律)。
       if (pendingToolImages.length) {

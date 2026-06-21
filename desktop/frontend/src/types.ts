@@ -122,7 +122,7 @@ export interface WorkspaceDescriptor {
   /** 分组键:cloud 用 CLOUD_WORKSPACE_KEY 哨兵;本地用绝对路径(= project_path)。 */
   key: string
   name: string
-  kind: 'cloud' | 'local'
+  kind: 'cloud' | 'local' | 'wechat'
   /** 本地工作目录绝对路径;cloud 为 null。 */
   path: string | null
   /** 常驻系统工作区(Cloud / Tangu 默认):不可重命名 / 移除。其余本地工作区(由会话 project_path 派生)可管理。 */
@@ -261,6 +261,11 @@ export interface ToolEvent {
   result?: string
   isError?: boolean
   done: boolean
+  startedAt?: number
+  elapsedMs?: number
+  outputChars?: number
+  parallelGroup?: string
+  artifactPath?: string
 }
 
 export interface ApprovalRequest {
@@ -290,7 +295,8 @@ export interface TodoItem {
 
 export interface UiMessage {
   id: string
-  role: 'user' | 'assistant'
+  /** system=客户端本地通知行(斜杠命令反馈等;不持久化,reload 会消失)。 */
+  role: 'user' | 'assistant' | 'system'
   content: string
   reasoning?: string
   toolEvents?: ToolEvent[]
@@ -323,6 +329,15 @@ export interface StoredDesktopConfig extends TanguDesktopConfig {
   cloudUrl: string
   cloudToken: string
   sandbox: 'auto' | 'docker' | 'none'
+  browserEnabled?: boolean
+  browserEngine?: 'auto' | 'chrome' | 'lightpanda'
+  browserSearchEngine?: 'duckduckgo' | 'bing' | 'google' | 'baidu'
+  browserAllowPrivateUrls?: boolean
+  browserCommandTimeoutMs?: number
+  wechatEnabled?: boolean
+  wechatDefaultSessionId?: string
+  wechatRemoteApprovalMode?: 'readonly' | 'auto-edit' | 'full-auto'
+  wechatAllowedPeers?: string[]
   /** 「Tangu 默认工作区」本地目录(空=主进程按 ~/Tangu 兜底并首启创建)。设置里可改。 */
   defaultWorkspaceDir?: string
   backendState?: BackendStatusInfo

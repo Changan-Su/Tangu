@@ -98,6 +98,16 @@ export const testProviderConnection = (
     body: JSON.stringify(probe),
   })
 
+/** 后端代拉上游 GET {baseUrl}/models(避 CORS),返回可选模型名列表;软失败回 []。 */
+export const fetchProviderModels = (
+  cfg: TanguDesktopConfig,
+  probe: { baseUrl: string; apiKey?: string },
+) =>
+  request<{ models: Array<{ id: string; name?: string }> }>(cfg, '/agent/providers/fetch-models', {
+    method: 'POST',
+    body: JSON.stringify(probe),
+  }).then((r) => r.models)
+
 export const listSkills = (cfg: TanguDesktopConfig) =>
   request<{ skills: SkillInfo[] }>(cfg, '/agent/skills').then((r) => r.skills)
 
@@ -113,6 +123,67 @@ export const deleteUserCloudSkill = (cfg: TanguDesktopConfig, id: string) =>
   request<{ ok: boolean }>(cfg, `/agent/skills/user/${encodeURIComponent(id)}`, { method: 'DELETE' })
 
 export const listTools = (cfg: TanguDesktopConfig) => request<ToolsResponse>(cfg, '/agent/tools')
+
+// ── WeChat Remote（本地后端）──
+export interface WechatStatusResponse {
+  enabled: boolean
+  runtime: Array<{ accountId: string; running: boolean; peers: number }>
+  bindings: Array<{
+    id: string
+    account_id: string
+    peer_id: string | null
+    session_id: string
+    remote_approval_mode: string
+    is_active: boolean
+    status: string
+    wx_user_id: string | null
+    session_title: string | null
+  }>
+}
+
+export const startWechatLogin = (
+  cfg: TanguDesktopConfig,
+  input: { session_id?: string; model_id?: string; approval_mode?: string },
+) =>
+  request<{ loginId: string; qrcode: string; qrcodeImg: string; expiresAt: number }>(cfg, '/agent/wechat/login/start', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+
+export const pollWechatLogin = (cfg: TanguDesktopConfig, loginId: string) =>
+  request<{ status: string; accountId?: string; sessionId?: string; detail?: string }>(
+    cfg,
+    `/agent/wechat/login/status?loginId=${encodeURIComponent(loginId)}`,
+  )
+
+export const getWechatStatus = (cfg: TanguDesktopConfig) =>
+  request<WechatStatusResponse>(cfg, '/agent/wechat/status')
+
+export const disconnectWechat = (cfg: TanguDesktopConfig, accountId: string) =>
+  request<{ ok: boolean }>(cfg, '/agent/wechat/disconnect', {
+    method: 'POST',
+    body: JSON.stringify({ account_id: accountId }),
+  })
+
+/** 「微信远程」Project 下的会话(connected=正在连接的那个)。 */
+export interface WechatProjectSession {
+  id: string
+  title: string
+  updated_at: string | number | null
+  connected: boolean
+}
+
+/** 列出微信 Project(~/Tangu/webot)下的会话,供主界面选择「正在连接的 session」。 */
+export const listWechatSessions = (cfg: TanguDesktopConfig) =>
+  request<{ sessions: WechatProjectSession[] }>(cfg, '/agent/wechat/sessions').then((r) => r.sessions)
+
+/** 切换「正在连接的 session」(微信 bot 收到的消息改走该会话)。 */
+export const setWechatConnectedSession = (cfg: TanguDesktopConfig, sessionId: string) =>
+  request<{ ok: boolean }>(cfg, '/agent/wechat/connect', { method: 'POST', body: JSON.stringify({ session_id: sessionId }) })
+
+/** 在微信 Project 下新建会话并(默认)切为正在连接。 */
+export const createWechatSession = (cfg: TanguDesktopConfig, title?: string) =>
+  request<{ sessionId: string }>(cfg, '/agent/wechat/sessions/new', { method: 'POST', body: JSON.stringify({ title }) }).then((r) => r.sessionId)
 
 // ── Normal Agent（本地自定义人格;仅本地后端可用,云端返回 404 → 调用方降级空列表）──
 export const listAgents = (cfg: TanguDesktopConfig) =>

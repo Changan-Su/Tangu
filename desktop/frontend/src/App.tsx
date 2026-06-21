@@ -5,6 +5,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   AgentConfig, AgentRunEvent, Attachment, ModelsResponse, NormalAgentDef, SessionRecord, SkillInfo, TanguDesktopConfig, UiMessage, WorkspaceDescriptor,
+  StoredDesktopConfig,
 } from './types'
 import { CLOUD_WORKSPACE_KEY } from './types'
 import * as api from './services/backendService'
@@ -17,6 +18,7 @@ import { SettingsModal } from './components/SettingsModal'
 import { RightPanel } from './components/RightPanel'
 import { HistorianView } from './components/HistorianView'
 import { MuseView } from './components/MuseView'
+import { WeChatView } from './components/WeChatView'
 import { OnboardingWizard, ONBOARDING_DISMISS_KEY } from './components/OnboardingWizard'
 import { resolveInitialMode, resolveInitialPreset } from './theme/registry'
 import { applyTheme } from './theme/loader'
@@ -55,6 +57,11 @@ function recordToUi(r: any): UiMessage {
         arguments: c.function?.arguments,
         result: res ? String(res.content ?? '') : undefined,
         isError: res?.isError || false,
+        startedAt: res?.startedAt,
+        elapsedMs: res?.elapsedMs,
+        outputChars: res?.outputChars,
+        parallelGroup: res?.parallelGroup,
+        artifactPath: res?.artifactPath,
         done: true,
       }
     })
@@ -66,6 +73,7 @@ function recordToUi(r: any): UiMessage {
 export function App(): React.JSX.Element {
   const { t } = useI18n()
   const [cfg, setCfg] = useState<TanguDesktopConfig>({ backendUrl: 'http://localhost:8787', token: '', modelId: '' })
+  const [desktopConfig, setDesktopConfig] = useState<StoredDesktopConfig | null>(null)
   const [cfgLoaded, setCfgLoaded] = useState(false)
   const [connState, setConnState] = useState<'idle' | 'ok' | 'err'>('idle')
   const [connMessage, setConnMessage] = useState('')
@@ -82,7 +90,11 @@ export function App(): React.JSX.Element {
   const [modelsResp, setModelsResp] = useState<ModelsResponse | null>(null)
   const [skillsList, setSkillsList] = useState<SkillInfo[] | null>(null)
   const [agentDefs, setAgentDefs] = useState<NormalAgentDef[]>([])
-  const [specialView, setSpecialView] = useState<'historian' | 'muse' | null>(null)
+  const [specialView, setSpecialView] = useState<'historian' | 'muse' | 'wechat' | null>(null)
+  // Special Agents 各自开关(侧栏入口按此显隐;云端 404 / 失败 → 全 false)。
+  const [specialEnabled, setSpecialEnabled] = useState<{ historian: boolean; muse: boolean }>({ historian: false, muse: false })
+  // 划线引用:聊天区选中的待引用文本(发送时以 markdown 引用拼到消息前)。
+  const [quote, setQuote] = useState('')
   const [messagesBySession, setMessagesBySession] = useState<Record<string, UiMessage[]>>({})
   const [configBySession, setConfigBySession] = useState<Record<string, AgentConfig>>({})
   const [runningBySession, setRunningBySession] = useState<Record<string, string>>({})
@@ -107,6 +119,9 @@ export function App(): React.JSX.Element {
   cfgRef.current = cfg
   const activeIdRef = useRef(activeId)
   activeIdRef.current = activeId
+  // 给轮询读「当前会话是否在本地 streaming」用,避免把 runningBySession 列进 effect 依赖导致定时器频繁重建。
+  const runningRef = useRef(runningBySession)
+  runningRef.current = runningBySession
   const runAborts = useRef(new Map<string, AbortController>())
   const subscribedRuns = useRef(new Set<string>())
   const loadedHistory = useRef(new Set<string>())
@@ -116,6 +131,20 @@ export function App(): React.JSX.Element {
     setToasts((t) => [...t, { id, text, error }])
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200)
   }, [])
+
+  // 斜杠命令的对话内反馈行:像 Claude Code/Codex 那样在消息流里留一条 system 提示(本地、不持久化)。
+  // 无活跃会话时退化为 toast。
+  const pushNotice = useCallback((text: string) => {
+    const sid = activeIdRef.current
+    if (!sid) { toast(text); return }
+    setMessagesBySession((prev) => ({
+      ...prev,
+      [sid]: [...(prev[sid] || []), {
+        id: `notice-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        role: 'system' as const, content: text, status: 'done' as const, timestamp: Date.now(),
+      }],
+    }))
+  }, [toast])
 
   // ── 消息更新助手 ──
   const patchMessage = useCallback((sessionId: string, messageId: string, fn: (m: UiMessage) => UiMessage) => {
@@ -149,6 +178,9 @@ export function App(): React.JSX.Element {
     }
   }, [])
 
+  // run 完成后 Historian 异步可能改了标题——经 ref 延迟刷新会话列表(避免 reduceEvent 依赖后定义的 refreshSessions)。
+  const refreshSessionsRef = useRef<((c: TanguDesktopConfig) => Promise<unknown>) | null>(null)
+
   // ── SSE 事件归约 ──
   const reduceEvent = useCallback((sessionId: string, runId: string, assistantId: string, ev: AgentRunEvent) => {
     const pl = ev.payload || {}
@@ -172,7 +204,7 @@ export function App(): React.JSX.Element {
         patchMessage(sessionId, assistantId, (m) => {
           const evs = (m.toolEvents || []).slice()
           const i = evs.findIndex((t) => t.id === pl.id)
-          const item = { id: pl.id, name: pl.name, arguments: pl.arguments, done: false }
+          const item = { id: pl.id, name: pl.name, arguments: pl.arguments, done: false, startedAt: pl.startedAt, parallelGroup: pl.parallelGroup }
           if (i >= 0) evs[i] = { ...evs[i], ...item }
           else evs.push(item)
           return { ...m, toolEvents: evs }
@@ -182,7 +214,19 @@ export function App(): React.JSX.Element {
         patchMessage(sessionId, assistantId, (m) => {
           const evs = (m.toolEvents || []).slice()
           const i = evs.findIndex((t) => t.id === pl.id)
-          if (i >= 0) evs[i] = { ...evs[i], result: String(pl.result ?? ''), isError: !!pl.isError, done: true }
+          if (i >= 0) {
+            evs[i] = {
+              ...evs[i],
+              result: String(pl.result ?? ''),
+              isError: !!pl.isError,
+              done: true,
+              startedAt: pl.startedAt ?? evs[i].startedAt,
+              elapsedMs: pl.elapsedMs,
+              outputChars: pl.outputChars,
+              parallelGroup: pl.parallelGroup ?? evs[i].parallelGroup,
+              artifactPath: pl.artifactPath,
+            }
+          }
           return { ...m, toolEvents: evs }
         })
         break
@@ -265,6 +309,8 @@ export function App(): React.JSX.Element {
           return { ...prev, [sessionId]: { ctx: u.ctx, base: u.base + u.live, live: 0 } }
         })
         endRun(sessionId, runId)
+        // Historian(若开启)在 run 完成后异步总结标题/写记忆——延迟刷新会话列表反映新标题。
+        setTimeout(() => { void refreshSessionsRef.current?.(cfgRef.current).catch(() => {}) }, 6000)
         break
       case 'error':
         patchMessage(sessionId, assistantId, (m) => ({
@@ -304,6 +350,7 @@ export function App(): React.JSX.Element {
     setArchivedSessions(arch)
     return act
   }, [])
+  refreshSessionsRef.current = refreshSessions // 供 reduceEvent('done') 延迟刷新用
 
   const connect = useCallback(async (c: TanguDesktopConfig) => {
     const r = await testConnection(c)
@@ -322,11 +369,32 @@ export function App(): React.JSX.Element {
     void api.listSkills(c).then(setSkillsList).catch(() => setSkillsList(null))
     // 本地 Normal Agent 目录(斜杠 /agent:* 用;云端 404 → 空)。
     void api.listAgents(c).then(setAgentDefs).catch(() => setAgentDefs([]))
+    // Special Agents 开关(侧栏入口显隐;云端 hostExec=false → 404 → 全 false)。
+    void refreshSpecialEnabled(c)
   }, [refreshSessions, toast, t])
+
+  // Special Agents 开关刷新(connect 后 + 设置关闭后调用,使侧栏入口即时反映开关)。
+  const refreshSpecialEnabled = useCallback(async (c: TanguDesktopConfig) => {
+    try {
+      const r = await api.getSpecialConfig(c)
+      setSpecialEnabled({ historian: !!r.config?.historian?.enabled, muse: !!r.config?.muse?.enabled })
+    } catch {
+      setSpecialEnabled({ historian: false, muse: false })
+    }
+  }, [])
+
+  // 正在查看的 Special Agent / 微信远程 被关掉 → 退出其视图,避免停留在死视图。
+  useEffect(() => {
+    if (specialView === 'historian' && !specialEnabled.historian) setSpecialView(null)
+    if (specialView === 'muse' && !specialEnabled.muse) setSpecialView(null)
+    const wechatOn = !!window.tangu?.backendStatus && desktopConfig?.wechatEnabled !== false
+    if (specialView === 'wechat' && !wechatOn) setSpecialView(null)
+  }, [specialEnabled, specialView, desktopConfig?.wechatEnabled])
 
   useEffect(() => {
     void (async () => {
       const stored = await window.tangu?.getConfig()
+      setDesktopConfig(stored || null)
       desktopMode.current = stored?.mode ?? null
       homeDirRef.current = stored?.homeDir
       defaultWsDirRef.current = stored?.defaultWorkspaceDir || ''
@@ -366,6 +434,7 @@ export function App(): React.JSX.Element {
     const off = window.tangu?.onBackendStatus?.((st) => {
       if (st.state === 'ready') {
         void window.tangu!.getConfig().then((c) => {
+          setDesktopConfig(c)
           const eff = { backendUrl: c.backendUrl, token: c.token, modelId: c.modelId }
           setCfg(eff)
           void connect(eff)
@@ -436,6 +505,60 @@ export function App(): React.JSX.Element {
     })()
   }, [activeId, connState, subscribeRun, toast, t])
 
+  // ── 活跃会话消息轮询(每 4s)──
+  // 拉入「带外」写入的新消息(典型:微信 bot 收到消息后由后端跑的会话,本端没订阅其 run),
+  // 并订阅外部启动、本端尚未订阅的在飞 run,使回复实时流式呈现——无需手动刷新页面。
+  // 本地正在 streaming(runningRef 有值)时跳过本会话拉取,交给 SSE,避免抢写。
+  useEffect(() => {
+    if (!activeId || connState !== 'ok') return
+    let alive = true
+    const poll = async (): Promise<void> => {
+      const sid = activeIdRef.current
+      if (!sid || sid !== activeId || runningRef.current[sid]) return
+      try {
+        const [records, active] = await Promise.all([
+          api.listMessages(cfgRef.current, sid),
+          listActiveRuns(cfgRef.current, sid).catch(() => []),
+        ])
+        if (!alive || activeIdRef.current !== sid || runningRef.current[sid]) return
+        setMessagesBySession((prev) => {
+          const existing = prev[sid] || []
+          const ui = records.map(recordToUi)
+          const byId = new Map(ui.map((m) => [m.id, m] as const))
+          // 本地版本优先(与初次加载一致):保留 SSE 累积、而 recordToUi 不重建的富状态
+          // ——toolEvents/approvals/inquiries/todos/planProposal/system 提示/乐观消息。
+          // 仅服务端「新增」的消息(新 id,典型:微信 bot 触发的往来)会被纳入。
+          for (const m of existing) byId.set(m.id, m)
+          const merged = [...byId.values()].sort((a, b) => a.timestamp - b.timestamp)
+          // 引用级比对:无新增/删除时元素引用全等 → 不触发重渲染(避免轮询把聊天区吸底/抖动)。
+          if (merged.length === existing.length && merged.every((m, i) => m === existing[i])) return prev
+          return { ...prev, [sid]: merged }
+        })
+        for (const run of active) {
+          if ((run.status === 'running' || run.status === 'queued') && run.assistant_message_id && !subscribedRuns.current.has(run.id)) {
+            const amid = run.assistant_message_id
+            setMessagesBySession((prev) => {
+              const list = prev[sid] || []
+              if (list.some((m) => m.id === amid)) return prev
+              return { ...prev, [sid]: [...list, { id: amid, role: 'assistant', content: '', status: 'streaming', timestamp: Date.now() }] }
+            })
+            subscribeRun(sid, run.id, amid)
+          }
+        }
+      } catch { /* 轮询失败静默,下次再试 */ }
+    }
+    const timer = window.setInterval(() => void poll(), 4000)
+    return () => { alive = false; window.clearInterval(timer) }
+  }, [activeId, connState, subscribeRun])
+
+  // ── 设置打开期间轮询 Special Agents 开关(每 2.5s)──
+  // 在设置里开/关 Historian/Muse 后,侧栏入口即时显隐(侧栏始终可见),无需刷新页面。
+  useEffect(() => {
+    if (!settingsOpen || connState !== 'ok') return
+    const timer = window.setInterval(() => { void refreshSpecialEnabled(cfgRef.current) }, 2500)
+    return () => window.clearInterval(timer)
+  }, [settingsOpen, connState, refreshSpecialEnabled])
+
   // ── 工作区 / 会话操作 ──
   /** 默认本地工作区(Tangu 默认工作区;cwd=defaultWsDir,空时回退主目录)。 */
   const defaultWorkspace = useCallback((): WorkspaceDescriptor => ({
@@ -448,11 +571,18 @@ export function App(): React.JSX.Element {
   /** 工作区列表:Cloud + Tangu 默认 常驻(空也在),再并入会话出现过的其它本地目录。 */
   const workspaces = useMemo<WorkspaceDescriptor[]>(() => {
     const defPath = defaultWsDir || homeDirRef.current || null
+    const wechatOn = !!window.tangu?.backendStatus && desktopConfig?.wechatEnabled !== false
+    const webotPath = defPath ? `${defPath}/webot` : null
     const list: WorkspaceDescriptor[] = [
       { key: CLOUD_WORKSPACE_KEY, name: t('app.cloudWorkspace'), kind: 'cloud', path: null, system: true },
       { key: defaultWsDir || '__default_ws__', name: t('app.defaultWorkspace'), kind: 'local', path: defPath, system: true },
     ]
     const seen = new Set<string>([CLOUD_WORKSPACE_KEY, defaultWsDir || '__default_ws__'])
+    // 「微信远程」专属 Project(~/Tangu/webot):常驻工作区组,点组名进 WeChatView 设置/连接。
+    if (wechatOn && webotPath) {
+      list.push({ key: webotPath, name: t('app.wechatWorkspace'), kind: 'wechat', path: webotPath, system: true })
+      seen.add(webotPath)
+    }
     for (const s of [...sessions, ...archivedSessions]) {
       if (s.project_path && s.project_path !== defPath && !seen.has(s.project_path)) {
         seen.add(s.project_path)
@@ -465,7 +595,7 @@ export function App(): React.JSX.Element {
       }
     }
     return list
-  }, [sessions, archivedSessions, defaultWsDir, t])
+  }, [sessions, archivedSessions, defaultWsDir, t, desktopConfig?.wechatEnabled])
 
   /** 在工作区下新建会话:cloud→云沙箱;本地→host + cwd=工作区目录 + 自动编辑审批档。 */
   const createInWorkspace = useCallback(async (ws: WorkspaceDescriptor) => {
@@ -697,11 +827,11 @@ export function App(): React.JSX.Element {
     toast(t('input.compacting'))
     try {
       const r = await api.compactSession(cfgRef.current, sid, modelId)
-      toast(r.ok ? t('input.compactDone', { n: r.summarizedCount || 0 }) : t('input.compactSkip', { reason: r.reason || '' }))
+      pushNotice(r.ok ? t('input.compactDone', { n: r.summarizedCount || 0 }) : t('input.compactSkip', { reason: r.reason || '' }))
     } catch (e: any) {
       toast(t('input.compactFail', { e: e?.message || e }), true)
     }
-  }, [sessions, modelsResp, toast, t])
+  }, [sessions, modelsResp, toast, pushNotice, t])
 
   const decideApproval = useCallback(
     async (messageId: string, approvalId: string, action: 'approve' | 'approve_always' | 'reject', argsOverride?: Record<string, any>) => {
@@ -793,10 +923,11 @@ export function App(): React.JSX.Element {
       cur.has(skillId) ? cur.delete(skillId) : cur.add(skillId)
       const next = { ...(prev[sid] || {}), enabledSkillIds: [...cur] }
       void api.putSessionConfig(cfgRef.current, sid, next).catch(() => {})
-      toast(cur.has(skillId) ? t('app.skillEnabled', { id: skillId }) : t('app.skillDisabled', { id: skillId }))
       return { ...prev, [sid]: next }
     })
-  }, [toast, t])
+    const willEnable = !(configBySession[sid]?.enabledSkillIds || []).includes(skillId)
+    pushNotice(willEnable ? t('app.skillEnabled', { id: skillId }) : t('app.skillDisabled', { id: skillId }))
+  }, [configBySession, pushNotice, t])
 
   /** 会话内选用 Normal Agent(/agent:<slug> 斜杠命令;''=取消):写 agent_config.agentSlug,有模型则应用会话模型。 */
   const selectSessionAgent = useCallback((slug: string) => {
@@ -809,8 +940,8 @@ export function App(): React.JSX.Element {
       return { ...prev, [sid]: next }
     })
     if (def?.model) setSessionModel(def.model)
-    toast(def ? t('input.agentActive', { name: def.name }) : t('input.agentCleared'))
-  }, [agentDefs, setSessionModel, toast, t])
+    pushNotice(def ? t('input.agentActive', { name: def.name }) : t('input.agentCleared'))
+  }, [agentDefs, setSessionModel, pushNotice, t])
 
   /** 兑现询问(ask_user/exit_plan_mode 的询问卡)。 */
   const answerInquiry = useCallback(
@@ -840,6 +971,19 @@ export function App(): React.JSX.Element {
       return merged
     })
   }, [])
+
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(false)
+    // 设置里可能改了默认工作区目录 → 重读折算值,刷新侧栏工作区。
+    void window.tangu?.getConfig().then((c) => {
+      setDesktopConfig(c)
+      homeDirRef.current = c.homeDir
+      defaultWsDirRef.current = c.defaultWorkspaceDir || ''
+      setDefaultWsDir(c.defaultWorkspaceDir || '')
+    })
+    // 设置里可能开/关了 Special Agents → 刷新侧栏入口显隐。
+    void refreshSpecialEnabled(cfgRef.current)
+  }, [refreshSpecialEnabled])
 
   const onGlassChange = useCallback((on: boolean) => {
     setGlassOn(on)
@@ -878,6 +1022,7 @@ export function App(): React.JSX.Element {
   const running = !!(activeId && runningBySession[activeId])
   const runningIds = useMemo(() => new Set(Object.keys(runningBySession)), [runningBySession])
   const execConfig = (activeId && configBySession[activeId]) || {}
+  const wechatFeatureEnabled = !!window.tangu?.backendStatus && desktopConfig?.wechatEnabled !== false
 
   if (!cfgLoaded) return <div className="app" />
 
@@ -890,8 +1035,14 @@ export function App(): React.JSX.Element {
         activeId={activeId}
         runningIds={runningIds}
         unreadIds={unread}
-        onSelect={(id) => { setSpecialView(null); setActiveId(id) }}
+        cfg={cfg}
+        modelId={activeSession?.model_id || cfg.modelId || modelsResp?.defaultModelId || ''}
+        activeSession={activeSession}
+        onSelect={(id) => { setSpecialView(null); setActiveId(id); setQuote('') }}
         showSpecial={!!window.tangu?.backendStatus}
+        historianEnabled={specialEnabled.historian}
+        museEnabled={specialEnabled.muse}
+        wechatEnabled={wechatFeatureEnabled}
         specialView={specialView}
         onOpenSpecial={(v) => setSpecialView(v)}
         workspaces={workspaces}
@@ -911,15 +1062,15 @@ export function App(): React.JSX.Element {
       />
       <main className="main">
         <ChatHeader
-          title={activeSession?.title || 'Tangu Agent'}
+          title={settingsOpen ? t('settings.title') : (activeSession?.title || 'Tangu Agent')}
           modelId={activeSession?.model_id || cfg.modelId}
           connState={connState}
           connMessage={connMessage}
           sidebarCollapsed={sidebarCollapsed}
-          rightOpen={rightOpen}
+          rightOpen={!settingsOpen && rightOpen}
           themeMode={themeMode}
           onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
-          onToggleRight={() => setRightOpen(!rightOpen)}
+          onToggleRight={() => { if (!settingsOpen) setRightOpen(!rightOpen) }}
           onToggleMode={() => {
             const m = themeMode === 'dark' ? 'light' : 'dark'
             applyTheme(themePreset, m) // 切换 + 持久化(forsion_theme)
@@ -927,7 +1078,29 @@ export function App(): React.JSX.Element {
           }}
         />
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-          {onboarding ? (
+          {settingsOpen ? (
+            <SettingsModal
+              open={settingsOpen}
+              cfg={cfg}
+              activeSession={(activeId && sessions.find((s) => s.id === activeId)) || null}
+              themePreset={themePreset}
+              themeMode={themeMode}
+              glassOn={glassOn}
+              onClose={closeSettings}
+              onConfigChange={patchConfig}
+              onThemeChange={(preset, mode) => {
+                setThemePreset(preset)
+                setThemeMode(mode)
+              }}
+              onGlassChange={onGlassChange}
+              onReconnect={(patch) => void connect({ ...cfgRef.current, ...(patch || {}) })}
+              onRelaunchOnboarding={() => {
+                closeSettings()
+                try { localStorage.removeItem(ONBOARDING_DISMISS_KEY) } catch { /* ignore */ }
+                setOnboarding(true)
+              }}
+            />
+          ) : onboarding ? (
             <OnboardingWizard
               themePreset={themePreset}
               themeMode={themeMode}
@@ -959,6 +1132,15 @@ export function App(): React.JSX.Element {
                 <HistorianView cfg={cfg} />
               ) : specialView === 'muse' ? (
                 <MuseView cfg={cfg} sessions={sessions} onInjected={(sid) => { setSpecialView(null); setActiveId(sid) }} />
+              ) : specialView === 'wechat' ? (
+                <WeChatView
+                  cfg={cfg}
+                  activeSession={activeSession}
+                  modelId={activeSession?.model_id || cfg.modelId || modelsResp?.defaultModelId || ''}
+                  onOpenSettings={() => setSettingsOpen(true)}
+                  onOpenSession={(sid) => { loadedHistory.current.delete(sid); setSpecialView(null); setActiveId(sid); void refreshSessions(cfgRef.current).catch(() => {}) }}
+                  onSessionsChanged={() => { void refreshSessions(cfgRef.current).catch(() => {}) }}
+                />
               ) : (
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                 <ChatArea
@@ -969,6 +1151,7 @@ export function App(): React.JSX.Element {
                   onEditResend={editUserMessage}
                   onRegenerate={regenerate}
                   running={running}
+                  onQuote={setQuote}
                 />
                 <MessageInput
                   disabled={connState !== 'ok'}
@@ -994,6 +1177,8 @@ export function App(): React.JSX.Element {
                   onExecConfigChange={setExecConfig}
                   onSend={send}
                   onStop={stop}
+                  quotedText={quote}
+                  onClearQuote={() => setQuote('')}
                   contextWindow={activeModel?.contextWindow || 0}
                   ctxTokens={activeUsage.ctx}
                   sessionTokens={activeUsage.base + activeUsage.live}
@@ -1016,36 +1201,6 @@ export function App(): React.JSX.Element {
           )}
         </div>
       </main>
-
-      <SettingsModal
-        open={settingsOpen}
-        cfg={cfg}
-        activeSession={(activeId && sessions.find((s) => s.id === activeId)) || null}
-        themePreset={themePreset}
-        themeMode={themeMode}
-        glassOn={glassOn}
-        onClose={() => {
-          setSettingsOpen(false)
-          // 设置里可能改了默认工作区目录 → 重读折算值,刷新侧栏工作区。
-          void window.tangu?.getConfig().then((c) => {
-            homeDirRef.current = c.homeDir
-            defaultWsDirRef.current = c.defaultWorkspaceDir || ''
-            setDefaultWsDir(c.defaultWorkspaceDir || '')
-          })
-        }}
-        onConfigChange={patchConfig}
-        onThemeChange={(preset, mode) => {
-          setThemePreset(preset)
-          setThemeMode(mode)
-        }}
-        onGlassChange={onGlassChange}
-        onReconnect={(patch) => void connect({ ...cfgRef.current, ...(patch || {}) })}
-        onRelaunchOnboarding={() => {
-          setSettingsOpen(false)
-          try { localStorage.removeItem(ONBOARDING_DISMISS_KEY) } catch { /* ignore */ }
-          setOnboarding(true)
-        }}
-      />
 
       <div className="toast-wrap">
         {toasts.map((t) => (

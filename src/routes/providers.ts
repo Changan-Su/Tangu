@@ -65,4 +65,62 @@ router.post('/agent/providers/test', authMiddleware, async (req, res) => {
   }
 });
 
+/** OpenAI(`data:[{id}]`)/ Ollama(`models:[{name|id}]`)/ 裸数组 多形兼容解析 → 归一 {id,name?}。 */
+function parseModels(data: any): Array<{ id: string; name?: string }> {
+  const out: Array<{ id: string; name?: string }> = [];
+  const push = (id: any, name?: any) => {
+    const sid = typeof id === 'string' ? id.trim() : '';
+    if (sid) out.push(name && String(name).trim() ? { id: sid, name: String(name).trim() } : { id: sid });
+  };
+  const list = Array.isArray(data?.data) ? data.data
+    : Array.isArray(data?.models) ? data.models
+      : Array.isArray(data) ? data
+        : [];
+  for (const m of list) {
+    if (typeof m === 'string') push(m);
+    else if (m && typeof m === 'object') push(m.id ?? m.name ?? m.model, m.name ?? m.display_name);
+  }
+  return out;
+}
+
+/**
+ * POST /agent/providers/fetch-models → { models: [{id, name?}] }
+ * 后端代拉上游 GET {baseUrl}/models(避 CORS),供「自定义 Provider」编辑器发现可用模型名。
+ * 软失败:上游不可达/无列表 → 返回 { models: [] }(不 500,前端展示空态)。
+ */
+router.post('/agent/providers/fetch-models', authMiddleware, async (req, res) => {
+  try {
+    const baseUrl = String(req.body?.baseUrl ?? '').trim();
+    const apiKey = String(req.body?.apiKey ?? '').trim();
+    if (!baseUrl) return res.status(400).json({ detail: 'baseUrl required' });
+
+    const clean = baseUrl.replace(/\/+$/, '');
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+    const tryFetch = async (path: string): Promise<Array<{ id: string; name?: string }>> => {
+      try {
+        const r = await fetch(`${clean}${path}`, { method: 'GET', headers, signal: AbortSignal.timeout(10_000) });
+        if (!r.ok) return [];
+        const data: any = await r.json().catch(() => ({}));
+        return parseModels(data);
+      } catch {
+        return [];
+      }
+    };
+
+    // 先 {base}/models,无果再 {base}/v1/models(覆盖 baseUrl 未含 /v1 的情况)。
+    let models = await tryFetch('/models');
+    if (!models.length) models = await tryFetch('/v1/models');
+
+    // 去重 + 按 id 排序。
+    const seen = new Set<string>();
+    const deduped = models.filter((m) => (seen.has(m.id) ? false : (seen.add(m.id), true)));
+    deduped.sort((a, b) => a.id.localeCompare(b.id));
+    res.json({ models: deduped });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'fetch models failed' });
+  }
+});
+
 export default router;

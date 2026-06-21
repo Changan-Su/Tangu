@@ -64,6 +64,9 @@ export const MessageInput: React.FC<{
    *  workspaceFiles:云沙箱拖入消息区的文件,发送时上传到会话工作区。 */
   onSend: (text: string, attachments: Attachment[], workspaceFiles?: Attachment[]) => Promise<boolean>
   onStop: () => void
+  /** 划线引用:聊天区选中的待引用文本(发送时以 markdown 引用 `> ` 拼到消息前)。 */
+  quotedText?: string
+  onClearQuote?: () => void
   /** 上下文占比 + 会话消耗 + 压缩(输入框下方进度行)。 */
   contextWindow?: number
   ctxTokens?: number
@@ -76,6 +79,7 @@ export const MessageInput: React.FC<{
   planMode, onPlanModeChange, skills, enabledSkillIds, onToggleSkill,
   agents, activeAgentSlug, onSelectAgent, onNewSession, onOpenSettings,
   onExecConfigChange, onSend, onStop,
+  quotedText, onClearQuote,
   contextWindow, ctxTokens, sessionTokens, onCompact,
 }) => {
   const { t } = useI18n()
@@ -214,16 +218,20 @@ export const MessageInput: React.FC<{
       return
     }
     if (disabled || running) return
-    if (text.length > MAX_INPUT_CHARS) {
-      setHint(t('input.tooLong', { len: text.length.toLocaleString(), max: MAX_INPUT_CHARS.toLocaleString() }))
+    // 划线引用:逐行加 `> ` 前缀拼成 markdown 引用块,置于消息正文之前。
+    const quoted = quotedText ? `${quotedText.split('\n').map((l) => `> ${l}`).join('\n')}\n\n` : ''
+    const outgoing = quoted + text
+    if (outgoing.length > MAX_INPUT_CHARS) {
+      setHint(t('input.tooLong', { len: outgoing.length.toLocaleString(), max: MAX_INPUT_CHARS.toLocaleString() }))
       return
     }
     setHint(null)
-    void onSend(text, attachments, wsFiles).then((accepted) => {
+    void onSend(outgoing, attachments, wsFiles).then((accepted) => {
       if (!accepted) return // 失败保留草稿
       setDraft('')
       setAttachments([])
       setWsFiles([])
+      onClearQuote?.()
       requestAnimationFrame(autoGrow)
     })
   }
@@ -333,6 +341,32 @@ export const MessageInput: React.FC<{
           {hint && (
             <div style={{ fontSize: 12, color: 'var(--danger, #c0392b)', marginBottom: 6 }}>
               {hint}
+            </div>
+          )}
+          {quotedText && (
+            <div
+              className="quote-card"
+              style={{
+                display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 8,
+                padding: '6px 10px', background: 'var(--bg-hover, rgba(127,127,127,0.10))',
+                borderLeft: '3px solid var(--accent)', borderRadius: 'var(--radius-sm)',
+              }}
+            >
+              <span
+                style={{
+                  flex: 1, minWidth: 0, fontSize: 12.5, color: 'var(--text-muted)', whiteSpace: 'pre-wrap',
+                  overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical',
+                }}
+              >
+                {quotedText.length > 280 ? `${quotedText.slice(0, 280)}…` : quotedText}
+              </span>
+              <button
+                title={t('input.remove')}
+                onClick={() => onClearQuote?.()}
+                style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', padding: 2, lineHeight: 0 }}
+              >
+                <X size={12} />
+              </button>
             </div>
           )}
           {attachments.length > 0 && (

@@ -16,6 +16,7 @@ export function hostEnvSection(cwd?: string): string {
     '## 本地执行环境（重要）\n' +
     `你运行在**用户本机**，当前工作目录是 \`${cwd || process.cwd()}\`。\n` +
     '- 用 `run_bash` 执行 shell 命令；`list_dir`/`read_file` 查看；`edit_file` 做精确局部修改、`write_file` 写新文件——全部作用于真实文件系统（相对路径相对当前工作目录解析）。\n' +
+    '- 查实时网页信息优先用 `browser_search`；需要打开网页、点击、输入或截图时使用 `browser_navigate` / `browser_snapshot` / `browser_click` / `browser_type` / `browser_screenshot`。\n' +
     '- 优先用 `edit_file`（唯一匹配的 old_string→new_string）做小改，不要整文件重写。\n' +
     '- 破坏性操作（写文件 / 跑命令）可能需要用户审批；被拒绝时换方案或询问用户，不要反复重试同一操作。'
   );

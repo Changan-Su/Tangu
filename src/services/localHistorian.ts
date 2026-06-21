@@ -19,8 +19,46 @@ import { loadSpecialAgentsConfig, DEFAULT_HISTORIAN_PROMPT } from './specialAgen
 const MAX_TRANSCRIPT_CHARS = 8000;
 const CHARGE_USER = false;
 
-const TITLE_PROMPT =
-  '用一个不超过 16 字的简洁中文短语概括下面这段对话的主题，作为会话标题。只输出标题本身，不要标点包裹、不要前后缀。';
+/**
+ * 构造 Historian 的结构化判断 system prompt:一次调用、输出 JSON,title/log/memory 各自独立判断。
+ * customPrompt = 用户可配的「判断哲学」(留空用默认);代码强制 JSON 输出格式 + 仅含到期字段。
+ * 关键:LOG(当天流水:发生了什么)与 memory(长期稳定事实/偏好,跨会话有用、绝非流水账)是**两类不同内容**,
+ * 不得相同;memory 要克制,多数对话应为空。
+ */
+function buildJudgeSystem(customPrompt: string, wantTitle: boolean, wantMemory: boolean, curMemory: string): string {
+  const fields: string[] = [];
+  if (wantTitle) fields.push('"title": 用 ≤16 字中文短语概括本对话主题作为会话标题(总是给出)');
+  if (wantMemory) {
+    fields.push('"log": 若本段对话有「当天值得记一笔」的事件/进展/产出,写一句简短中文;否则给空字符串 ""');
+    fields.push(
+      '"memory": **整体覆盖式**——基于下面【当前长期记忆】与本段对话,输出**更新后的完整长期记忆全文**' +
+      '(可新增条目、可修订或删除已过时/被纠正的条目;保留仍然成立的旧条目)。只在确有变化时给出;无任何变化则给空字符串 ""。' +
+      '记忆是关于用户本人的长期稳定信息(身份/偏好/目标/重要事实),务必精炼、条目化,**不要把当天流水写进来**(那是 log)',
+    );
+  }
+  return [
+    (customPrompt && customPrompt.trim()) || DEFAULT_HISTORIAN_PROMPT,
+    wantMemory ? `\n【当前长期记忆】\n${curMemory.trim() || '(空)'}` : '',
+    '\n阅读下面这段对话并判断,只输出**一个 JSON 对象**,字段如下:',
+    '- ' + fields.join('\n- '),
+    '示例:{"title":"梯度可视化","log":"完成 donk_intro.docx 初稿","memory":"- 正在学习线性代数与多元微积分\\n- 偏好简洁、直接的回答"}',
+    '不需要更新的字段给空字符串。只输出 JSON,不要代码围栏、不要任何额外文字。',
+  ].filter(Boolean).join('\n');
+}
+
+/** 从模型输出里提取首个 JSON 对象(容忍代码围栏 / 前后噪声)。失败 → null。 */
+function parseJudgement(raw: string): { title?: string; log?: string; memory?: string } | null {
+  let s = String(raw || '').trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
+  const i = s.indexOf('{');
+  const j = s.lastIndexOf('}');
+  if (i >= 0 && j > i) s = s.slice(i, j + 1);
+  try {
+    const o = JSON.parse(s);
+    return o && typeof o === 'object' ? o : null;
+  } catch {
+    return null;
+  }
+}
 
 /** 纯判定:第 roundN 轮是否触发(首轮可强制 + 每 every 轮)。roundN<1 不触发。 */
 export function isRoundDue(roundN: number, every: number, firstRoundTrigger: boolean): boolean {
@@ -127,30 +165,46 @@ export async function onUserRunDone(sessionId: string, userId: string): Promise<
     const transcript = await recentTranscript(sessionId);
     if (!transcript.trim()) { log('无可用对话内容,跳过'); return; }
 
-    if (titleDue) {
-      const title = (await complete('标题', cfg.modelId, TITLE_PROMPT, transcript, userId, 40))
-        .replace(/^["'《「]+|["'》」]+$/g, '')
-        .slice(0, 60);
-      if (title && title.toUpperCase() !== 'NOTHING') {
-        await query(`UPDATE chat_sessions SET title = ? WHERE id = ?`, [title, sessionId]).catch((e: any) => log(`更新标题失败: ${e?.message || e}`));
-        await logActivity(userId, 'title_updated', title, sessionId);
-        log(`已更新标题: ${title}`);
-      }
-    }
+    // memory 是「读-改-写」:把现有记忆喂给模型,让它产出更新后的完整记忆(增量或修订)。
+    const curMem = memoryDue
+      ? String((await deps().brain.memory.getMemory(userId).catch(() => ({ content: '' })))?.content || '')
+      : '';
 
-    if (memoryDue) {
-      const out = await complete('记忆', cfg.modelId, cfg.prompt || DEFAULT_HISTORIAN_PROMPT, transcript, userId, 300);
-      const skip = !out || out.toUpperCase() === 'NOTHING' || out.length < 4 || out.length > 400;
-      log(`记忆判断: ${out ? `"${out.slice(0, 40)}"` : '(空)'} → ${skip ? '跳过' : '写入'}`);
-      if (!skip) {
-        // 同步进用户 LOG 与 memory（共享云端记忆经 brain）。任一失败不连坐另一。
-        await deps().brain.memory.appendLogEntry(userId, out).then(() => log('已写入 LOG')).catch((e: any) => log(`写 LOG 失败: ${e?.message || e}`));
-        await logActivity(userId, 'log_appended', out, sessionId);
+    // 一次结构化判断:title / log / memory 各自独立(到期才要、不需要则空)。
+    const sys = buildJudgeSystem(cfg.prompt, titleDue, memoryDue, curMem);
+    const raw = await complete('判断', cfg.modelId, sys, transcript, userId, 1200);
+    const j = parseJudgement(raw);
+    if (!j) { log(`判断输出无法解析为 JSON: "${raw.slice(0, 80)}"`); return; }
+    const title = String(j.title || '').trim().replace(/^["'《「]+|["'》」]+$/g, '').slice(0, 60);
+    const logText = String(j.log || '').trim();
+    const memoryDoc = String(j.memory || '').trim();
+    const okShort = (s: string) => !!s && s.toUpperCase() !== 'NOTHING' && s.length >= 2 && s.length <= 400;
+    log(`判断: title="${title}" log="${logText.slice(0, 30)}" memoryΔ=${memoryDoc ? `${curMem.length}→${memoryDoc.length}` : '无'}`);
+
+    if (titleDue && okShort(title)) {
+      await query(`UPDATE chat_sessions SET title = ? WHERE id = ?`, [title, sessionId]).catch((e: any) => log(`更新标题失败: ${e?.message || e}`));
+      await logActivity(userId, 'title_updated', title, sessionId);
+      log(`已更新标题: ${title}`);
+    }
+    if (memoryDue && okShort(logText)) {
+      // LOG = 当天流水(append-only)。共享 LOG 经 brain(云端)。
+      await deps().brain.memory.appendLogEntry(userId, logText).then(() => log('已写入 LOG')).catch((e: any) => log(`写 LOG 失败: ${e?.message || e}`));
+      await logActivity(userId, 'log_appended', logText, sessionId);
+    }
+    if (memoryDue && memoryDoc && memoryDoc.toUpperCase() !== 'NOTHING' && memoryDoc !== curMem.trim()) {
+      // memory = 整体覆盖(读-改-写)。防异常缩水:旧记忆较多而新内容骤降 → 疑似截断,弃用。
+      const suspiciousShrink = curMem.trim().length > 200 && memoryDoc.length < curMem.trim().length * 0.4;
+      const setMem = deps().brain.memory.setMemory;
+      if (suspiciousShrink) {
+        log(`记忆疑似异常缩水(${curMem.trim().length}→${memoryDoc.length}),跳过覆盖`);
+      } else if (setMem) {
         try {
-          await deps().brain.memory.appendMemoryEntry(userId, out, { dedup: true });
-          await logActivity(userId, 'memory_appended', out, sessionId);
-          log('已写入 memory');
-        } catch (e: any) { log(`写 memory 失败: ${e?.message || e}`); }
+          await setMem(userId, memoryDoc.slice(0, 20000));
+          await logActivity(userId, 'memory_updated', memoryDoc.slice(0, 300), sessionId);
+          log('已更新 memory(整体覆盖)');
+        } catch (e: any) { log(`写 memory 失败(服务端可能未部署 PUT /brain/memory): ${e?.message || e}`); }
+      } else {
+        log('当前 brain 不支持 setMemory,跳过记忆覆盖(需更新服务端)');
       }
     }
   } catch (e: any) {

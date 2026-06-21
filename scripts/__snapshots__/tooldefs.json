@@ -2500,6 +2500,209 @@
     {
       "type": "function",
       "function": {
+        "name": "browser_search",
+        "description": "使用本地轻量浏览器打开搜索引擎并返回页面快照。优先用于实时网页搜索；结果里的 @eN 可继续用 browser_click/browser_type 交互。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "搜索关键词"
+            },
+            "engine": {
+              "type": "string",
+              "enum": [
+                "duckduckgo",
+                "bing",
+                "google",
+                "baidu"
+              ],
+              "description": "可选搜索引擎，默认设置值"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_navigate",
+        "description": "在本地轻量浏览器中打开一个公网 http/https URL，并返回标题、最终 URL 与 compact snapshot。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "完整 URL"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_snapshot",
+        "description": "读取当前浏览器页的可访问性树快照。compact=true 返回更短的交互元素视图。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "compact": {
+              "type": "boolean",
+              "description": "默认 true"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_click",
+        "description": "点击 snapshot 中的元素 ref，例如 @e5。点击后通常调用 browser_snapshot 刷新页面状态。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "ref": {
+              "type": "string",
+              "description": "元素 ref，如 @e5"
+            }
+          },
+          "required": [
+            "ref"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_type",
+        "description": "向 snapshot 中的输入元素 ref 填入文本；会清空原值后输入。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "ref": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ref",
+            "text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_scroll",
+        "description": "滚动当前页面。direction 为 up 或 down，pixels 默认 500。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "direction": {
+              "type": "string",
+              "enum": [
+                "up",
+                "down"
+              ]
+            },
+            "pixels": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "direction"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_back",
+        "description": "浏览器后退到上一页。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_press",
+        "description": "在当前页面按键，例如 Enter、Tab、Escape。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_console",
+        "description": "读取 console/errors，或提供 expression 时在页面上下文执行 JS 表达式。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "可选 JS 表达式；省略则读取 console/errors"
+            },
+            "clear": {
+              "type": "boolean",
+              "description": "读取后清空缓冲区"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_screenshot",
+        "description": "保存当前页面截图到 ~/.tangu/browser/screenshots，并返回 screenshot_path。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "full_page": {
+              "type": "boolean",
+              "description": "默认 true"
+            },
+            "annotate": {
+              "type": "boolean",
+              "description": "为交互元素叠加编号"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "todo_write",
         "description": "维护本会话的任务清单(整单替换)。规划多步任务时先写清单;每完成一步就更新状态再继续。status ∈ pending | in_progress | completed;同一时刻至多一项 in_progress。",
         "parameters": {
@@ -2743,6 +2946,44 @@
           },
           "required": [
             "action"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "wechat_send_file",
+        "description": "把工作区里的一个文件以「文件」形式发送给当前微信会话连接的微信用户。仅在「微信远程」会话(已扫码连接微信)里有效;在普通会话调用会报「未连接微信」。path 相对工作目录或绝对路径;任意类型(文档/压缩包/音频等),上限 50MB。图片想内联显示请改用 wechat_send_image。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "要发送的文件路径(相对工作目录或绝对路径)"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "wechat_send_image",
+        "description": "把工作区里的一张图片以「图片」气泡形式内联发送给当前微信会话连接的微信用户。仅在「微信远程」会话里有效。path 相对工作目录或绝对路径;适合截图/图表/生成的图片(png/jpg/gif 等),上限 50MB。非图片或想保留原文件名请用 wechat_send_file。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "要发送的图片路径(png/jpg/gif 等)"
+            }
+          },
+          "required": [
+            "path"
           ]
         }
       }
@@ -3129,6 +3370,209 @@
     {
       "type": "function",
       "function": {
+        "name": "browser_search",
+        "description": "使用本地轻量浏览器打开搜索引擎并返回页面快照。优先用于实时网页搜索；结果里的 @eN 可继续用 browser_click/browser_type 交互。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "搜索关键词"
+            },
+            "engine": {
+              "type": "string",
+              "enum": [
+                "duckduckgo",
+                "bing",
+                "google",
+                "baidu"
+              ],
+              "description": "可选搜索引擎，默认设置值"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_navigate",
+        "description": "在本地轻量浏览器中打开一个公网 http/https URL，并返回标题、最终 URL 与 compact snapshot。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "完整 URL"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_snapshot",
+        "description": "读取当前浏览器页的可访问性树快照。compact=true 返回更短的交互元素视图。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "compact": {
+              "type": "boolean",
+              "description": "默认 true"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_click",
+        "description": "点击 snapshot 中的元素 ref，例如 @e5。点击后通常调用 browser_snapshot 刷新页面状态。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "ref": {
+              "type": "string",
+              "description": "元素 ref，如 @e5"
+            }
+          },
+          "required": [
+            "ref"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_type",
+        "description": "向 snapshot 中的输入元素 ref 填入文本；会清空原值后输入。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "ref": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ref",
+            "text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_scroll",
+        "description": "滚动当前页面。direction 为 up 或 down，pixels 默认 500。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "direction": {
+              "type": "string",
+              "enum": [
+                "up",
+                "down"
+              ]
+            },
+            "pixels": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "direction"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_back",
+        "description": "浏览器后退到上一页。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_press",
+        "description": "在当前页面按键，例如 Enter、Tab、Escape。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_console",
+        "description": "读取 console/errors，或提供 expression 时在页面上下文执行 JS 表达式。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "可选 JS 表达式；省略则读取 console/errors"
+            },
+            "clear": {
+              "type": "boolean",
+              "description": "读取后清空缓冲区"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_screenshot",
+        "description": "保存当前页面截图到 ~/.tangu/browser/screenshots，并返回 screenshot_path。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "full_page": {
+              "type": "boolean",
+              "description": "默认 true"
+            },
+            "annotate": {
+              "type": "boolean",
+              "description": "为交互元素叠加编号"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "todo_write",
         "description": "维护本会话的任务清单(整单替换)。规划多步任务时先写清单;每完成一步就更新状态再继续。status ∈ pending | in_progress | completed;同一时刻至多一项 in_progress。",
         "parameters": {
@@ -3372,6 +3816,44 @@
           },
           "required": [
             "action"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "wechat_send_file",
+        "description": "把工作区里的一个文件以「文件」形式发送给当前微信会话连接的微信用户。仅在「微信远程」会话(已扫码连接微信)里有效;在普通会话调用会报「未连接微信」。path 相对工作目录或绝对路径;任意类型(文档/压缩包/音频等),上限 50MB。图片想内联显示请改用 wechat_send_image。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "要发送的文件路径(相对工作目录或绝对路径)"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "wechat_send_image",
+        "description": "把工作区里的一张图片以「图片」气泡形式内联发送给当前微信会话连接的微信用户。仅在「微信远程」会话里有效。path 相对工作目录或绝对路径;适合截图/图表/生成的图片(png/jpg/gif 等),上限 50MB。非图片或想保留原文件名请用 wechat_send_file。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "要发送的图片路径(png/jpg/gif 等)"
+            }
+          },
+          "required": [
+            "path"
           ]
         }
       }
@@ -4458,6 +4940,209 @@
     {
       "type": "function",
       "function": {
+        "name": "browser_search",
+        "description": "使用本地轻量浏览器打开搜索引擎并返回页面快照。优先用于实时网页搜索；结果里的 @eN 可继续用 browser_click/browser_type 交互。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "搜索关键词"
+            },
+            "engine": {
+              "type": "string",
+              "enum": [
+                "duckduckgo",
+                "bing",
+                "google",
+                "baidu"
+              ],
+              "description": "可选搜索引擎，默认设置值"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_navigate",
+        "description": "在本地轻量浏览器中打开一个公网 http/https URL，并返回标题、最终 URL 与 compact snapshot。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "完整 URL"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_snapshot",
+        "description": "读取当前浏览器页的可访问性树快照。compact=true 返回更短的交互元素视图。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "compact": {
+              "type": "boolean",
+              "description": "默认 true"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_click",
+        "description": "点击 snapshot 中的元素 ref，例如 @e5。点击后通常调用 browser_snapshot 刷新页面状态。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "ref": {
+              "type": "string",
+              "description": "元素 ref，如 @e5"
+            }
+          },
+          "required": [
+            "ref"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_type",
+        "description": "向 snapshot 中的输入元素 ref 填入文本；会清空原值后输入。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "ref": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ref",
+            "text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_scroll",
+        "description": "滚动当前页面。direction 为 up 或 down，pixels 默认 500。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "direction": {
+              "type": "string",
+              "enum": [
+                "up",
+                "down"
+              ]
+            },
+            "pixels": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "direction"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_back",
+        "description": "浏览器后退到上一页。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_press",
+        "description": "在当前页面按键，例如 Enter、Tab、Escape。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_console",
+        "description": "读取 console/errors，或提供 expression 时在页面上下文执行 JS 表达式。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "可选 JS 表达式；省略则读取 console/errors"
+            },
+            "clear": {
+              "type": "boolean",
+              "description": "读取后清空缓冲区"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_screenshot",
+        "description": "保存当前页面截图到 ~/.tangu/browser/screenshots，并返回 screenshot_path。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "full_page": {
+              "type": "boolean",
+              "description": "默认 true"
+            },
+            "annotate": {
+              "type": "boolean",
+              "description": "为交互元素叠加编号"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "todo_write",
         "description": "维护本会话的任务清单(整单替换)。规划多步任务时先写清单;每完成一步就更新状态再继续。status ∈ pending | in_progress | completed;同一时刻至多一项 in_progress。",
         "parameters": {
@@ -4701,6 +5386,44 @@
           },
           "required": [
             "action"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "wechat_send_file",
+        "description": "把工作区里的一个文件以「文件」形式发送给当前微信会话连接的微信用户。仅在「微信远程」会话(已扫码连接微信)里有效;在普通会话调用会报「未连接微信」。path 相对工作目录或绝对路径;任意类型(文档/压缩包/音频等),上限 50MB。图片想内联显示请改用 wechat_send_image。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "要发送的文件路径(相对工作目录或绝对路径)"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "wechat_send_image",
+        "description": "把工作区里的一张图片以「图片」气泡形式内联发送给当前微信会话连接的微信用户。仅在「微信远程」会话里有效。path 相对工作目录或绝对路径;适合截图/图表/生成的图片(png/jpg/gif 等),上限 50MB。非图片或想保留原文件名请用 wechat_send_file。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "要发送的图片路径(png/jpg/gif 等)"
+            }
+          },
+          "required": [
+            "path"
           ]
         }
       }
@@ -5087,6 +5810,209 @@
     {
       "type": "function",
       "function": {
+        "name": "browser_search",
+        "description": "使用本地轻量浏览器打开搜索引擎并返回页面快照。优先用于实时网页搜索；结果里的 @eN 可继续用 browser_click/browser_type 交互。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "搜索关键词"
+            },
+            "engine": {
+              "type": "string",
+              "enum": [
+                "duckduckgo",
+                "bing",
+                "google",
+                "baidu"
+              ],
+              "description": "可选搜索引擎，默认设置值"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_navigate",
+        "description": "在本地轻量浏览器中打开一个公网 http/https URL，并返回标题、最终 URL 与 compact snapshot。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "完整 URL"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_snapshot",
+        "description": "读取当前浏览器页的可访问性树快照。compact=true 返回更短的交互元素视图。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "compact": {
+              "type": "boolean",
+              "description": "默认 true"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_click",
+        "description": "点击 snapshot 中的元素 ref，例如 @e5。点击后通常调用 browser_snapshot 刷新页面状态。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "ref": {
+              "type": "string",
+              "description": "元素 ref，如 @e5"
+            }
+          },
+          "required": [
+            "ref"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_type",
+        "description": "向 snapshot 中的输入元素 ref 填入文本；会清空原值后输入。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "ref": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "ref",
+            "text"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_scroll",
+        "description": "滚动当前页面。direction 为 up 或 down，pixels 默认 500。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "direction": {
+              "type": "string",
+              "enum": [
+                "up",
+                "down"
+              ]
+            },
+            "pixels": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "direction"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_back",
+        "description": "浏览器后退到上一页。",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_press",
+        "description": "在当前页面按键，例如 Enter、Tab、Escape。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_console",
+        "description": "读取 console/errors，或提供 expression 时在页面上下文执行 JS 表达式。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "可选 JS 表达式；省略则读取 console/errors"
+            },
+            "clear": {
+              "type": "boolean",
+              "description": "读取后清空缓冲区"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "browser_screenshot",
+        "description": "保存当前页面截图到 ~/.tangu/browser/screenshots，并返回 screenshot_path。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "full_page": {
+              "type": "boolean",
+              "description": "默认 true"
+            },
+            "annotate": {
+              "type": "boolean",
+              "description": "为交互元素叠加编号"
+            }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "todo_write",
         "description": "维护本会话的任务清单(整单替换)。规划多步任务时先写清单;每完成一步就更新状态再继续。status ∈ pending | in_progress | completed;同一时刻至多一项 in_progress。",
         "parameters": {
@@ -5330,6 +6256,44 @@
           },
           "required": [
             "action"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "wechat_send_file",
+        "description": "把工作区里的一个文件以「文件」形式发送给当前微信会话连接的微信用户。仅在「微信远程」会话(已扫码连接微信)里有效;在普通会话调用会报「未连接微信」。path 相对工作目录或绝对路径;任意类型(文档/压缩包/音频等),上限 50MB。图片想内联显示请改用 wechat_send_image。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "要发送的文件路径(相对工作目录或绝对路径)"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "wechat_send_image",
+        "description": "把工作区里的一张图片以「图片」气泡形式内联发送给当前微信会话连接的微信用户。仅在「微信远程」会话里有效。path 相对工作目录或绝对路径;适合截图/图表/生成的图片(png/jpg/gif 等),上限 50MB。非图片或想保留原文件名请用 wechat_send_file。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "要发送的图片路径(png/jpg/gif 等)"
+            }
+          },
+          "required": [
+            "path"
           ]
         }
       }

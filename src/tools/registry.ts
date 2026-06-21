@@ -16,16 +16,77 @@ import { sandboxPythonProvider } from './builtin/sandboxPython.js';
 import { hostExecProvider } from './hostExec.js';
 import { fileSearchProvider } from './builtin/fileSearch.js';
 import { webFetchProvider } from './builtin/webFetch.js';
+import { browserToolsProvider } from './builtin/browserTools.js';
 import { todoProvider } from './builtin/todo.js';
 import { hostProcessProvider } from './builtin/hostProcess.js';
 import { delegateProvider } from './builtin/delegate.js';
 import { interactionProvider } from './builtin/interaction.js';
 import { manageAgentProvider } from './builtin/manageAgent.js';
 import { museTodoProvider } from './builtin/museTodo.js';
-import type { ToolContext, ToolResult, ToolImpl } from './toolTypes.js';
+import { wechatToolsProvider } from './builtin/wechatTools.js';
+import type { ToolContext, ToolResult, ToolImpl, ToolCapabilities } from './toolTypes.js';
 
 // 类型 re-export:保持既有 `from './registry.js'` 的 import 路径不变。
 export type { ToolContext, ToolResult, ToolImpl } from './toolTypes.js';
+
+const DEFAULT_TOOL_CAPABILITIES: Record<string, ToolCapabilities> = {
+  get_datetime: { sideEffect: 'none', parallel: true, defaultTimeoutMs: 5_000 },
+  calculator: { sideEffect: 'none', parallel: true, defaultTimeoutMs: 5_000 },
+  web_search: { sideEffect: 'network', parallel: true, defaultTimeoutMs: 30_000 },
+  web_fetch: { sideEffect: 'network', parallel: true, defaultTimeoutMs: 25_000 },
+  browser_search: { sideEffect: 'browser', parallel: false, concurrencyKey: 'browser', defaultTimeoutMs: 60_000 },
+  browser_navigate: { sideEffect: 'browser', parallel: false, concurrencyKey: 'browser', defaultTimeoutMs: 60_000 },
+  browser_snapshot: { sideEffect: 'browser', parallel: false, concurrencyKey: 'browser', defaultTimeoutMs: 30_000 },
+  browser_click: { sideEffect: 'browser', parallel: false, concurrencyKey: 'browser', defaultTimeoutMs: 30_000 },
+  browser_type: { sideEffect: 'browser', parallel: false, concurrencyKey: 'browser', defaultTimeoutMs: 30_000 },
+  browser_scroll: { sideEffect: 'browser', parallel: false, concurrencyKey: 'browser', defaultTimeoutMs: 30_000 },
+  browser_back: { sideEffect: 'browser', parallel: false, concurrencyKey: 'browser', defaultTimeoutMs: 30_000 },
+  browser_press: { sideEffect: 'browser', parallel: false, concurrencyKey: 'browser', defaultTimeoutMs: 30_000 },
+  browser_console: { sideEffect: 'browser', parallel: false, concurrencyKey: 'browser', defaultTimeoutMs: 30_000 },
+  browser_screenshot: { sideEffect: 'browser', parallel: false, concurrencyKey: 'browser', defaultTimeoutMs: 30_000 },
+  search_files: { sideEffect: 'read', parallel: true, defaultTimeoutMs: 30_000 },
+  glob_files: { sideEffect: 'read', parallel: true, defaultTimeoutMs: 20_000 },
+  list_files: { sideEffect: 'read', parallel: true, defaultTimeoutMs: 15_000 },
+  read_file: { sideEffect: 'read', parallel: true, defaultTimeoutMs: 20_000 },
+  list_dir: { sideEffect: 'read', parallel: true, defaultTimeoutMs: 15_000 },
+  view_image: { sideEffect: 'read', parallel: true, defaultTimeoutMs: 20_000 },
+  read_log: { sideEffect: 'read', parallel: true, defaultTimeoutMs: 15_000 },
+  list_processes: { sideEffect: 'read', parallel: true, defaultTimeoutMs: 10_000 },
+  read_process_output: { sideEffect: 'read', parallel: true, defaultTimeoutMs: 10_000 },
+  todo_read: { sideEffect: 'read', parallel: true, defaultTimeoutMs: 10_000 },
+};
+
+const SERIAL_TOOL_CAPABILITIES: ToolCapabilities = {
+  sideEffect: 'unknown',
+  parallel: false,
+};
+
+function mergeCapabilities(name: string, impl?: ToolImpl): ToolCapabilities {
+  const defaults = DEFAULT_TOOL_CAPABILITIES[name] || SERIAL_TOOL_CAPABILITIES;
+  return { ...defaults, ...(impl?.capabilities || {}) };
+}
+
+export function getToolCapabilities(name: string, ctx: ToolContext): ToolCapabilities {
+  const impl = resolveTools(currentProfile(ctx), ctx).get(name);
+  if (impl) return mergeCapabilities(name, impl);
+  // custom/MCP 工具副作用不可知，默认不并发。
+  return { ...SERIAL_TOOL_CAPABILITIES };
+}
+
+function withTimeoutSignal(ctx: ToolContext, timeoutMs?: number): { scopedCtx: ToolContext; cleanup: () => void } {
+  if (!timeoutMs || timeoutMs <= 0) return { scopedCtx: ctx, cleanup: () => {} };
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  const onAbort = (): void => ac.abort();
+  ctx.signal?.addEventListener('abort', onAbort, { once: true });
+  return {
+    scopedCtx: { ...ctx, signal: ac.signal },
+    cleanup: () => {
+      clearTimeout(timer);
+      ctx.signal?.removeEventListener('abort', onAbort);
+    },
+  };
+}
 
 // ── 内置 provider 注册。顺序 = 原 TOOLS 字面量字段顺序(get_datetime → remember/log_event/read_log
 //    → calculator → web_search → list_files/read_file/write_file → use_skill → pip_install/run_python),
@@ -44,12 +105,14 @@ registerToolProvider(hostExecProvider);
 //    旧会话的 prompt 前缀缓存只在部署边界失效一次)。后续新增 provider 继续往这里追加。──
 registerToolProvider(fileSearchProvider);
 registerToolProvider(webFetchProvider);
+registerToolProvider(browserToolsProvider);
 registerToolProvider(todoProvider);
 registerToolProvider(hostProcessProvider);
 registerToolProvider(delegateProvider);
 registerToolProvider(interactionProvider);
 registerToolProvider(manageAgentProvider); // host-only:本地 Normal Agent 自创建(append 末尾,保前缀缓存)
 registerToolProvider(museTodoProvider); // Muse 唯一写权限;仅 ctx.muse 可见(普通 run 不暴露,快照不变)
+registerToolProvider(wechatToolsProvider); // host-only:微信远程会话里发文件/图片(append 末尾,保前缀缓存)
 
 /** ctx 自带 profile(loop 按 run.app_id 解析)优先;缺省回退本进程装配的 profile。 */
 function currentProfile(ctx: ToolContext) {
@@ -96,11 +159,18 @@ export async function executeTool(call: ToolCall, ctx: ToolContext): Promise<Too
 
   const impl: ToolDef | undefined = resolveTools(currentProfile(ctx), ctx).get(name);
   if (impl) {
+    const caps = mergeCapabilities(name, impl);
+    const { scopedCtx, cleanup } = withTimeoutSignal(ctx, caps.defaultTimeoutMs);
     try {
-      const result = await impl.execute(args, ctx);
+      const result = await impl.execute(args, scopedCtx);
       return { toolCallId: call.id, name, result: String(result), isError: false };
     } catch (e: any) {
+      if (scopedCtx.signal?.aborted && !ctx.signal?.aborted) {
+        return { toolCallId: call.id, name, result: `Error: tool timed out after ${caps.defaultTimeoutMs}ms`, isError: true };
+      }
       return { toolCallId: call.id, name, result: `Error: ${e?.message || e}`, isError: true };
+    } finally {
+      cleanup();
     }
   }
 

@@ -150,6 +150,15 @@ interface TanguStoredConfig {
   sandbox: 'auto' | 'docker' | 'none'
   /** 「Tangu 默认工作区」本地目录(空=按 ~/Tangu 兜底);新建本机会话默认 cwd。 */
   defaultWorkspaceDir: string
+  browserEnabled: boolean
+  browserEngine: 'auto' | 'chrome' | 'lightpanda'
+  browserSearchEngine: 'duckduckgo' | 'bing' | 'google' | 'baidu'
+  browserAllowPrivateUrls: boolean
+  browserCommandTimeoutMs: number
+  wechatEnabled: boolean
+  wechatDefaultSessionId: string
+  wechatRemoteApprovalMode: 'readonly' | 'auto-edit' | 'full-auto'
+  wechatAllowedPeers: string[]
 }
 
 /**
@@ -169,6 +178,15 @@ const DEFAULT_CONFIG: TanguStoredConfig = {
   cloudToken: '',
   sandbox: 'auto',
   defaultWorkspaceDir: '',
+  browserEnabled: true,
+  browserEngine: 'auto',
+  browserSearchEngine: 'duckduckgo',
+  browserAllowPrivateUrls: false,
+  browserCommandTimeoutMs: 30000,
+  wechatEnabled: true,
+  wechatDefaultSessionId: '',
+  wechatRemoteApprovalMode: 'readonly',
+  wechatAllowedPeers: [],
 }
 
 /** 默认工作区目录(配置未填时兜底 ~/Tangu);best-effort 创建,失败不阻断。 */
@@ -236,6 +254,14 @@ function ensureBackend(): Promise<void> {
       cloudToken: stored.cloudToken,
       modelId: stored.modelId || undefined,
       sandbox: stored.sandbox,
+      browserEnabled: stored.browserEnabled,
+      browserEngine: stored.browserEngine,
+      browserSearchEngine: stored.browserSearchEngine,
+      browserAllowPrivateUrls: stored.browserAllowPrivateUrls,
+      browserCommandTimeoutMs: stored.browserCommandTimeoutMs,
+      wechatEnabled: stored.wechatEnabled,
+      wechatRemoteApprovalMode: stored.wechatRemoteApprovalMode,
+      defaultWorkspaceDir: await ensureDefaultWorkspaceDir(stored),
     })
   }).catch((e) => {
     console.error('[tangu-desktop] ensureBackend failed:', e)
@@ -288,7 +314,11 @@ app.whenReady().then(async () => {
     const before = await loadConfig()
     const merged = await saveConfig(patch)
     // 模式/托管参数变化 → 重启托管后端(切到 external 则停掉)。
-    const managedKeys: Array<keyof TanguStoredConfig> = ['mode', 'cloudUrl', 'cloudToken', 'sandbox']
+    const managedKeys: Array<keyof TanguStoredConfig> = [
+      'mode', 'cloudUrl', 'cloudToken', 'sandbox',
+      'browserEnabled', 'browserEngine', 'browserSearchEngine', 'browserAllowPrivateUrls', 'browserCommandTimeoutMs',
+      'wechatEnabled', 'wechatRemoteApprovalMode',
+    ]
     if (managedKeys.some((k) => patch[k] !== undefined && patch[k] !== before[k])) {
       void ensureBackend()
     }

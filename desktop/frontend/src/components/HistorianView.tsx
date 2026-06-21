@@ -11,6 +11,7 @@ const ACTION_KEY: Record<string, string> = {
   title_updated: 'special.action.title_updated',
   log_appended: 'special.action.log_appended',
   memory_appended: 'special.action.memory_appended',
+  memory_updated: 'special.action.memory_updated',
 }
 
 export const HistorianView: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg }) => {
