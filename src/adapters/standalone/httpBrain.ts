@@ -11,6 +11,9 @@ import type {
 } from '../../seams/cloudBrain.js';
 import { LlmError } from '../../core/types.js';
 import { streamIdleGuard, mapStreamAbort } from '../../llm/streamIdle.js';
+import { parseAgentConfig } from '../../agents/agentRegistry.js';
+import { currentAgentSlug } from '../../seams/runContext.js';
+import { DEFAULT_AGENT_SLUG } from '../../core/tanguHome.js';
 
 export interface HttpBrainConfig {
   cloudUrl: string; // 形如 https://host(无尾斜杠)
@@ -34,6 +37,8 @@ export function createHttpBrain(cfg: HttpBrainConfig): CloudBrainServices {
   const reqSignal = (s?: AbortSignal): AbortSignal => s ?? AbortSignal.timeout(REQ_TIMEOUT_MS);
   const toB64 = (c: Buffer | string): string =>
     (Buffer.isBuffer(c) ? c : Buffer.from(String(c), 'utf-8')).toString('base64');
+  // 运行中 agent 的记忆作用域 slug(非默认才带;无 run 上下文 → ''=全局)。
+  const scopedSlug = (): string => { const s = currentAgentSlug(); return s && s !== DEFAULT_AGENT_SLUG ? s : ''; };
 
   async function postJson<T>(path: string, body: any, signal?: AbortSignal): Promise<T> {
     const r = await fetch(`${base}${path}`, {
@@ -163,16 +168,27 @@ export function createHttpBrain(cfg: HttpBrainConfig): CloudBrainServices {
     users: {
       getUserById: async (_id: string) => getJson<any>('/api/brain/users/me'),
     },
+    // 记忆/日志按运行中 agent slug 作用域(B):非默认 agent 带 slug → server 路由到 per-agent 行;
+    // 默认 xyra / 无 run 上下文 → 不带 slug → 旧全局(AI Studio 网页行为不变)。
     memory: {
-      getMemory: async (_userId: string) => getJson<{ content: string; updatedAt: any }>('/api/brain/memory'),
+      getMemory: async (_userId: string) => {
+        const s = scopedSlug();
+        return getJson<{ content: string; updatedAt: any }>(`/api/brain/memory${s ? `?slug=${encodeURIComponent(s)}` : ''}`);
+      },
       appendMemoryEntry: async (_userId: string, text: string, opts) =>
-        postJson('/api/brain/memory', { text, dedup: opts?.dedup, cap: opts?.cap }),
+        postJson('/api/brain/memory', { text, dedup: opts?.dedup, cap: opts?.cap, slug: scopedSlug() || undefined }),
       setMemory: async (_userId: string, content: string) =>
-        putJson<{ content: string; updatedAt: any }>('/api/brain/memory', { content }),
+        putJson<{ content: string; updatedAt: any }>('/api/brain/memory', { content, slug: scopedSlug() || undefined }),
       appendLogEntry: async (_userId: string, text: string, opts) =>
-        postJson('/api/brain/log', { text, date: opts?.date, time: opts?.time }),
-      getLog: async (_userId: string, date?: string) =>
-        getJson(`/api/brain/log${date ? `?date=${encodeURIComponent(date)}` : ''}`),
+        postJson('/api/brain/log', { text, date: opts?.date, time: opts?.time, slug: scopedSlug() || undefined }),
+      getLog: async (_userId: string, date?: string) => {
+        const q = new URLSearchParams();
+        if (date) q.set('date', date);
+        const s = scopedSlug();
+        if (s) q.set('slug', s);
+        const qs = q.toString();
+        return getJson(`/api/brain/log${qs ? `?${qs}` : ''}`);
+      },
     },
     assets: {
       getSkill: async (id: string) => getJson<any>(`/api/brain/skills/${encodeURIComponent(id)}`),
@@ -255,6 +271,31 @@ export function createHttpBrain(cfg: HttpBrainConfig): CloudBrainServices {
       uploadFile: async (_userId, appId, parentId, name, content, mimeType, autoRename) =>
         postJson<any>('/api/brain/storage/upload', { parentId, appId, name, contentBase64: toB64(content), mimeType, autoRename: !!autoRename }),
       deleteItem: async (...args: any[]) => postJson<any>('/api/brain/storage/delete', { fileId: args[0] }),
+    },
+    // Tangu 每-agent 云文件镜像(Phase 2):跨设备同步 + 云端运行水合。userId 由 token 隐含(忽略入参)。
+    agentFiles: {
+      getManifest: async (_userId: string) => {
+        const r = await getJson<{ agents: any[] }>('/api/brain/agents/manifest');
+        return r?.agents ?? [];
+      },
+      getFile: async (_userId: string, slug: string, relPath: string) => {
+        const r = await postJson<any>('/api/brain/agents/file/get', { slug, relPath });
+        return !r || r.notFound ? null : r;
+      },
+      putFile: async (_userId: string, slug: string, relPath: string, body: any) =>
+        postJson('/api/brain/agents/file/put', { slug, relPath, ...body }),
+      deleteFile: async (_userId: string, slug: string, relPath: string, mtimeMs: number, deviceId?: string) => {
+        await postJson('/api/brain/agents/file/delete', { slug, relPath, mtimeMs, deviceId });
+      },
+    },
+    // 云端运行水合(B):worker 本地 FS 无 agents → 从云读 config.toml+SOUL.md 组装人格。软失败 → null。
+    agents: {
+      getAgent: async (_userId: string, slug: string) => {
+        const cfg = await postJson<any>('/api/brain/agents/file/get', { slug, relPath: 'config.toml' }).catch(() => null);
+        if (!cfg || cfg.notFound || cfg.deleted || !cfg.content) return null;
+        const soul = await postJson<any>('/api/brain/agents/file/get', { slug, relPath: 'SOUL.md' }).catch(() => null);
+        return parseAgentConfig(slug, cfg.content, soul && !soul.notFound && !soul.deleted ? (soul.content || '') : '');
+      },
     },
   };
 }

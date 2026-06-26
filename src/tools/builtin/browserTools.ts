@@ -238,12 +238,12 @@ export const browserToolsProvider: ToolProvider = {
         function: {
           name: 'browser_search',
           description:
-            '使用本地轻量浏览器打开搜索引擎并返回页面快照。优先用于实时网页搜索；结果里的 @eN 可继续用 browser_click/browser_type 交互。',
+            'Open a search engine in the local lightweight browser and return a page snapshot. Prefer this for real-time web search; the @eN refs in the results can be used with browser_click/browser_type to interact further.',
           parameters: {
             type: 'object',
             properties: {
-              query: { type: 'string', description: '搜索关键词' },
-              engine: { type: 'string', enum: ['duckduckgo', 'bing', 'google', 'baidu'], description: '可选搜索引擎，默认设置值' },
+              query: { type: 'string', description: 'Search keywords' },
+              engine: { type: 'string', enum: ['duckduckgo', 'bing', 'google', 'baidu'], description: 'Optional search engine, defaults to the configured value' },
             },
             required: ['query'],
           },
@@ -271,8 +271,8 @@ export const browserToolsProvider: ToolProvider = {
         type: 'function',
         function: {
           name: 'browser_navigate',
-          description: '在本地轻量浏览器中打开一个公网 http/https URL，并返回标题、最终 URL 与 compact snapshot。',
-          parameters: { type: 'object', properties: { url: { type: 'string', description: '完整 URL' } }, required: ['url'] },
+          description: 'Open a public http/https URL in the local lightweight browser and return the title, final URL, and a compact snapshot.',
+          parameters: { type: 'object', properties: { url: { type: 'string', description: 'Full URL' } }, required: ['url'] },
         },
       },
       execute: async (args, ctx) => toJson(await navigate(ctx, String(args.url ?? ''))),
@@ -286,8 +286,8 @@ export const browserToolsProvider: ToolProvider = {
         type: 'function',
         function: {
           name: 'browser_snapshot',
-          description: '读取当前浏览器页的可访问性树快照。compact=true 返回更短的交互元素视图。',
-          parameters: { type: 'object', properties: { compact: { type: 'boolean', description: '默认 true' } }, required: [] },
+          description: 'Read the accessibility-tree snapshot of the current browser page. compact=true returns a shorter view of interactive elements.',
+          parameters: { type: 'object', properties: { compact: { type: 'boolean', description: 'Defaults to true' } }, required: [] },
         },
       },
       execute: async (args, ctx) => {
@@ -305,8 +305,8 @@ export const browserToolsProvider: ToolProvider = {
         type: 'function',
         function: {
           name: 'browser_click',
-          description: '点击 snapshot 中的元素 ref，例如 @e5。点击后通常调用 browser_snapshot 刷新页面状态。',
-          parameters: { type: 'object', properties: { ref: { type: 'string', description: '元素 ref，如 @e5' } }, required: ['ref'] },
+          description: 'Click an element ref from the snapshot, e.g. @e5. After clicking, typically call browser_snapshot to refresh the page state.',
+          parameters: { type: 'object', properties: { ref: { type: 'string', description: 'Element ref, e.g. @e5' } }, required: ['ref'] },
         },
       },
       execute: async (args, ctx) => {
@@ -324,7 +324,7 @@ export const browserToolsProvider: ToolProvider = {
         type: 'function',
         function: {
           name: 'browser_type',
-          description: '向 snapshot 中的输入元素 ref 填入文本；会清空原值后输入。',
+          description: 'Fill text into an input element ref from the snapshot; clears the existing value before typing.',
           parameters: { type: 'object', properties: { ref: { type: 'string' }, text: { type: 'string' } }, required: ['ref', 'text'] },
         },
       },
@@ -343,7 +343,7 @@ export const browserToolsProvider: ToolProvider = {
         type: 'function',
         function: {
           name: 'browser_scroll',
-          description: '滚动当前页面。direction 为 up 或 down，pixels 默认 500。',
+          description: 'Scroll the current page. direction is up or down, pixels defaults to 500.',
           parameters: { type: 'object', properties: { direction: { type: 'string', enum: ['up', 'down'] }, pixels: { type: 'number' } }, required: ['direction'] },
         },
       },
@@ -361,7 +361,7 @@ export const browserToolsProvider: ToolProvider = {
       capabilities: { sideEffect: 'browser', parallel: false, concurrencyKey: 'browser', defaultTimeoutMs: DEFAULT_TIMEOUT_MS },
       definition: {
         type: 'function',
-        function: { name: 'browser_back', description: '浏览器后退到上一页。', parameters: { type: 'object', properties: {}, required: [] } },
+        function: { name: 'browser_back', description: 'Navigate the browser back to the previous page.', parameters: { type: 'object', properties: {}, required: [] } },
       },
       execute: async (_args, ctx) => toJson(await runBrowserCommand(ctx, 'back', [], commandTimeout())),
     },
@@ -374,7 +374,7 @@ export const browserToolsProvider: ToolProvider = {
         type: 'function',
         function: {
           name: 'browser_press',
-          description: '在当前页面按键，例如 Enter、Tab、Escape。',
+          description: 'Press a key on the current page, e.g. Enter, Tab, Escape.',
           parameters: { type: 'object', properties: { key: { type: 'string' } }, required: ['key'] },
         },
       },
@@ -393,12 +393,12 @@ export const browserToolsProvider: ToolProvider = {
         type: 'function',
         function: {
           name: 'browser_console',
-          description: '读取 console/errors，或提供 expression 时在页面上下文执行 JS 表达式。',
+          description: 'Read console/errors, or when an expression is provided, evaluate a JS expression in the page context.',
           parameters: {
             type: 'object',
             properties: {
-              expression: { type: 'string', description: '可选 JS 表达式；省略则读取 console/errors' },
-              clear: { type: 'boolean', description: '读取后清空缓冲区' },
+              expression: { type: 'string', description: 'Optional JS expression; omit to read console/errors' },
+              clear: { type: 'boolean', description: 'Clear the buffer after reading' },
             },
             required: [],
           },
@@ -421,10 +421,10 @@ export const browserToolsProvider: ToolProvider = {
         type: 'function',
         function: {
           name: 'browser_screenshot',
-          description: '保存当前页面截图到 ~/.tangu/browser/screenshots，并返回 screenshot_path。',
+          description: 'Save a screenshot of the current page to ~/.tangu/browser/screenshots and return the screenshot_path.',
           parameters: {
             type: 'object',
-            properties: { full_page: { type: 'boolean', description: '默认 true' }, annotate: { type: 'boolean', description: '为交互元素叠加编号' } },
+            properties: { full_page: { type: 'boolean', description: 'Defaults to true' }, annotate: { type: 'boolean', description: 'Overlay numbers on interactive elements' } },
             required: [],
           },
         },

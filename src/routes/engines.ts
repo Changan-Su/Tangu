@@ -6,6 +6,7 @@
 import { Router } from 'express';
 import { authMiddleware } from '../core/http.js';
 import { deps } from '../seams/runtime.js';
+import { listEngineAssets, importEngineSkill, importEngineMcp } from '../engines/assets.js';
 
 const router = Router();
 
@@ -30,6 +31,29 @@ router.put('/agent/engines/:id', authMiddleware, (req, res) => {
   if (!engines || !engines.has(req.params.id)) return res.status(404).json({ detail: 'unknown engine' });
   const modelId = typeof req.body?.defaultModel === 'string' ? req.body.defaultModel : '';
   engines.setDefaultModel(req.params.id, modelId);
+  res.json({ ok: true });
+});
+
+// 列出某引擎已装的 skills + mcp(设置页「Agent CLIs」二级面板;各项标 imported)。云端/无该引擎 → 空。
+router.get('/agent/engines/:id/assets', authMiddleware, (req, res) => {
+  const engines = deps().engines;
+  if (!engines || !engines.has(req.params.id)) return res.json({ skills: [], mcp: [] });
+  res.json(listEngineAssets(req.params.id));
+});
+
+// 导入一个引擎资产到 Tangu;body { kind: 'skill' | 'mcp', name }。
+router.post('/agent/engines/:id/import', authMiddleware, (req, res) => {
+  const engines = deps().engines;
+  if (!engines || !engines.has(req.params.id)) return res.status(404).json({ detail: 'unknown engine' });
+  const name = typeof req.body?.name === 'string' ? req.body.name : '';
+  if (!name) return res.status(400).json({ detail: 'name required' });
+  const r =
+    req.body?.kind === 'skill'
+      ? importEngineSkill(req.params.id, name)
+      : req.body?.kind === 'mcp'
+        ? importEngineMcp(req.params.id, name)
+        : { ok: false, error: 'bad kind' };
+  if (!r.ok) return res.status(400).json({ detail: r.error || 'import failed' });
   res.json({ ok: true });
 });
 

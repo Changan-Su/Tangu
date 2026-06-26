@@ -39,6 +39,8 @@ export interface AppProfile {
   /** 能力门禁(红线④):未声明 hostExec 的 app,agent_config.execMode='host' 一律强制回 sandbox。 */
   capabilities: {
     hostExec: boolean;
+    /** 群聊编排(多轮 LLM + cast_vote 投票 + 主持人总结),纯编排无 host 访问 → 可 per-app 覆盖授予。 */
+    groupChat: boolean;
     memory: boolean;
     log: boolean;
   };
@@ -57,6 +59,7 @@ export interface AppProfile {
  *
  * ⚠️ 故意**不含** hostExec / historian / sandboxMode / providers —— 这些是部署级强制字段,
  * 绝不可经覆盖授予(红线:云端永不可拿 host-exec)。合并时一律取基线值。
+ * capabilities.groupChat 是例外:纯编排无 host 访问,**可** per-app 授予(云端 app opt-in 群聊)。
  */
 export interface AppProfileOverride {
   /** false → 该 app 被路由拒绝(等同未知 app,400)。缺省 true。 */
@@ -66,7 +69,7 @@ export interface AppProfileOverride {
   defaultModelId?: string | null;
   /** 'all' 或内置工具白名单(未知名在合并时丢弃);缺省=继承基线。 */
   toolBuiltins?: 'all' | string[];
-  capabilities?: { memory?: boolean; log?: boolean };
+  capabilities?: { memory?: boolean; log?: boolean; groupChat?: boolean };
   features?: { webSearch?: boolean; customTools?: boolean; sandbox?: boolean };
   /** 整段替换默认 guidance(`promptSections().guidance`);缺省=继承。 */
   promptGuidance?: string[];

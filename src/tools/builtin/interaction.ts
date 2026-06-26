@@ -26,16 +26,16 @@ export const interactionProvider: ToolProvider = {
         function: {
           name: 'ask_user',
           description:
-            '向用户提一个问题并等待回答(可附候选项,用户也可自由输入)。只在**真正需要用户决策**时用:' +
-            '需求有歧义、多个合理方案需取舍、操作影响面大需确认。能从上下文/代码推断的不要问。',
+            'Ask the user a question and wait for an answer (optionally with candidate options; the user can also type freely). Only use this when **user decision is truly needed**: ' +
+            'the requirement is ambiguous, multiple reasonable approaches need a trade-off, or an operation has broad impact and needs confirmation. Do not ask about things you can infer from context/code.',
           parameters: {
             type: 'object',
             properties: {
-              question: { type: 'string', description: '完整的问题(以问号结尾,给足上下文)' },
+              question: { type: 'string', description: 'The full question (end with a question mark, give enough context)' },
               options: {
                 type: 'array',
                 items: { type: 'string' },
-                description: `候选项(可空;最多 ${MAX_OPTIONS} 个,每项一句话;推荐项放第一个)`,
+                description: `Candidate options (may be empty; at most ${MAX_OPTIONS}, one sentence each; put the recommended one first)`,
               },
             },
             required: ['question'],
@@ -68,12 +68,12 @@ export const interactionProvider: ToolProvider = {
         function: {
           name: 'exit_plan_mode',
           description:
-            '计划模式专用:调研完成、计划成形后,把**完整计划**提交给用户审批。' +
-            '批准 → 计划模式关闭(下一条消息开始可执行写操作);要求修改 → 按反馈继续完善计划再次提交。',
+            'Plan-mode only: once research is complete and the plan is formed, submit the **full plan** to the user for approval. ' +
+            'Approved → plan mode turns off (write operations become executable starting from the next message); changes requested → refine the plan per feedback and submit again.',
           parameters: {
             type: 'object',
             properties: {
-              plan: { type: 'string', description: '完整实施计划(markdown:目标/步骤/涉及文件/验证方式)' },
+              plan: { type: 'string', description: 'The full implementation plan (markdown: goals/steps/files involved/how to verify)' },
             },
             required: ['plan'],
           },

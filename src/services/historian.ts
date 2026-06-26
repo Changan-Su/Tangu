@@ -26,11 +26,11 @@ const MAX_TRANSCRIPT_CHARS = 6000;
 const HISTORIAN_CHARGE_USER = false; // 背景任务默认不扣用户配额；置 true 则按 cost 扣
 
 const HISTORIAN_PROMPT =
-  '你是一名「历史记录员」。下面是某用户与 AI 的一段最近对话。' +
-  '如果其中有值得长期留痕的事实、结论或产出（例如：完成了某任务、得出明确结论、生成了文件、用户表达了明确的长期偏好），' +
-  '用一句简洁中文写成日志条目（≤60 字，不要寒暄、不要复述全文、不要加引号）。' +
-  '如果没有任何值得记录的内容，只回复一个词：NOTHING。' +
-  '不要输出除日志条目或 NOTHING 以外的任何内容。';
+  'You are a "historian". Below is a recent conversation between a user and an AI. ' +
+  'If it contains facts, conclusions, or outputs worth recording long-term (e.g. a task was completed, a clear conclusion was reached, a file was generated, or the user expressed a clear long-term preference), ' +
+  "write a single concise log entry in the user's language (≤60 characters; no pleasantries, do not restate the whole text, no quotes). " +
+  'If there is nothing worth recording, reply with a single word: NOTHING. ' +
+  'Do not output anything other than the log entry or NOTHING.';
 
 type Resolved = Awaited<ReturnType<typeof resolveModelAndKey>>;
 

@@ -14,7 +14,7 @@ export const datetimeProvider: ToolProvider = {
         type: 'function',
         function: {
           name: 'get_datetime',
-          description: '获取当前日期与时间（服务器时区）。',
+          description: 'Get the current date and time (server timezone).',
           parameters: { type: 'object', properties: {}, required: [] },
         },
       },
@@ -35,10 +35,10 @@ export const calculatorProvider: ToolProvider = {
         type: 'function',
         function: {
           name: 'calculator',
-          description: '计算一个算术表达式，支持 + - * / % ( ) 与小数。',
+          description: 'Evaluate an arithmetic expression, supporting + - * / % ( ) and decimals.',
           parameters: {
             type: 'object',
-            properties: { expression: { type: 'string', description: '算术表达式，如 (3+4)*2' } },
+            properties: { expression: { type: 'string', description: 'Arithmetic expression, e.g. (3+4)*2' } },
             required: ['expression'],
           },
         },

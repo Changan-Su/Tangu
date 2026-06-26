@@ -39,7 +39,7 @@ export function splitLogBlocks(content: string): { header: string; blocks: strin
 }
 
 /** 从块里取 time + body(heading 之后的全部行,含 `@deviceId` 前缀)。 */
-function parseBlock(block: string): { time: string; body: string } {
+export function parseBlock(block: string): { time: string; body: string } {
   const nl = block.indexOf('\n');
   const heading = nl === -1 ? block : block.slice(0, nl);
   const body = nl === -1 ? '' : block.slice(nl + 1);
@@ -48,7 +48,7 @@ function parseBlock(block: string): { time: string; body: string } {
 }
 
 /** 合并日志块:union + 按归一化块串去重,按 time 升序。 */
-function mergeBlocks(a: string[], b: string[]): { merged: string[]; onlyInA: string[]; onlyInB: string[] } {
+export function mergeBlocks(a: string[], b: string[]): { merged: string[]; onlyInA: string[]; onlyInB: string[] } {
   const norm = (s: string): string => s.replace(/\s+$/, '');
   const setB = new Set(b.map(norm));
   const setA = new Set(a.map(norm));

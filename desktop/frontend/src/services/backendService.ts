@@ -3,7 +3,7 @@
  * 统一 Bearer + JSON 错误,错误信息抛 Error(detail)。
  */
 import type {
-  AgentConfig, HistorianActivityItem, MessageRecord, ModelsResponse, MuseStatusInfo, MuseTodo,
+  AgentConfig, AgentsMeta, HistorianActivityItem, MessageRecord, ModelsResponse, MuseStatusInfo, MuseTodo,
   NormalAgentDef, SessionRecord, SkillInfo, SpecialAgentsConfig,
   TanguDesktopConfig, ToolsResponse, WorkspaceFileMeta,
 } from '../types'
@@ -25,6 +25,13 @@ async function request<T>(cfg: TanguDesktopConfig, path: string, init?: RequestI
 // ── 记忆同步(本地 ↔ Forsion Brain)──
 export interface SyncRunResult {
   ok: boolean
+  /** 镜像的 agent 数(cloudSync 开的)+ 文件级推/拉/删/跳过计数(每-agent 云文件镜像)。 */
+  agents?: number
+  pushed?: number
+  pulled?: number
+  deleted?: number
+  skipped?: number
+  /** 旧全局 xyra 记忆/日志(AI Studio 网页共享)。 */
   memory: 'pushed' | 'pulled' | 'in-sync' | 'skipped'
   logs: Array<{ date: string; pushed: number; pulled: number }>
   error?: string
@@ -69,6 +76,13 @@ export const updateSession = (
 
 export const deleteSession = (cfg: TanguDesktopConfig, id: string) =>
   request<{ ok: boolean }>(cfg, `/agent/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' })
+
+/** 从某条消息(含)处分支出新会话:继承到该点为止的历史(区别于空的新会话)。返回新会话。 */
+export const branchSession = (cfg: TanguDesktopConfig, sessionId: string, messageId: string, title?: string) =>
+  request<{ session: SessionRecord; copied: number }>(
+    cfg, `/agent/sessions/${encodeURIComponent(sessionId)}/branch`,
+    { method: 'POST', body: JSON.stringify({ message_id: messageId, ...(title ? { title } : {}) }) },
+  ).then((r) => r.session)
 
 export const listMessages = (cfg: TanguDesktopConfig, sessionId: string, limit = 200) =>
   request<{ messages: MessageRecord[] }>(
@@ -116,6 +130,24 @@ export const setEngineDefaultModel = (cfg: TanguDesktopConfig, engineId: string,
   request<{ ok: boolean }>(cfg, `/agent/engines/${encodeURIComponent(engineId)}`, {
     method: 'PUT',
     body: JSON.stringify({ defaultModel }),
+  })
+
+export interface EngineAssets {
+  skills: Array<{ name: string; description: string; imported: boolean }>
+  mcp: Array<{ name: string; command?: string; args?: string[]; url?: string; imported: boolean }>
+}
+
+/** 列出某引擎已装的 skills + mcp(设置页「Agent CLIs」二级面板)。云端/失败 → 空。 */
+export const listEngineAssets = (cfg: TanguDesktopConfig, engineId: string) =>
+  request<EngineAssets>(cfg, `/agent/engines/${encodeURIComponent(engineId)}/assets`)
+    .then((r) => ({ skills: r.skills || [], mcp: r.mcp || [] }))
+    .catch(() => ({ skills: [], mcp: [] } as EngineAssets))
+
+/** 导入一个引擎资产到 Tangu(kind: 'skill' | 'mcp')。 */
+export const importEngineAsset = (cfg: TanguDesktopConfig, engineId: string, kind: 'skill' | 'mcp', name: string) =>
+  request<{ ok: boolean }>(cfg, `/agent/engines/${encodeURIComponent(engineId)}/import`, {
+    method: 'POST',
+    body: JSON.stringify({ kind, name }),
   })
 
 /** 懒探测某引擎能力(模型 + slash 命令);首次会 spawn(慢),后端缓存。失败 → 空。 */
@@ -215,6 +247,7 @@ export interface WechatProjectSession {
   title: string
   updated_at: string | number | null
   connected: boolean
+  agentSlug?: string | null
 }
 
 /** 列出微信 Project(~/Tangu/webot)下的会话,供主界面选择「正在连接的 session」。 */
@@ -224,6 +257,10 @@ export const listWechatSessions = (cfg: TanguDesktopConfig) =>
 /** 切换「正在连接的 session」(微信 bot 收到的消息改走该会话)。 */
 export const setWechatConnectedSession = (cfg: TanguDesktopConfig, sessionId: string) =>
   request<{ ok: boolean }>(cfg, '/agent/wechat/connect', { method: 'POST', body: JSON.stringify({ session_id: sessionId }) })
+
+/** 设置某微信会话使用的 Normal Agent。 */
+export const setWechatSessionAgent = (cfg: TanguDesktopConfig, sessionId: string, agentSlug: string) =>
+  request<{ ok: boolean }>(cfg, '/agent/wechat/session-agent', { method: 'POST', body: JSON.stringify({ session_id: sessionId, agent_slug: agentSlug }) })
 
 /** 在微信 Project 下新建会话并(默认)切为正在连接。 */
 export const createWechatSession = (cfg: TanguDesktopConfig, title?: string) =>
@@ -242,6 +279,83 @@ export const saveAgentDef = (cfg: TanguDesktopConfig, def: Partial<NormalAgentDe
 
 export const deleteAgentDef = (cfg: TanguDesktopConfig, slug: string) =>
   request<{ ok: boolean }>(cfg, `/agent/agents/${encodeURIComponent(slug)}`, { method: 'DELETE' })
+
+/** 上传头像(data URL 或纯 base64;≤1MB;后端写进该 agent 的 Library/ 并设 config.avatar)。 */
+export const uploadAgentAvatar = (cfg: TanguDesktopConfig, slug: string, data: string, mimeType: string) =>
+  request<{ ok: boolean; avatar: string }>(cfg, `/agent/agents/${encodeURIComponent(slug)}/avatar`,
+    { method: 'POST', body: JSON.stringify({ data, mimeType }) })
+
+/** 拉头像为 object URL(带鉴权;无/失败返回 null)。调用方负责 URL.revokeObjectURL。 */
+export async function fetchAgentAvatar(cfg: TanguDesktopConfig, slug: string): Promise<string | null> {
+  try {
+    const r = await fetch(`${cfg.backendUrl}/agent/agents/${encodeURIComponent(slug)}/avatar`, { headers: headers(cfg.token) })
+    if (!r.ok) return null
+    return URL.createObjectURL(await r.blob())
+  } catch { return null }
+}
+
+/** 列表顺序 + 默认 agent。 */
+export const getAgentsMeta = (cfg: TanguDesktopConfig) =>
+  request<AgentsMeta>(cfg, '/agent/agents-meta').catch(() => ({ order: [], defaultSlug: 'xyra' } as AgentsMeta))
+export const putAgentsMeta = (cfg: TanguDesktopConfig, patch: Partial<AgentsMeta>) =>
+  request<AgentsMeta>(cfg, '/agent/agents-meta', { method: 'PUT', body: JSON.stringify(patch) })
+
+// 某 agent 的 MEMORY / LOG(按 slug 读其文件夹)。
+export const getAgentMemory = (cfg: TanguDesktopConfig, slug: string) =>
+  request<{ content: string }>(cfg, `/agent/agents/${encodeURIComponent(slug)}/memory`).then((r) => r.content).catch(() => '')
+export const putAgentMemory = (cfg: TanguDesktopConfig, slug: string, content: string) =>
+  request<{ ok: boolean }>(cfg, `/agent/agents/${encodeURIComponent(slug)}/memory`, { method: 'PUT', body: JSON.stringify({ content }) })
+export const listAgentLogDates = (cfg: TanguDesktopConfig, slug: string) =>
+  request<{ dates: string[] }>(cfg, `/agent/agents/${encodeURIComponent(slug)}/logs`).then((r) => r.dates).catch(() => [] as string[])
+export const getAgentLog = (cfg: TanguDesktopConfig, slug: string, date: string) =>
+  request<{ date: string; content: string }>(cfg, `/agent/agents/${encodeURIComponent(slug)}/log?date=${encodeURIComponent(date)}`).then((r) => r.content).catch(() => '')
+export const putAgentLog = (cfg: TanguDesktopConfig, slug: string, date: string, content: string) =>
+  request<{ ok: boolean }>(cfg, `/agent/agents/${encodeURIComponent(slug)}/log?date=${encodeURIComponent(date)}`, { method: 'PUT', body: JSON.stringify({ content }) })
+
+// 某 agent 的 Library 文件(列表 / 读 / 写 / 删;用 agent 自身 slug)。
+export type AgentLibraryFile = { name: string; size: number; isBinary: boolean; mtimeMs: number }
+export const listAgentLibrary = (cfg: TanguDesktopConfig, slug: string) =>
+  request<{ files: AgentLibraryFile[] }>(cfg, `/agent/agents/${encodeURIComponent(slug)}/library`).then((r) => r.files).catch(() => [] as AgentLibraryFile[])
+export const getAgentLibraryFile = (cfg: TanguDesktopConfig, slug: string, name: string) =>
+  request<{ name: string; isBinary: boolean; content?: string; dataBase64?: string; mimeType?: string }>(
+    cfg, `/agent/agents/${encodeURIComponent(slug)}/library/file?name=${encodeURIComponent(name)}`)
+export const putAgentLibraryFile = (cfg: TanguDesktopConfig, slug: string, name: string, body: { content?: string; dataBase64?: string; isBinary?: boolean }) =>
+  request<{ ok: boolean; name: string }>(cfg, `/agent/agents/${encodeURIComponent(slug)}/library/file`, { method: 'POST', body: JSON.stringify({ name, ...body }) })
+export const deleteAgentLibraryFile = (cfg: TanguDesktopConfig, slug: string, name: string) =>
+  request<{ ok: boolean }>(cfg, `/agent/agents/${encodeURIComponent(slug)}/library/file?name=${encodeURIComponent(name)}`, { method: 'DELETE' })
+
+// 全局用户画像 USER.md。
+export const getUserProfile = (cfg: TanguDesktopConfig) =>
+  request<{ content: string }>(cfg, '/agent/user-profile').then((r) => r.content).catch(() => '')
+export const putUserProfile = (cfg: TanguDesktopConfig, content: string) =>
+  request<{ ok: boolean }>(cfg, '/agent/user-profile', { method: 'PUT', body: JSON.stringify({ content }) })
+
+// ── 统一插件(设置 → 插件):列表 / 启用 / 设置(全局或按 agent)/ image-list 文件 ──
+export type PluginField =
+  | { key: string; type: 'toggle'; label: string; labelEn?: string; help?: string; helpEn?: string; default?: boolean }
+  | { key: string; type: 'text' | 'textarea'; label: string; labelEn?: string; help?: string; helpEn?: string; default?: string; placeholder?: string }
+  | { key: string; type: 'number'; label: string; labelEn?: string; help?: string; helpEn?: string; default?: number; min?: number; max?: number }
+  | { key: string; type: 'select'; label: string; labelEn?: string; help?: string; helpEn?: string; default?: string; options: Array<{ value: string; label: string; labelEn?: string }> }
+  | { key: string; type: 'image-list'; label: string; labelEn?: string; help?: string; helpEn?: string; itemFields: PluginField[] }
+export type PluginInfo = {
+  id: string; name: string; nameEn?: string; description: string; descriptionEn?: string;
+  scopes: Array<'global' | 'agent'>; settings: { fields: PluginField[] } | null; source: 'builtin' | 'folder'; enabled: boolean
+}
+export const listPlugins = (cfg: TanguDesktopConfig) =>
+  request<{ plugins: PluginInfo[] }>(cfg, '/agent/plugins').then((r) => r.plugins).catch(() => [] as PluginInfo[])
+export const setPluginEnabled = (cfg: TanguDesktopConfig, id: string, enabled: boolean) =>
+  request<{ ok: boolean; enabled: boolean }>(cfg, `/agent/plugins/${encodeURIComponent(id)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) })
+export const getPluginSettings = (cfg: TanguDesktopConfig, id: string, scope: string) =>
+  request<{ values: Record<string, any> }>(cfg, `/agent/plugins/${encodeURIComponent(id)}/settings?scope=${encodeURIComponent(scope)}`).then((r) => r.values)
+export const putPluginSettings = (cfg: TanguDesktopConfig, id: string, scope: string, patch: Record<string, any>) =>
+  request<{ ok: boolean; values: Record<string, any> }>(cfg, `/agent/plugins/${encodeURIComponent(id)}/settings?scope=${encodeURIComponent(scope)}`, { method: 'PUT', body: JSON.stringify({ patch }) }).then((r) => r.values)
+export type PluginFile = { name: string; size: number; mimeType: string; dataBase64?: string }
+export const listPluginFiles = (cfg: TanguDesktopConfig, id: string, scope: string) =>
+  request<{ files: PluginFile[] }>(cfg, `/agent/plugins/${encodeURIComponent(id)}/files?scope=${encodeURIComponent(scope)}`).then((r) => r.files).catch(() => [] as PluginFile[])
+export const addPluginFile = (cfg: TanguDesktopConfig, id: string, scope: string, name: string, dataBase64: string) =>
+  request<{ ok: boolean; name: string }>(cfg, `/agent/plugins/${encodeURIComponent(id)}/files?scope=${encodeURIComponent(scope)}`, { method: 'POST', body: JSON.stringify({ name, dataBase64 }) })
+export const deletePluginFile = (cfg: TanguDesktopConfig, id: string, scope: string, name: string) =>
+  request<{ ok: boolean }>(cfg, `/agent/plugins/${encodeURIComponent(id)}/files?scope=${encodeURIComponent(scope)}&name=${encodeURIComponent(name)}`, { method: 'DELETE' })
 
 // ── Special Agents（Historian / Muse;本地后端）──
 export const getSpecialConfig = (cfg: TanguDesktopConfig) =>
@@ -269,10 +383,10 @@ export const getMuseStatus = (cfg: TanguDesktopConfig) =>
 export const getMemory = (cfg: TanguDesktopConfig) =>
   request<{ content: string; updatedAt: any }>(cfg, '/agent/memory')
 
-export const appendMemory = (cfg: TanguDesktopConfig, text: string) =>
+export const appendMemory = (cfg: TanguDesktopConfig, text: string, slug?: string) =>
   request<{ appended: boolean; reason?: string }>(cfg, '/agent/memory', {
     method: 'POST',
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, slug }),
   })
 
 export const getLog = (cfg: TanguDesktopConfig, date?: string) =>

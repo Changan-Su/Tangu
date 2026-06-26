@@ -26,7 +26,7 @@ export function createAiStudioProfile(opts?: {
       historian: opts?.historian ?? true,
       customTools: true,
     },
-    capabilities: { hostExec: false, memory: true, log: true },
+    capabilities: { hostExec: false, groupChat: false, memory: true, log: true },
     toolLoadout: { builtins: 'all' },
     promptSections: defaultPromptSections,
   };

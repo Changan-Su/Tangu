@@ -31,7 +31,19 @@ const api = {
   authProviders: (): Promise<Array<{ id: string; loggedIn: boolean }>> => ipcRenderer.invoke('auth:providers'),
   providerLogin: (id: string): Promise<any> => ipcRenderer.invoke('auth:providerLogin', id),
   openAccountCenter: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('auth:openAccountCenter'),
+  /** 提交反馈到 Forsion 反馈中心(会话日志 JSON 随附为附件;token 留主进程)。 */
+  submitFeedback: (input: { description: string; sessionLogJson?: string; sessionLogName?: string }): Promise<{ ok: boolean; id?: string | null; error?: string; attachmentSkipped?: boolean }> =>
+    ipcRenderer.invoke('feedback:submit', input),
   appVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
+  // ── 应用内自动更新(检查 → 下载 → 重启安装;mac 仅检测,引导手动下载)──
+  checkForUpdates: (): Promise<any> => ipcRenderer.invoke('updater:check'),
+  downloadUpdate: (): Promise<void> => ipcRenderer.invoke('updater:download'),
+  installUpdate: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('updater:install'),
+  onUpdaterStatus: (cb: (st: any) => void): (() => void) => {
+    const listener = (_e: unknown, st: any): void => cb(st)
+    ipcRenderer.on('updater:status', listener)
+    return () => ipcRenderer.removeListener('updater:status', listener)
+  },
   onAuthDevice: (cb: (info: { url: string; userCode: string }) => void): (() => void) => {
     const listener = (_e: unknown, info: { url: string; userCode: string }): void => cb(info)
     ipcRenderer.on('auth:device', listener)

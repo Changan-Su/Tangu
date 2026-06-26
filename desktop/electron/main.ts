@@ -13,6 +13,7 @@ import {
   forsionDeviceLogin, forsionLogout, forsionWhoami, loadTanguCreds,
 } from './forsionAuth'
 import { importMcp, importSkills, scanAll } from './discovery'
+import { checkForUpdates, downloadUpdate, installUpdate } from './updater'
 
 /** ~/.tangu(与包内 core/tanguHome.ts 同约定;TANGU_HOME 可整体重定向)。 */
 const tanguHomeDir = (): string => process.env.TANGU_HOME || join(app.getPath('home'), '.tangu')
@@ -580,6 +581,17 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('app:version', () => app.getVersion())
 
+  // ── 应用内自动更新(electron-updater;检查 → 下载 → 重启安装。mac 仅检测,UI 引导手动下载)──
+  ipcMain.handle('updater:check', () => checkForUpdates())
+  ipcMain.handle('updater:download', () => downloadUpdate())
+  ipcMain.handle('updater:install', async () => {
+    // 先优雅停后端 → 下方 before-quit 见 'stopped' 不再 preventDefault/app.exit(0),
+    // electron-updater 的退出安装路径才不被硬退出截断。
+    await backend.stop()
+    installUpdate()
+    return { ok: true }
+  })
+
   // 打开 Forsion 个人中心(对齐 AI Studio:{cloudUrl}/account?token=…)。token 留在主进程,不下发渲染层。
   ipcMain.handle('auth:openAccountCenter', async () => {
     const stored = await loadConfig()
@@ -590,6 +602,51 @@ app.whenReady().then(async () => {
     const url = `${cloudUrl}/account${token ? `?token=${encodeURIComponent(token)}` : ''}`
     await shell.openExternal(url)
     return { ok: true }
+  })
+
+  // 提交反馈到 Forsion 反馈中心(token 留主进程,不下发渲染层)。会话日志 JSON 作附件随附,
+  // >5MB 则省略附件、正文照常提交(后端附件硬上限 5MB)。
+  ipcMain.handle('feedback:submit', async (
+    _e,
+    input: { description?: string; sessionLogJson?: string; sessionLogName?: string },
+  ) => {
+    const stored = await loadConfig()
+    const creds = loadTanguCreds()
+    const cloudUrl = (stored.cloudUrl || creds.cloudUrl || '').replace(/\/+$/, '')
+    const token = stored.cloudToken || creds.token || ''
+    if (!cloudUrl || !token) return { ok: false, error: 'not-logged-in' }
+    const description = (input?.description || '').trim()
+    if (!description) return { ok: false, error: 'empty' }
+
+    const attachments: Array<{ filename: string; mime_type: string; size: number; data_base64: string }> = []
+    let attachmentSkipped = false
+    if (input?.sessionLogJson) {
+      const buf = Buffer.from(input.sessionLogJson, 'utf8')
+      if (buf.length > 5 * 1024 * 1024) attachmentSkipped = true
+      else attachments.push({
+        filename: input.sessionLogName || 'tangu-session.json',
+        mime_type: 'application/json',
+        size: buf.length,
+        data_base64: buf.toString('base64'),
+      })
+    }
+    try {
+      const r = await fetch(`${cloudUrl}/api/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ description, attachments }),
+        signal: AbortSignal.timeout(20000),
+      })
+      if (!r.ok) {
+        let detail = `HTTP ${r.status}`
+        try { detail = (await r.json())?.detail || detail } catch { /* keep */ }
+        return { ok: false, error: detail }
+      }
+      const j: any = await r.json().catch(() => ({}))
+      return { ok: true, id: j?.id ?? null, attachmentSkipped }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
+    }
   })
 
   ipcMain.handle('auth:forsionLogin', async (_e, cloudUrl?: string) => {

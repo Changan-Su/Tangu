@@ -53,14 +53,14 @@ export interface SpecialAgentsConfig {
 }
 
 export const DEFAULT_HISTORIAN_PROMPT =
-  '你是 Historian，在后台维护用户的「会话标题 / 当天日志(LOG) / 长期记忆(memory)」。请严格区分两类内容：' +
-  'LOG 是「当天发生了什么」的流水（事件、进展、产出），每段对话大多有一条；' +
-  'memory 是关于用户本人的【长期稳定】事实/偏好/目标（跨会话长期有用，绝不是当天流水），要非常克制、多数对话应留空，且绝不能与 LOG 雷同。' +
-  '判断务必基于实际内容、宁缺毋滥，绝不臆造、不复述显而易见的东西。';
+  'You are the Historian, maintaining the user\'s "session title / daily log (LOG) / long-term memory (memory)" in the background. Strictly distinguish two kinds of content: ' +
+  'LOG is the running record of "what happened today" (events, progress, outputs), usually one entry per conversation; ' +
+  'memory is **long-term stable** facts/preferences/goals about the user themselves (useful long-term across sessions, never a daily running log) — be very restrained, leave it empty for most conversations, and never let it duplicate the LOG. ' +
+  'Always judge based on the actual content; when in doubt, leave it out — never fabricate, never restate the obvious.';
 
 export const DEFAULT_MUSE_PROMPT =
-  '你是 Muse，一个在后台持续思考、主动为用户发现机会的 agent。你可读取用户的记忆、日志、会话历史与授权的本地文件夹，' +
-  '但你唯一的写权限是通过 add_muse_todo 工具向 Muse TODO 清单提交真正高价值、可执行的待办。持续思考：我现在能为用户做点什么？';
+  'You are Muse, an agent that keeps thinking in the background and proactively spots opportunities for the user. You can read the user\'s memory, logs, conversation history, and authorized local folders, ' +
+  'but your only write permission is to submit genuinely high-value, actionable todos to the Muse TODO list via the add_muse_todo tool. Keep thinking: what can I do for the user right now?';
 
 export const SPECIAL_AGENTS_DEFAULTS: SpecialAgentsConfig = {
   historian: {
@@ -176,7 +176,7 @@ export function buildTodoDedupHint(rows: Array<{ title?: string; status?: string
   const closed = rows.filter((r) => r.status === 'done' || r.status === 'dismissed').map((r) => norm(r.title)).filter(Boolean);
   if (!pending.length && !closed.length) return '';
   const parts: string[] = [];
-  if (pending.length) parts.push(`已在清单中（请勿重复提交）：${pending.slice(0, 15).join('；')}`);
-  if (closed.length) parts.push(`此前已被用户处理/驳回（不要再提同类）：${closed.slice(0, 15).join('；')}`);
-  return `\n\n【你已提过的 TODO】\n${parts.join('\n')}`;
+  if (pending.length) parts.push(`Already on the list (do not resubmit): ${pending.slice(0, 15).join('; ')}`);
+  if (closed.length) parts.push(`Previously handled/dismissed by the user (do not propose similar again): ${closed.slice(0, 15).join('; ')}`);
+  return `\n\n[TODOs you have already proposed]\n${parts.join('\n')}`;
 }

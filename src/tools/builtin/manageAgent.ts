@@ -19,22 +19,23 @@ export const manageAgentProvider: ToolProvider = {
         function: {
           name: 'manage_agent',
           description:
-            '创建/更新/删除/列出本地「Normal Agent」（可复用的对话人格 = system prompt + 模型 + 工具 + 设置）。' +
-            '当你发现一种值得复用的角色/工作方式时，可用 action="create" 把它沉淀为一个 agent，供用户之后选用。' +
-            'action ∈ create | update | delete | list。create/update 需 name 与 system_prompt。',
+            'Create/update/delete/list local "Normal Agents" (a reusable conversational persona = system prompt + model + tools + settings). ' +
+            'When you discover a role/way of working worth reusing, use action="create" to capture it as an agent for the user to select later. ' +
+            'action ∈ create | update | delete | list. create/update require name and system_prompt.',
           parameters: {
             type: 'object',
             properties: {
-              action: { type: 'string', enum: ['create', 'update', 'delete', 'list'], description: '操作' },
-              slug: { type: 'string', description: 'agent 唯一标识(小写字母数字与连字符);update/delete 必填,create 可省(由 name 派生)' },
-              name: { type: 'string', description: '显示名(create/update 必填)' },
-              description: { type: 'string', description: '一句话简介' },
-              system_prompt: { type: 'string', description: '该 agent 的 system prompt / 人格(create/update 必填)' },
-              model: { type: 'string', description: '覆盖会话模型的模型 id(可省)' },
-              tools: { type: 'array', items: { type: 'string' }, description: '启用的 custom/MCP 工具 id 白名单(可省)' },
-              thinking_level: { type: 'string', enum: ['off', 'low', 'medium', 'high'], description: '思考强度(可省)' },
-              max_iterations: { type: 'number', description: '最大循环轮数(可省)' },
-              approval_mode: { type: 'string', enum: ['readonly', 'auto-edit', 'full-auto'], description: '审批档(可省)' },
+              action: { type: 'string', enum: ['create', 'update', 'delete', 'list'], description: 'The operation' },
+              slug: { type: 'string', description: 'Unique agent identifier (lowercase alphanumerics and hyphens); required for update/delete, optional for create (derived from name)' },
+              name: { type: 'string', description: 'Display name (required for create/update)' },
+              description: { type: 'string', description: 'One-sentence summary' },
+              system_prompt: { type: 'string', description: 'The agent\'s development instructions (what to do / how to do it / what to read; required for create/update)' },
+              soul: { type: 'string', description: 'Persona definition (SOUL.md; tone/values; optional)' },
+              model: { type: 'string', description: 'Model id that overrides the session model (optional)' },
+              tools: { type: 'array', items: { type: 'string' }, description: 'Allowlist of enabled custom/MCP tool ids (optional)' },
+              thinking_level: { type: 'string', enum: ['off', 'low', 'medium', 'high'], description: 'Thinking intensity (optional)' },
+              max_iterations: { type: 'number', description: 'Maximum number of loop iterations (optional)' },
+              approval_mode: { type: 'string', enum: ['readonly', 'auto-edit', 'full-auto'], description: 'Approval level (optional)' },
             },
             required: ['action'],
           },
@@ -68,6 +69,7 @@ export const manageAgentProvider: ToolProvider = {
               maxIterations: args.max_iterations != null ? Number(args.max_iterations) : undefined,
               approvalMode: args.approval_mode,
               systemPrompt: String(args.system_prompt),
+              soul: args.soul != null ? String(args.soul) : undefined,
               createdBy: 'agent',
             });
             return `已${action === 'create' ? '创建' : '更新'} agent: ${def.slug}（${def.name}）。用户可在设置/输入栏选用它。`;

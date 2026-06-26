@@ -597,6 +597,41 @@ a:hover { color: var(--accent-hover); }
   transition: color var(--duration-fast), border-color var(--duration-fast);
 }
 .jump-bottom:hover { color: var(--accent); border-color: var(--accent); }
+/* 群聊「正在投票」底部动画(三点跳动) */
+.voting-indicator {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  background: var(--bg-glass);
+  backdrop-filter: var(--panel-blur);
+  border: var(--border-width) solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 6px 20px var(--shadow);
+  z-index: 6;
+  animation: fade-up var(--duration-slow) var(--ease-out);
+}
+.voting-dots { display: inline-flex; gap: 3px; }
+.voting-dots > span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: inline-block;
+  animation: voting-bounce 1.2s infinite ease-in-out;
+}
+.voting-dots > span:nth-child(2) { animation-delay: 0.18s; }
+.voting-dots > span:nth-child(3) { animation-delay: 0.36s; }
+@keyframes voting-bounce {
+  0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-3px); }
+}
 .stream-inner {
   max-width: 760px;
   margin: 0 auto;
@@ -627,6 +662,11 @@ a:hover { color: var(--accent-hover); }
   letter-spacing: 0.06em;
   margin-bottom: 6px;
 }
+/* 带头像的发言人标识(AI 当前会话 agent / 用户) */
+.msg-role-with-avatar { display: inline-flex; align-items: center; gap: 7px; letter-spacing: normal; font-size: 12px; color: var(--text-muted); }
+.msg-role.user { align-self: flex-end; flex-direction: row-reverse; }
+.msg-avatar { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.msg-avatar.fallback { display: inline-flex; align-items: center; justify-content: center; color: #fff; font-size: 11px; font-weight: 700; background: linear-gradient(135deg, var(--accent), var(--accent-hover)); }
 .msg-content { word-break: break-word; }
 .msg-content > * + * { margin-top: 0.7em; }
 .msg-content h1, .msg-content h2, .msg-content h3, .msg-content h4 {
@@ -1034,6 +1074,13 @@ a:hover { color: var(--accent-hover); }
 .engine-pill.selected .engine-pill-label { max-width: 160px; opacity: 1; margin-left: 6px; font-weight: 600; }
 @keyframes agentSelectPop { 0% { transform: scale(1); } 35% { transform: scale(1.12); } 100% { transform: scale(1.02); } }
 .engine-picker-hint { font-size: 11.5px; color: var(--text-faint); }
+/* Agent 选择器复用 engine-picker 形态;icon 槽放圆形头像或首字母 */
+.agent-pill-avatar { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; display: block; }
+.agent-pill-initial { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: var(--overlay-light); font-size: 11px; font-weight: 600; line-height: 1; }
+.agent-picker .engine-pill.selected .agent-pill-initial { background: var(--bg-card); }
+/* 引擎(上)+ Agent(下)选择器成一组,出现在欢迎区下方、输入框上方 */
+.newchat-pickers { display: flex; flex-direction: column; align-items: center; gap: 2px; margin: 0 auto 8px; }
+.newchat-pickers .engine-picker { margin-bottom: 0; }
 
 .composer-hint { font-size: 11px; color: var(--text-ghost); }
 .attach-chip {
@@ -1559,6 +1606,21 @@ a:hover { color: var(--accent-hover); }
 .toast.error { border-left-color: var(--danger); }
 
 .spin { animation: spin 0.9s linear infinite; }
+
+/* ── 应用内更新横幅(主界面顶部,启动检测到新版时出现;非侵入,可忽略) ── */
+.update-banner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 14px;
+  background: var(--accent-light);
+  border-bottom: var(--border-width) solid var(--border);
+  font-size: 13px;
+}
+.update-banner > span { flex: 1; }
+.update-banner-x {
+  border: 0; background: transparent; cursor: pointer;
+  font-size: 18px; line-height: 1; opacity: 0.55; padding: 0 4px;
+}
+.update-banner-x:hover { opacity: 1; }
 
 /* ── 工作区文件浮层预览(点右侧工作区文件 → 从输入框上方升起) ── */
 .composer-anchor { position: relative; }

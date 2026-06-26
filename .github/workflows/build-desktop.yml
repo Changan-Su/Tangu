@@ -71,6 +71,15 @@ jobs:
         working-directory: desktop
         run: npx electron-builder ${{ matrix.ebargs }} --publish never
 
+      # electron-builder 在有 publish 配置时随包产出更新 feed 清单(Win=latest.yml / Linux=latest-linux.yml);
+      # 缺失则应用内更新形同虚设 → 这里硬失败,避免发出一个装不了更新的版本。
+      # macOS 走 GitHub API 检测(未签名不自装),不依赖该 feed,故跳过校验。
+      - name: Verify update manifests
+        if: runner.os != 'macOS'
+        working-directory: desktop
+        shell: bash
+        run: ls -1 dist/latest*.yml || { echo "::error::缺少 latest*.yml — 应用内更新 feed 未生成,请改用 --publish always(见 build.publish 配置)"; exit 1; }
+
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
@@ -79,6 +88,8 @@ jobs:
             desktop/dist/*.AppImage
             desktop/dist/*.dmg
             desktop/dist/*.exe
+            desktop/dist/latest*.yml
+            desktop/dist/*.blockmap
           if-no-files-found: ignore
 
   # 仅在打 v* tag 时:收集三平台产物 → 创建/更新对应 Release 并附件。

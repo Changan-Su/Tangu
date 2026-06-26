@@ -17,12 +17,12 @@ export const webSearchProvider: ToolProvider = {
         type: 'function',
         function: {
           name: 'web_search',
-          description: '联网搜索，返回相关网页摘要。用于查实时/外部信息。',
+          description: 'Search the web and return summaries of relevant web pages. Use it to look up real-time or external information.',
           parameters: {
             type: 'object',
             properties: {
-              query: { type: 'string', description: '搜索关键词' },
-              max_results: { type: 'number', description: '返回结果数，默认 5' },
+              query: { type: 'string', description: 'Search keywords' },
+              max_results: { type: 'number', description: 'Number of results to return, default 5' },
             },
             required: ['query'],
           },

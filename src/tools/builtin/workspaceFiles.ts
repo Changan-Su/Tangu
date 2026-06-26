@@ -19,10 +19,10 @@ export const workspaceFilesProvider: ToolProvider = {
         type: 'function',
         function: {
           name: 'list_files',
-          description: '列出 agent 工作区某目录下的文件与子目录。',
+          description: 'List the files and subdirectories under a directory in the agent workspace.',
           parameters: {
             type: 'object',
-            properties: { path: { type: 'string', description: "目录路径，根为 '/'" } },
+            properties: { path: { type: 'string', description: "Directory path, root is '/'" } },
             required: [],
           },
         },
@@ -40,13 +40,13 @@ export const workspaceFilesProvider: ToolProvider = {
         type: 'function',
         function: {
           name: 'read_file',
-          description: '读取 agent 工作区某文件的文本内容。大文件可用 offset/limit 按行分页读取。',
+          description: 'Read the text content of a file in the agent workspace. For large files, use offset/limit to read by line in pages.',
           parameters: {
             type: 'object',
             properties: {
-              path: { type: 'string', description: '文件路径，如 /notes/a.txt' },
-              offset: { type: 'number', description: '起始行（从 0 计），默认 0' },
-              limit: { type: 'number', description: '最多返回的行数（默认读尽，受上限封顶）' },
+              path: { type: 'string', description: 'File path, e.g. /notes/a.txt' },
+              offset: { type: 'number', description: 'Starting line (0-based), default 0' },
+              limit: { type: 'number', description: 'Maximum number of lines to return (default reads to the end, capped at a limit)' },
             },
             required: ['path'],
           },
@@ -69,12 +69,12 @@ export const workspaceFilesProvider: ToolProvider = {
         type: 'function',
         function: {
           name: 'write_file',
-          description: '在 agent 工作区写入/覆盖一个文本文件（中间目录自动创建）。',
+          description: 'Write/overwrite a text file in the agent workspace (intermediate directories are created automatically).',
           parameters: {
             type: 'object',
             properties: {
-              path: { type: 'string', description: '文件路径，如 /out/result.py' },
-              content: { type: 'string', description: '文件文本内容' },
+              path: { type: 'string', description: 'File path, e.g. /out/result.py' },
+              content: { type: 'string', description: 'Text content of the file' },
             },
             required: ['path', 'content'],
           },

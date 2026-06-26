@@ -23,7 +23,8 @@ import { gateToolCall } from './approvals.js';
 import { publish, drain } from './eventBus.js';
 import { updateRunStatus } from './runStore.js';
 import { requestInquiry } from './inquiries.js';
-import { getAgent, type NormalAgentDef } from '../agents/agentRegistry.js';
+import { getAgent, resolveMemorySlug, type NormalAgentDef } from '../agents/agentRegistry.js';
+import { enterRunContext } from '../seams/runContext.js';
 import { runCostCeiling, isOverRunCost } from './runBudget.js';
 import { capToolResult } from './contextBudget.js';
 
@@ -81,6 +82,13 @@ export async function runGroupChat(p: GroupChatParams): Promise<void> {
       return;
     }
 
+    // 被 @ 的 agent 优先发言:把它移到队首(整场讨论每轮都先发)。不在群内则忽略。
+    const prioritySlug = typeof p.agentConfig.priorityAgent === 'string' ? p.agentConfig.priorityAgent : '';
+    if (prioritySlug) {
+      const idx = participants.findIndex((a) => a.slug === prioritySlug);
+      if (idx > 0) participants.unshift(participants.splice(idx, 1)[0]);
+    }
+
     // ② 用户消息落库(group 分支早于 runLoop 的 insertUserMessage 点,故此处补上)
     if (p.userMessageId && p.message) {
       await state.insertUserMessage({
@@ -99,7 +107,7 @@ export async function runGroupChat(p: GroupChatParams): Promise<void> {
       ctxByAgent.set(a.slug, [{ role: 'system', content: buildGroupSystem(a, roster, p.message) } as ChatMessage]);
       seen.set(a.slug, 0);
     }
-    const transcript: TranscriptEntry[] = [{ round: 0, slug: USER_SLUG, name: '用户', text: String(p.message) }];
+    const transcript: TranscriptEntry[] = [{ round: 0, slug: USER_SLUG, name: 'User', text: String(p.message) }];
 
     let costTotal = 0;
     const meter: Meter = { tokens: 0 };
@@ -112,6 +120,8 @@ export async function runGroupChat(p: GroupChatParams): Promise<void> {
       roundsRun = round;
       for (const agent of participants) {
         if (signal.aborted) throw new AbortLikeError();
+        // 本发言人的记忆作用域:其 remember/log_event 落到自己的 agent 文件夹(顺序执行,enterWith 即时生效)。
+        enterRunContext(p.userId, p.runId, resolveMemorySlug(agent));
         // 额度复查(标准计费才有意义;standalone 为 noop → 恒 ok)
         const can = await deps().billing.canConsumeTokenPoints(userId, 1).catch(() => ({ ok: true } as any));
         if (!can.ok) {
@@ -148,6 +158,8 @@ export async function runGroupChat(p: GroupChatParams): Promise<void> {
 
       // 每轮末投票(最后一轮无需投 —— 反正要停)
       if (round < maxRounds) {
+        // 投票开始信号:前端据此显示「正在投票」动画,收到下方 group_vote 结果即结束。
+        await publish(runId, 'group_voting', { round });
         const votes: Array<{ slug: string; name: string; end: boolean; reason: string }> = [];
         let endCount = 0;
         for (const agent of participants) {
@@ -168,14 +180,16 @@ export async function runGroupChat(p: GroupChatParams): Promise<void> {
       participants: participants.map((a) => ({ slug: a.slug, name: a.name })),
     });
 
-    // ④ 询问用户是否要主持人总结(run 内 await,不结束 run)
+    // ④ 主持人总结。groupAutoSummary(后台 @讨论:无交互用户)→ 直接总结;否则询问用户(run 内 await,不结束 run)。
     let summarized = false;
     if (!signal.aborted) {
-      const ans = await requestInquiry(
-        runId,
-        { question: '群聊讨论已结束,需要主持人总结一下吗?', options: ['是,总结', '否,不用'], allowFreeText: false },
-        signal,
-      );
+      const ans = p.agentConfig.groupAutoSummary
+        ? '是,总结'
+        : await requestInquiry(
+            runId,
+            { question: '群聊讨论已结束,需要主持人总结一下吗?', options: ['是,总结', '否,不用'], allowFreeText: false },
+            signal,
+          );
       if (ans.startsWith('是')) {
         const hostRound = roundsRun + 1;
         await publish(runId, 'group_speaker', { slug: HOST_SLUG, name: '主持人', round: hostRound, phase: 'start' });
@@ -215,6 +229,8 @@ async function runGroupTurn(ctx: ChatMessage[], agent: NormalAgentDef, p: GroupC
   const toolCtx: ToolContext = {
     userId: p.userId, sessionId, appId, runId, signal,
     execMode, cwd, approvalMode, profile, modelId: effModelId, planMode: false, muse: false,
+    // 群聊发言人不可再起讨论(start_discussion/wait_discussion 隐藏)——防递归裂变。
+    inDiscussion: true,
     // ponytail: v1 群聊每 agent 用内置工具集(读/写/执行已够「完整工具」);custom/MCP per-agent 暂不接,
     // 需要时按 agent.tools 走 loadCustomTools 即可补上。
   };
@@ -256,7 +272,7 @@ async function runGroupTurn(ctx: ChatMessage[], agent: NormalAgentDef, p: GroupC
       let content: string;
       let isError = false;
       if (decision.action === 'reject') {
-        content = '用户拒绝了该操作。';
+        content = 'The user rejected this operation.';
         isError = true;
       } else {
         const execCall = decision.argsOverride
@@ -270,7 +286,7 @@ async function runGroupTurn(ctx: ChatMessage[], agent: NormalAgentDef, p: GroupC
       ctx.push({ role: 'tool', content, tool_call_id: call.id } as ChatMessage);
     }
   }
-  return { text: (text || '(本轮未发言)').slice(0, SPEECH_CAP), cost };
+  return { text: (text || '(no remark this round)').slice(0, SPEECH_CAP), cost };
 }
 
 /** 投票:在 agent 私有上下文末尾临时挂一条投票指令,强制调 cast_vote;不污染发言上下文(不回写)。 */
@@ -306,7 +322,7 @@ async function runHostSummary(transcript: TranscriptEntry[], p: GroupChatParams,
   const body = transcript.map((t) => `【${t.name}】\n${t.text}`).join('\n\n');
   const messages: ChatMessage[] = [
     { role: 'system', content: HOST_PROMPT } as ChatMessage,
-    { role: 'user', content: `以下是完整的群聊讨论记录:\n\n${body}` } as ChatMessage,
+    { role: 'user', content: `Here is the full record of the group discussion:\n\n${body}` } as ChatMessage,
   ];
   const payload = await llm.buildProviderPayload({
     model, apiModelId, messages, projectSource: p.appId, temperature: 0.4,
@@ -318,7 +334,7 @@ async function runHostSummary(transcript: TranscriptEntry[], p: GroupChatParams,
     onToken: (d) => { streamed += d; void publish(p.runId, 'token', { delta: d, agentId: HOST_SLUG }); },
   });
   const cost = await account(p, res, p.modelId, model, HOST_SLUG, meter);
-  return { text: (res.content || streamed || '(无总结)').slice(0, SPEECH_CAP), cost };
+  return { text: (res.content || streamed || '(no summary)').slice(0, SPEECH_CAP), cost };
 }
 
 /** 计费 + 发 usage 事件(usage 取自真实 provider 用量,即使 noop 计费也让前端 token 表生效)。 */
@@ -373,40 +389,41 @@ function sanitizeTempAgents(raw: any): NormalAgentDef[] {
 function buildGroupSystem(agent: NormalAgentDef, roster: string, topic: string): string {
   return (
     (agent.systemPrompt ? agent.systemPrompt.trim() + '\n\n' : '') +
-    '## 群聊模式\n' +
-    '你正在参与一个多 Agent 群聊讨论。在场成员:\n' +
+    (agent.soul && agent.soul.trim() ? '## Persona\n' + agent.soul.trim() + '\n\n' : '') +
+    '## Group Chat Mode\n' +
+    'You are participating in a multi-agent group discussion. Members present:\n' +
     roster +
     '\n\n' +
-    `你是「${agent.name}」。规则:\n` +
-    '- 每轮你会先看到其他成员的新发言,然后轮到你发言。基于全部讨论给出**你自己**的观点:可以赞同、质疑、补充或提出新方案,但要保持你的专业视角与人格,不要无脑附和。\n' +
-    '- 称呼某位成员用 @<名字>;引用其原话用 markdown 引用块(以 > 开头)。\n' +
-    '- 简洁、有据、对事不对人。必要时可用工具(读文件/搜索/执行等)佐证你的观点,但发言才是产出。\n' +
-    `- 本次讨论的主题(用户最初的消息):${topic}`
+    `You are "${agent.name}". Rules:\n` +
+    "- Each round you first see other members' new remarks, then it is your turn. Give **your own** view based on the whole discussion: you may agree, challenge, add to, or propose something new, but keep your professional perspective and persona — do not blindly agree.\n" +
+    '- Address a member with @<name>; quote their words with a markdown blockquote (starting with >).\n' +
+    '- Be concise and well-grounded; address the issue, not the person. Use tools (read files/search/run, etc.) to support your view when needed, but your remark is the deliverable.\n' +
+    `- The topic of this discussion (the user's initial message): ${topic}`
   );
 }
 
 function formatDelta(delta: TranscriptEntry[], selfName: string): string {
-  if (!delta.length) return `现在轮到你(${selfName})发言。`;
+  if (!delta.length) return `It is now your turn (${selfName}) to speak.`;
   const lines = delta
-    .map((t) => (t.slug === USER_SLUG ? `【用户】${t.text}` : `@${t.name}:\n${t.text}`))
+    .map((t) => (t.slug === USER_SLUG ? `[User] ${t.text}` : `@${t.name}:\n${t.text}`))
     .join('\n\n');
-  return `群里的新发言:\n\n${lines}\n\n———\n现在轮到你(${selfName})发言。可以 @ 某位成员,或用 > 引用其发言。`;
+  return `New remarks in the group:\n\n${lines}\n\n———\nIt is now your turn (${selfName}) to speak. You may @ a member, or quote their remark with >.`;
 }
 
 const VOTE_PROMPT =
-  '本轮讨论到此。综合目前所有发言,你认为这场群聊讨论是否应当结束了(议题已充分讨论 / 已达成共识 / 继续也无新增价值)?' +
-  '请只调用 cast_vote 表态,不要输出其他文字。';
+  'This round ends here. Considering all remarks so far, do you think this group discussion should end (the topic has been discussed thoroughly / consensus reached / continuing adds no new value)? ' +
+  'Only call cast_vote to indicate your position; do not output any other text.';
 
 const CAST_VOTE_DEF: Tool = {
   type: 'function',
   function: {
     name: 'cast_vote',
-    description: '对「是否结束本次群聊讨论」投票表态。',
+    description: 'Vote on whether to end this group discussion.',
     parameters: {
       type: 'object',
       properties: {
-        end: { type: 'boolean', description: 'true=应当结束讨论;false=应当继续' },
-        reason: { type: 'string', description: '一句话理由' },
+        end: { type: 'boolean', description: 'true = should end the discussion; false = should continue' },
+        reason: { type: 'string', description: 'One-sentence reason' },
       },
       required: ['end'],
     },
@@ -414,12 +431,12 @@ const CAST_VOTE_DEF: Tool = {
 };
 
 const HOST_PROMPT =
-  '你是这场多 Agent 群聊的主持人。请基于完整讨论记录,为用户做一份清晰、客观的总结:\n' +
-  '1. 讨论的核心议题\n' +
-  '2. 各方主要观点(按成员归纳)\n' +
-  '3. 达成的共识与仍存在的分歧\n' +
-  '4. 结论与可执行建议\n' +
-  '用中文,条理清晰、简洁,不要逐字复述发言。';
+  'You are the moderator of this multi-agent group chat. Based on the full discussion record, give the user a clear, objective summary:\n' +
+  '1. The core topic of the discussion\n' +
+  '2. Each side\'s main points (grouped by member)\n' +
+  '3. Consensus reached and remaining disagreements\n' +
+  '4. Conclusions and actionable recommendations\n' +
+  "Write in the user's language, well-organized and concise; do not restate remarks verbatim.";
 
 class AbortLikeError extends Error {
   constructor() {

@@ -14,6 +14,7 @@ export const COMMANDS: CommandSpec[] = [
   { name: '/model', desc: '切换模型：/model <id>' },
   { name: '/sessions', desc: '列出最近会话' },
   { name: '/resume', desc: '恢复会话并续聊：/resume <id|序号>' },
+  { name: '/branch', desc: '从某条回复后分支新会话（继承历史）：/branch [序号]，缺省最近' },
   { name: '/approval', desc: '切换审批档：/approval readonly|auto-edit|full-auto' },
   { name: '/think', desc: '思考强度：/think off|low|medium|high（思考内容默认折叠）' },
   { name: '/loop', desc: '最大循环轮数：/loop <1-200>（默认 90；耗尽会提示）' },

@@ -20,6 +20,7 @@ import { createMcpManager } from '../mcp/manager.js';
 import { createEngineManager } from '../engines/index.js';
 import { loadTanguEnv } from '../core/tanguHome.js';
 import { activateAllPlugins } from '../plugins/bootstrap.js';
+import { seedBuiltinSkills } from '../skills/localSkills.js';
 
 async function main(): Promise<void> {
   loadTanguEnv(); // ~/.tangu/.env → process.env(不覆盖真实环境);须先于 parseConfig
@@ -54,6 +55,9 @@ async function main(): Promise<void> {
 
   // 外部 agent 引擎(~/.tangu/engines.json + 内置 claude-code):host-only,云端 microserver 不装配。
   const engines = createEngineManager();
+
+  // 内置技能首启播种进 ~/.tangu/skills(像 Claude/Codex 落用户家目录,可见可改;已存在跳过,best-effort)。
+  await seedBuiltinSkills().catch(() => {});
 
   // 插件:激活全部（tool provider 全局注册 + 收集路由挂载器）。tool provider 注册无需 deps()，先于
   // createTanguModule 安全;路由挂载须**在 createTanguModule 之后**（彼时 configureTangu/deps() 才就绪）。

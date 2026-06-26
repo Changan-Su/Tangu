@@ -7,17 +7,19 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   FolderOpen, Folder, List, BookOpen, Download, Trash2, Upload, RefreshCw, FileText, Image as ImageIcon, Loader2, CornerLeftUp,
-  FolderPlus, Pencil, ExternalLink, Check, X, Eye,
+  FolderPlus, Pencil, ExternalLink, Check, X, Eye, MessageCircle,
 } from 'lucide-react'
-import type { AgentConfig, TanguDesktopConfig, UiMessage, WorkspaceFileMeta } from '../types'
+import type { AgentConfig, SubChat, TanguDesktopConfig, UiMessage, WorkspaceFileMeta } from '../types'
+import { DEFAULT_AGENT_SLUG } from '../types'
 import * as api from '../services/backendService'
 import { Markdown } from './Markdown'
 import { ChatToc } from './ChatToc'
+import { SubChatsTab } from './SubChatsTab'
 import type { PreviewTarget } from './WorkspaceFilePreview'
 import { fmtSize, b64ToBytes } from '../services/fileKinds'
 import { useI18n } from '../i18n'
 
-type Tab = 'workspace' | 'toc' | 'memory'
+type Tab = 'workspace' | 'toc' | 'memory' | 'subchats'
 
 /** 内部拖拽(拖行进文件夹)携带的源路径;区别于 OS 文件拖入('Files')。 */
 const DRAG_MIME = 'application/x-tangu-paths'
@@ -32,6 +34,8 @@ export const RightPanel: React.FC<{
   onToast: (text: string, error?: boolean) => void
   /** 打开工作区文件浮层预览(由 App 在聊天列渲染面板)。 */
   onOpenPreview: (target: PreviewTarget) => void
+  /** 当前会话的子聊天(discussion/subagent)实时内容,渲染在「子聊天」tab。 */
+  subChats?: SubChat[]
 }> = (p) => {
   const { t } = useI18n()
   const [tab, setTab] = useState<Tab>('workspace')
@@ -47,11 +51,18 @@ export const RightPanel: React.FC<{
         <button className={tab === 'memory' ? 'active' : ''} onClick={() => setTab('memory')}>
           <BookOpen size={13} /> {t('panel.tab.memory')}
         </button>
+        <button className={tab === 'subchats' ? 'active' : ''} onClick={() => setTab('subchats')}>
+          <MessageCircle size={13} /> {t('panel.tab.subchats')}
+          {p.subChats && p.subChats.length > 0 && (
+            <span style={{ marginLeft: 3, fontSize: 9, fontWeight: 700, background: 'var(--accent)', color: '#fff', borderRadius: 8, padding: '0 4px', lineHeight: '14px' }}>{p.subChats.length}</span>
+          )}
+        </button>
       </div>
       <div className="right-panel-body">
         {tab === 'workspace' && <WorkspaceTab {...p} />}
         {tab === 'toc' && <ChatToc containerRef={p.chatScrollRef} scanTrigger={p.messages.length} />}
         {tab === 'memory' && <MemoryTab {...p} />}
+        {tab === 'subchats' && <SubChatsTab cfg={p.cfg} subChats={p.subChats} />}
       </div>
     </aside>
   )
@@ -492,27 +503,30 @@ const SandboxFilesTab: React.FC<{
 
 const MemoryTab: React.FC<{
   cfg: TanguDesktopConfig
+  sessionConfig?: AgentConfig
   onToast: (t: string, e?: boolean) => void
-}> = ({ cfg, onToast }) => {
+}> = ({ cfg, sessionConfig, onToast }) => {
   const { t } = useI18n()
   const [memory, setMemory] = useState<string | null>(null)
   const [log, setLog] = useState<{ date: string; content: string } | null>(null)
   const [logDate, setLogDate] = useState('')
   const [draft, setDraft] = useState('')
+  // 当前会话 agent(无则默认);后端按 resolveMemorySlug 解析「共用默认」,这里只管传 slug。
+  const agentSlug = sessionConfig?.agentSlug || DEFAULT_AGENT_SLUG
 
   const refresh = useCallback(async () => {
     try {
-      const m = await api.getMemory(cfg)
-      setMemory(m.content || '')
+      setMemory(await api.getAgentMemory(cfg, agentSlug) || '')
     } catch (e: any) {
       setMemory(null)
       onToast(t('panel.toast.memoryLoadFail', { err: e?.message || e }), true)
     }
     try {
-      const l = await api.getLog(cfg, logDate || undefined)
-      setLog({ date: l.date, content: l.content || '' })
+      const d = new Date()
+      const date = logDate || `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      setLog({ date, content: await api.getAgentLog(cfg, agentSlug, date) || '' })
     } catch { /* log 可选 */ }
-  }, [cfg, logDate, onToast])
+  }, [cfg, agentSlug, logDate, onToast])
 
   useEffect(() => {
     void refresh()
@@ -522,7 +536,7 @@ const MemoryTab: React.FC<{
     const text = draft.trim()
     if (!text) return
     try {
-      const r = await api.appendMemory(cfg, text)
+      const r = await api.appendMemory(cfg, text, agentSlug)
       onToast(r.appended ? t('panel.toast.memorySaved') : t('panel.toast.memoryNotWritten'))
       setDraft('')
       void refresh()

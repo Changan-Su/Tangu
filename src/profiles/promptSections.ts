@@ -6,37 +6,37 @@ import type { PromptSectionCtx, PromptSections } from '../seams/appProfile.js';
 
 /** 「记忆与日志」使用指引(用户记忆段之后、技能段之前)。 */
 export const MEMORY_LOG_GUIDANCE =
-  '## 记忆与日志\n' +
-  '- 遇到值得长期保留的用户事实/偏好，用 `remember` 工具记入长期记忆（跨会话保留，勿记一次性细节）。\n' +
-  '- 完成的事/结论/产出可用 `log_event` 记入当天日志；需回顾历史用 `read_log` 查看某天。';
+  '## Memory & Logs\n' +
+  '- When you encounter a user fact/preference worth keeping long-term, use the `remember` tool to store it in long-term memory (persists across sessions; do not store one-off details).\n' +
+  '- Record completed work/conclusions/outputs to the current day\'s log with `log_event`; use `read_log` to review a specific day when you need history.';
 
 /** host 模式(本地直连):真实文件系统 + shell 的执行环境说明。 */
 export function hostEnvSection(cwd?: string): string {
   return (
-    '## 本地执行环境（重要）\n' +
-    `你运行在**用户本机**，当前工作目录是 \`${cwd || process.cwd()}\`。\n` +
-    '- 用 `run_bash` 执行 shell 命令；`list_dir`/`read_file` 查看；`edit_file` 做精确局部修改、`write_file` 写新文件——全部作用于真实文件系统（相对路径相对当前工作目录解析）。\n' +
-    '- 查实时网页信息优先用 `browser_search`；需要打开网页、点击、输入或截图时使用 `browser_navigate` / `browser_snapshot` / `browser_click` / `browser_type` / `browser_screenshot`。\n' +
-    '- 优先用 `edit_file`（唯一匹配的 old_string→new_string）做小改，不要整文件重写。\n' +
-    '- 破坏性操作（写文件 / 跑命令）可能需要用户审批；被拒绝时换方案或询问用户，不要反复重试同一操作。'
+    '## Local Execution Environment (important)\n' +
+    `You are running on the **user's own machine**; the current working directory is \`${cwd || process.cwd()}\`.\n` +
+    '- Use `run_bash` to run shell commands; `list_dir`/`read_file` to inspect; `edit_file` for precise local edits and `write_file` for new files — all act on the real filesystem (relative paths resolve against the current working directory).\n' +
+    '- For live web information prefer `browser_search`; to open a page, click, type, or take a screenshot use `browser_navigate` / `browser_snapshot` / `browser_click` / `browser_type` / `browser_screenshot`.\n' +
+    '- Prefer `edit_file` (a single matching old_string→new_string) for small changes; do not rewrite whole files.\n' +
+    '- Destructive operations (writing files / running commands) may require user approval; when denied, switch approach or ask the user — do not retry the same operation repeatedly.'
   );
 }
 
 /** sandbox 模式:文件输出位置(最常见的「产物丢失」原因:模型把文件写到工作区之外)。 */
 export const SANDBOX_OUTPUT_SECTION =
-  '## 文件输出位置（重要）\n' +
-  '本会话有一个**工作区**，是唯一会被保留并回流给用户的地方。' +
-  '用 `write_file` 或在 `run_python` 里写文件时，一律用**相对路径**（如 `report.docx`、`out/data.csv`）——' +
-  '它就落在工作区里（run_python 的当前目录 /workspace，等价 /mnt/data）。\n' +
-  '**不要**把要交付的产物写到 `/tmp`、`~/`(HOME) 或其他绝对路径——那些不在工作区、不会保留，文件会丢失。';
+  '## File Output Location (important)\n' +
+  'This session has a **workspace**, the only place that is preserved and returned to the user. ' +
+  'When writing files with `write_file` or inside `run_python`, always use **relative paths** (e.g. `report.docx`, `out/data.csv`) — ' +
+  'they land in the workspace (run_python\'s current directory is /workspace, equivalent to /mnt/data).\n' +
+  '**Do not** write deliverables to `/tmp`, `~/` (HOME), or other absolute paths — those are outside the workspace, are not preserved, and the files will be lost.';
 
 /** sandbox 模式:执行效率约束(最影响耗时的是模型「生成量」:慢模型 ~50 tok/s,写 8000 token 要 ~160s)。 */
 export const EFFICIENCY_SECTION =
-  '## 执行效率（重要）\n' +
-  '- 生成文档直接用 python-docx / openpyxl / python-pptx **一步写出目标文件**；' +
-  '不要先写中间 md/txt 再转换、不要把同一份内容生成两遍、不要手搓 OOXML/XML、不用 docx-js/pandoc/node。\n' +
-  '- 严格按用户要求的篇幅产出，不要无谓加长（生成越多越慢）。\n' +
-  '- run_python 尽量一次写完整脚本，减少往返轮次。';
+  '## Execution Efficiency (important)\n' +
+  '- To generate documents, use python-docx / openpyxl / python-pptx to **write the target file in one step**; ' +
+  'do not write an intermediate md/txt and convert, do not generate the same content twice, do not hand-craft OOXML/XML, and do not use docx-js/pandoc/node.\n' +
+  '- Produce exactly the length the user asked for; do not pad needlessly (the more you generate, the slower it is).\n' +
+  '- In run_python, write the full script in one pass where possible to reduce round-trips.';
 
 /** 默认段落装载(AI Studio 与 Tangu 当前文本一致;per-app 差异化在各自工厂覆盖)。 */
 export function defaultPromptSections(ctx: PromptSectionCtx): PromptSections {

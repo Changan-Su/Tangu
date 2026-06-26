@@ -9,6 +9,7 @@ import { createRun } from '../services/runStore.js';
 import { enqueueRun, abortRun } from '../services/agentLoop.js';
 import { subscribe } from '../services/eventBus.js';
 import { compactSession } from '../services/compaction.js';
+import { branchSession } from '../services/sessionBranch.js';
 import { modelContextWindow } from '../services/contextBudget.js';
 import { listAgents, getAgent } from '../agents/agentRegistry.js';
 import { loadSpecialAgentsConfig, saveSpecialAgentsConfig } from '../services/specialAgentsConfig.js';
@@ -27,7 +28,7 @@ import { InquiryPrompt } from './components/InquiryPrompt.js';
 import type { TuiConfig } from './config.js';
 import type { ApprovalMode } from './types.js';
 
-const RUN_AFFECTING = new Set(['/new', '/resume', '/retry', '/compact']);
+const RUN_AFFECTING = new Set(['/new', '/resume', '/retry', '/compact', '/branch']);
 
 interface MutableConfig {
   model: string;
@@ -438,6 +439,42 @@ export function App({ boot, storage }: { boot: TuiConfig; storage: string }): Re
         }
         return;
       }
+      case '/branch': {
+        // 从当前会话某条 AI 回复(含)处分支出新会话,继承到该点为止的历史,并切入新会话续聊。
+        try {
+          const replies = await query<any[]>(
+            `SELECT id FROM chat_messages WHERE session_id = ? AND role IN ('model', 'assistant')
+             ORDER BY timestamp ASC`,
+            [sessionIdRef.current],
+          );
+          if (!replies.length) { notice('当前会话还没有可分支的 AI 回复', 'warn'); return; }
+          let pick = replies.length - 1; // 缺省:最近一条回复
+          if (rest) {
+            const n = Number(rest);
+            if (!Number.isInteger(n) || n < 1 || n > replies.length) {
+              notice(`用法：/branch [序号]（1-${replies.length}，缺省=最近回复）`, 'warn');
+              return;
+            }
+            pick = n - 1;
+          }
+          const r = await branchSession({
+            sourceSessionId: sessionIdRef.current,
+            userId,
+            appId: 'tangu',
+            messageId: replies[pick].id,
+          });
+          if (!r) { notice('分支失败：源会话或消息不存在', 'error'); return; }
+          const { items } = await loadSessionItems(r.id, 1);
+          sessionIdRef.current = r.id;
+          setSessionId(r.id);
+          setCfg((c) => ({ ...c, seedSystem: undefined }));
+          dispatch({ type: 'RESET_SESSION', items });
+          notice(`已分支到新会话 ${String(r.id).slice(0, 8)}（继承 ${r.copied} 条消息），继续聊将走新分支`, 'success');
+        } catch (e: any) {
+          notice(`分支失败：${e?.message || e}`, 'error');
+        }
+        return;
+      }
       case '/memory': {
         try {
           const mem = await deps().brain.memory.getMemory(userId);
@@ -462,7 +499,7 @@ export function App({ boot, storage }: { boot: TuiConfig; storage: string }): Re
         try {
           const skills = (await deps().brain.assets.listSkills?.({ visibleOnly: true, forUser: userId })) || [];
           if (!skills.length) {
-            notice('暂无可用技能(本地技能放 ~/.tangu/skills/<id>/SKILL.md,自动识别 ~/.claude/skills)。');
+            notice('暂无可用技能(把技能放进 ~/.tangu/skills/<id>/SKILL.md;外部引擎技能在桌面端「设置 → Agent CLIs」导入)。');
             return;
           }
           const enabled = new Set(cfgRef.current.enabledSkillIds || []);

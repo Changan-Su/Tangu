@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
 import { checkWritePath, isOutsideWorkspace } from '../src/tools/fsPolicy.js';
+import { agentsDir, DEFAULT_AGENT_SLUG } from '../src/core/tanguHome.js';
 
 const ctx = (cwd: string) => ({ cwd } as any);
 const ws = path.resolve('/tmp/forsion-ws-test');
@@ -23,6 +24,11 @@ describe('fsPolicy.checkWritePath', () => {
 
   it('hard-denies writes into ~/.ssh', () => {
     expect(checkWritePath(ctx(ws), path.join(os.homedir(), '.ssh', 'id_rsa')).hardDeny).toBe(true);
+  });
+
+  it('allows the agent to write its own Library (home is a writable root, no escalation)', () => {
+    const lib = path.join(agentsDir(), DEFAULT_AGENT_SLUG, 'Library', 'notes.md');
+    expect(checkWritePath(ctx(ws), lib)).toEqual({ ok: true, hardDeny: false, reason: '' });
   });
 });
 

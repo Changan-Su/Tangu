@@ -16,6 +16,12 @@ import { subscribe } from './eventBus.js';
 import { resolveApproval } from './approvals.js';
 import { IlinkClient, ILINK_BASE_URL } from '../wechat/ilinkClient.js';
 import { IlinkRuntime } from '../wechat/ilinkRuntime.js';
+import { readAgentsMeta, listAgents, getAgent } from '../agents/agentRegistry.js';
+import { splitMessage, segmentDelayMs } from '../wechat/splitMessage.js';
+import { isPluginEnabledSync, getPluginSettingsSync } from '../plugins/settingsStore.js';
+import { WECHAT_SEGMENT_ID } from '../plugins/builtin/wechatSegment.js';
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 type ApprovalMode = 'readonly' | 'auto-edit' | 'full-auto';
 
@@ -194,7 +200,7 @@ class WechatRemoteService {
       `SELECT b.id, b.account_id, b.peer_id, b.session_id, b.remote_approval_mode, b.is_active,
               a.status, a.wx_user_id, s.title AS session_title
        FROM tangu_wechat_bindings b
-       JOIN tangu_wechat_accounts a ON a.id = b.account_id
+       LEFT JOIN tangu_wechat_accounts a ON a.id = b.account_id
        LEFT JOIN chat_sessions s ON s.id = b.session_id
        WHERE b.user_id = ?
        ORDER BY b.updated_at DESC`,
@@ -319,6 +325,8 @@ class WechatRemoteService {
       // host 执行需要真实 cwd：优先会话已存 cwd，其次 project_path，最后兜底默认工作区
       // （兼容本次修复前创建、project_path 为空的旧绑定）。
       cwd: currentCfg.cwd || session.project_path || webotDir(),
+      // 接入 Normal Agent 机制：会话已选则用之，否则用用户设定的默认 agent（兼容无 agentSlug 的旧会话）。
+      agentSlug: currentCfg.agentSlug || readAgentsMeta().defaultSlug,
     };
     await createRun({
       id: runId,
@@ -384,10 +392,44 @@ class WechatRemoteService {
           close(false); // 退订(用户回「批准」时会新建一次等待重新订阅);保留 run + 待批登记
           return;
         }
-        if (ev.type === 'done') { deliver(String(ev.payload?.content || '完成。')); close(true); return; }
+        if (ev.type === 'done') {
+          // 分段消息(本地全局性插件):开启时把回复拆成多条依次发出;否则单条(行为与现状逐字节一致)。
+          void this.deliverReply(String(ev.payload?.content || '完成。'), deliver, () => close(true), { accountId, openid, key, runId });
+          return;
+        }
         if (ev.type === 'error') { deliver(ev.payload?.aborted ? '任务已停止。' : `任务失败：${ev.payload?.error || 'unknown error'}`); close(true); }
       });
     });
+  }
+
+  /**
+   * 把一条 done 回复送达微信。分段消息插件开启时拆成多条:首段走 deliver(同步回复),其余段
+   * 等拟人延迟后经 deliver→runtime.send 推送;被「停止」/新任务取代(activeRunsByPeer 变更)即停发。
+   * 末了调 done() 收尾(停 typing + 清 peer 态)。typing 由 startTyping 的 5s 定时器在分段期间保持。
+   */
+  private async deliverReply(
+    content: string,
+    deliver: (text: string) => void,
+    done: () => void,
+    ctx: { accountId: string; openid: string; key: string; runId: string },
+  ): Promise<void> {
+    try {
+      const on = isPluginEnabledSync(WECHAT_SEGMENT_ID);
+      const delayBase = on ? (getPluginSettingsSync(WECHAT_SEGMENT_ID).segmentDelayMs as number | undefined) : undefined;
+      const segs = on ? splitMessage(content) : [content];
+      deliver(segs[0] ?? content);
+      for (let i = 1; i < segs.length; i++) {
+        if (activeRunsByPeer.get(ctx.key) !== ctx.runId) break; // 被停止/取代 → 停发
+        await sleep(segmentDelayMs(segs[i], delayBase));
+        if (activeRunsByPeer.get(ctx.key) !== ctx.runId) break;
+        void this.runtime?.setTyping(ctx.accountId, ctx.openid, true).catch(() => {});
+        deliver(segs[i]);
+      }
+    } catch (e) {
+      console.warn('[wechat-remote] deliverReply failed:', e);
+    } finally {
+      done();
+    }
   }
 
   // ── typing 指示(run 期间周期重发「正在输入」,出回复时停止)──
@@ -407,13 +449,22 @@ class WechatRemoteService {
 
   // ── 微信 Project(~/Tangu/webot)下的会话管理 ──
   /** 列出该用户「微信远程」Project 下的会话(标注哪个是正在连接的)。 */
-  async listProjectSessions(userId: string): Promise<Array<{ id: string; title: string; updated_at: any; connected: boolean }>> {
+  async listProjectSessions(userId: string): Promise<Array<{ id: string; title: string; updated_at: any; connected: boolean; agentSlug: string | null }>> {
     const rows = await query<any[]>(
-      `SELECT id, title, updated_at FROM chat_sessions WHERE user_id = ? AND project_path = ? ORDER BY updated_at DESC`,
+      `SELECT id, title, updated_at, agent_config FROM chat_sessions WHERE user_id = ? AND project_path = ? ORDER BY updated_at DESC`,
       [userId, webotDir()],
     );
     const connected = await this.currentBoundSessionId(userId);
-    return rows.map((r) => ({ id: r.id, title: r.title || 'WeChat Remote', updated_at: r.updated_at, connected: r.id === connected }));
+    return rows.map((r) => ({ id: r.id, title: r.title || 'WeChat Remote', updated_at: r.updated_at, connected: r.id === connected, agentSlug: (parseJson(r.agent_config) || {}).agentSlug || null }));
+  }
+
+  /** 设置某会话使用的 Normal Agent(merge agentSlug;微信主界面 / desktop 选 agent 用)。 */
+  async setSessionAgent(userId: string, sessionId: string, slug: string): Promise<{ ok: boolean }> {
+    const rows = await query<any[]>(`SELECT agent_config FROM chat_sessions WHERE id = ? AND user_id = ? LIMIT 1`, [sessionId, userId]);
+    if (!rows[0]) throw new Error('Session not found');
+    const cfg = parseJson(rows[0].agent_config) || {};
+    await deps().state.setAgentConfig(sessionId, JSON.stringify({ ...cfg, agentSlug: slug }));
+    return { ok: true };
   }
 
   /** 当前活跃绑定指向的会话 id(正在连接的 session)。 */
@@ -474,7 +525,7 @@ class WechatRemoteService {
     const id = uuidv4();
     await deps().state.autoCreateSession({ id, userId, appId: profile.appId, title: title || 'WeChat Remote', modelId: mid });
     await query(`UPDATE chat_sessions SET project_path = ? WHERE id = ?`, [ws, id]);
-    await deps().state.setAgentConfig(id, JSON.stringify({ execMode: 'host', approvalMode: defaultApprovalMode(), cwd: ws }));
+    await deps().state.setAgentConfig(id, JSON.stringify({ execMode: 'host', approvalMode: defaultApprovalMode(), cwd: ws, agentSlug: readAgentsMeta().defaultSlug }));
     return id;
   }
 
@@ -501,8 +552,25 @@ class WechatRemoteService {
       await this.setConnectedSession(binding.user_id, items[n - 1].id);
       return `✓ 已切换到会话 ${n}:${items[n - 1].title || '未命名'}。`;
     }
+    if (c === 'agents' || c === 'agentlist') {
+      const all = await listAgents();
+      if (!all.length) return '还没有可用的 Agent。回复 /help 查看其它命令。';
+      const rows = await query<any[]>(`SELECT agent_config FROM chat_sessions WHERE id = ? LIMIT 1`, [binding.session_id]);
+      const cur = (parseJson(rows[0]?.agent_config) || {}).agentSlug || readAgentsMeta().defaultSlug;
+      const lines = all.map((a) => `${a.slug === cur ? '● ' : ''}${a.slug} — ${a.name}`);
+      return `可用 Agent(● 为当前):\n${lines.join('\n')}\n\n回复 /agent <slug> 切换。`;
+    }
+    if (c === 'agent') {
+      if (!arg) return '用法:/agent <slug>。回复 /agents 查看可用 Agent。';
+      const def = await getAgent(arg);
+      if (!def) return `未找到 Agent: ${arg}。回复 /agents 查看可用列表。`;
+      const rows = await query<any[]>(`SELECT agent_config FROM chat_sessions WHERE id = ? AND user_id = ? LIMIT 1`, [binding.session_id, binding.user_id]);
+      const cfg = parseJson(rows[0]?.agent_config) || {};
+      await deps().state.setAgentConfig(binding.session_id, JSON.stringify({ ...cfg, agentSlug: def.slug }));
+      return `✓ 已切换到 Agent:${def.name}(${def.slug})。之后本会话的消息都用它。`;
+    }
     if (c === 'help' || c === 'h' || c === '帮助' || c === '?') {
-      return ['可用命令:', '/new 新建会话并切换连接', '/list 列出会话(● 为正在连接)', '/switch <序号> 切换正在连接的会话', '/help 显示本帮助', '停止 中止当前任务', '批准 / 拒绝 处理待批操作'].join('\n');
+      return ['可用命令:', '/new 新建会话并切换连接', '/list 列出会话(● 为正在连接)', '/switch <序号> 切换正在连接的会话', '/agents 列出可用 Agent', '/agent <slug> 切换本会话的 Agent', '/help 显示本帮助', '停止 中止当前任务', '批准 / 拒绝 处理待批操作'].join('\n');
     }
     return `未知命令 /${parts[0]}。回复 /help 查看可用命令。`;
   }

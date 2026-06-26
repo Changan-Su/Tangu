@@ -19,6 +19,12 @@ export interface SkillLoadout {
   enabledSkillIds: string[];
   /** 进 system prompt 的技能段（0-2 段：Skill Instructions / Available Skills，构建文本与原内联逐字节一致）。 */
   sections: string[];
+  /**
+   * 本轮 /skill 点名的技能（指针，**不内联正文进 system**）：调用方据此在「尾部 user 消息」拼
+   * 「先 use_skill」强指令,正文由 use_skill 按需取回、落对话尾部。参考 Hermes 的「指针+按需加载」——
+   * 每条 /skill 都不改 system 前缀字节,前缀缓存照常命中(对比旧做法:正文进 system,/skill 轮整段前缀 miss)。
+   */
+  requested: Array<{ id: string; name: string; description: string }>;
 }
 
 export async function loadSkillLoadout(
@@ -63,6 +69,26 @@ export async function loadSkillLoadout(
     }
   }
 
+  // 本轮用户经 /skill 显式点选的技能(per-message,与持久 enabledSkillIds 正交):
+  // 加性——并入可用集(准许 use_skill),**绝不收窄目录**(修复「点选一个技能,其它都不识别」);
+  // 但**不内联正文进 system**(参考 Hermes:指针+按需加载)——正文由 use_skill 取回、落对话尾部,
+  // 强指令由调用方拼到尾部 user 消息,这样 /skill 轮不改 system 前缀字节,前缀缓存照常命中。
+  const requestedIds: string[] = Array.isArray(agentConfig.requestedSkillIds) ? agentConfig.requestedSkillIds : [];
+  const requested: Array<{ id: string; name: string; description: string }> = [];
+  if (requestedIds.length) {
+    const skills = (
+      await Promise.all(requestedIds.map((id: string) => getSkill(id).catch(() => null)))
+    ).filter(Boolean) as any[];
+    for (const s of skills) {
+      if (!enabledSkillIds.includes(s.id)) enabledSkillIds = [...enabledSkillIds, s.id]; // 准许 use_skill 访问
+      // 已由尾部「指定技能」强指令点名,从普通目录/内联摘掉避免重复列出。
+      deferredSkills = deferredSkills.filter((d) => d.id !== s.id);
+      inlineSkills = inlineSkills.filter((i) => i.name !== s.name);
+      requested.push({ id: s.id, name: s.name, description: String(s.description || '').trim() });
+      if (s.content) void materializeSkill(userId, appId, s.id, s.content).catch(() => {});
+    }
+  }
+
   const sections: string[] = [];
   if (inlineSkills.length) {
     sections.push(
@@ -75,11 +101,11 @@ export async function loadSkillLoadout(
       .map((s) => `- ${s.name} (id: \`${s.id}\`)${s.description ? ` — ${s.description}` : ''}`)
       .join('\n');
     sections.push(
-      '## Available Skills (按需加载)\n' +
-        '以下技能体量较大，未展开。当任务匹配某技能时，**先调用 `use_skill` 工具（传其 id）拿到完整说明书再执行**，' +
-        '不要凭空假设其细节。无关的简单问题不必调用。\n\n' +
+      '## Available Skills (load on demand)\n' +
+        'The following skills are large and not expanded here. When a task matches a skill, **first call the `use_skill` tool (passing its id) to obtain the full instructions, then act**; ' +
+        'do not assume its details. No need to call it for unrelated simple questions.\n\n' +
         lines,
     );
   }
-  return { enabledSkillIds, sections };
+  return { enabledSkillIds, sections, requested };
 }

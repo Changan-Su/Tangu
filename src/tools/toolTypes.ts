@@ -29,6 +29,10 @@ export interface ToolContext {
   profile?: AppProfile;
   /** delegate 子代理深度(0/缺省=主 loop,1=子代理内)。深度 ≥1 时 delegate 工具不可见,防递归裂变。 */
   subAgentDepth?: number;
+  /** 本 run 激活的 Normal Agent 定义 slug(start_discussion 的「分身」据此取主 agent 人设;缺省=默认 agent)。 */
+  agentSlug?: string;
+  /** 讨论 run 标记:start_discussion 起的后台群聊 run 内,start_discussion/wait_discussion 不可见(防递归)。 */
+  inDiscussion?: boolean;
   /** 计划模式(类 Claude plan mode):只暴露只读工具 + exit_plan_mode;custom/MCP 工具一并隐藏。 */
   planMode?: boolean;
   /** Muse run 标记:仅此时 add_muse_todo(Muse 唯一写权限)可见。 */

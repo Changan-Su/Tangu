@@ -366,6 +366,30 @@ registerMessages({
     "zh": "记忆",
     "en": "Memory"
   },
+  "panel.tab.subchats": {
+    "zh": "子聊天",
+    "en": "Sub-chats"
+  },
+  "panel.subchats.empty": {
+    "zh": "暂无子聊天（agent 发起讨论或子代理任务时会出现在这里）",
+    "en": "No sub-chats yet (discussions or subagent tasks the agent starts appear here)"
+  },
+  "panel.subchats.live": {
+    "zh": "实时进行中…",
+    "en": "Live…"
+  },
+  "panel.subchats.connecting": {
+    "zh": "连接讨论中…",
+    "en": "Connecting…"
+  },
+  "panel.subchats.starting": {
+    "zh": "子代理启动中…",
+    "en": "Subagent starting…"
+  },
+  "panel.subchats.voteEnd": {
+    "zh": "票同意结束",
+    "en": "voted to end"
+  },
   "panel.back": {
     "zh": "返回",
     "en": "Back"
@@ -1356,6 +1380,9 @@ registerMessages({
   "group.ended.line": { "zh": "群聊结束 · 共 {rounds} 轮 · {reason}", "en": "Group chat ended · {rounds} round(s) · {reason}" },
   "group.vote.round": { "zh": "第 {round} 轮投票", "en": "Round {round} vote" },
   "group.vote.tally": { "zh": "{end}/{total} 赞成结束", "en": "{end}/{total} to end" },
+  "group.voting.inProgress": { "zh": "正在投票…", "en": "Voting…" },
+  "input.mention.groupNote": { "zh": "群内 Agent · 优先发言", "en": "Agents in group · speaks first" },
+  "input.mention.delegateNote": { "zh": "委派给 Agent · 作为 subagent 处理", "en": "Delegate to agent · runs as subagent" },
   "group.setup.title": { "zh": "群聊模式", "en": "Group chat" },
   "group.setup.close": { "zh": "关闭", "en": "Close" },
   "group.setup.hint": { "zh": "选择至少 2 个 Agent,它们会轮流发言、相互回应,每轮可投票结束。", "en": "Pick at least 2 agents — they take turns speaking, respond to each other, and can vote to end each round." },

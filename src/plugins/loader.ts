@@ -12,6 +12,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pluginsDir } from '../core/tanguHome.js';
 import {
   TANGU_PLUGIN_API,
   type TanguPlugin,
@@ -21,13 +22,21 @@ import {
 
 const MANIFEST = 'tangu-plugin.json';
 
-/** 解析 `./plugins` 目录:`TANGU_PLUGINS=off` 关闭 > `TANGU_PLUGINS_DIR` 覆盖 > 安装根相对。 */
-export function resolvePluginsDir(): string | null {
-  if (process.env.TANGU_PLUGINS === 'off') return null;
+/**
+ * 插件搜索目录(按优先级,先扫的同 id 胜):
+ *   ① <pkg>/plugins —— 随包发布的首方插件(如 forsion-worker;会进 worker 镜像)。受保护,不被用户插件顶掉。
+ *   ② ~/.tangu/plugins —— 用户安装的全局插件(可写、跨升级保留)。
+ * `TANGU_PLUGINS=off` 全关;`TANGU_PLUGINS_DIR=<path>` 只扫该目录(覆盖以上两者)。
+ */
+export function resolvePluginsDirs(): string[] {
+  if (process.env.TANGU_PLUGINS === 'off') return [];
   const override = process.env.TANGU_PLUGINS_DIR;
-  if (override) return path.resolve(override);
+  if (override) return [path.resolve(override)];
   const here = path.dirname(fileURLToPath(import.meta.url)); // <pkg>/dist/plugins
-  return path.resolve(here, '../../plugins'); // <pkg>/plugins
+  return [
+    path.resolve(here, '../../plugins'), // ① <pkg>/plugins(首方,随包/进 worker 镜像)
+    pluginsDir(), // ② ~/.tangu/plugins(用户安装的全局插件)
+  ];
 }
 
 export interface DiscoveredPlugin {
@@ -37,43 +46,48 @@ export interface DiscoveredPlugin {
   entryUrl: string;
 }
 
-/** 廉价:扫目录、读 manifest、校验 apiVersion，按 id 排序。目录缺失/为空 → `[]`。 */
+/** 廉价:扫各目录、读 manifest、校验 apiVersion，按 id 去重(先扫目录胜)后排序。目录全缺失/为空 → `[]`。 */
 export function discoverPlugins(): DiscoveredPlugin[] {
-  const root = resolvePluginsDir();
-  if (!root) return [];
-  let names: string[];
-  try {
-    names = readdirSync(root);
-  } catch (e: any) {
-    if (e?.code === 'ENOENT') return []; // 目录不存在 → no-op（OSS/Desktop 常态）
-    console.warn(`[tangu] 插件目录读取失败（忽略）:${e?.message || e}`);
-    return [];
-  }
   const found: DiscoveredPlugin[] = [];
-  for (const name of names) {
-    if (name.startsWith('.')) continue;
-    const dir = path.join(root, name);
+  const seen = new Set<string>(); // 同 id 只取第一个(高优先级目录),防用户插件顶掉首方(forsion-worker)
+  for (const root of resolvePluginsDirs()) {
+    let names: string[];
     try {
-      if (!statSync(dir).isDirectory()) continue;
-    } catch {
-      continue;
-    }
-    let manifest: TanguPluginManifest;
-    try {
-      manifest = JSON.parse(readFileSync(path.join(dir, MANIFEST), 'utf8'));
+      names = readdirSync(root);
     } catch (e: any) {
-      if (e?.code !== 'ENOENT') console.warn(`[tangu] 插件 ${name} manifest 解析失败，跳过:${e?.message || e}`);
-      continue; // 无 manifest 的子目录直接忽略
+      if (e?.code !== 'ENOENT') console.warn(`[tangu] 插件目录读取失败（忽略）:${root}:${e?.message || e}`);
+      continue; // 目录不存在 → 跳过（OSS/Desktop/无用户插件 常态)
     }
-    if (!manifest?.id || !manifest?.entry) {
-      console.warn(`[tangu] 插件 ${name} manifest 缺 id/entry，跳过`);
-      continue;
+    for (const name of names) {
+      if (name.startsWith('.')) continue;
+      const dir = path.join(root, name);
+      try {
+        if (!statSync(dir).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      let manifest: TanguPluginManifest;
+      try {
+        manifest = JSON.parse(readFileSync(path.join(dir, MANIFEST), 'utf8'));
+      } catch (e: any) {
+        if (e?.code !== 'ENOENT') console.warn(`[tangu] 插件 ${name} manifest 解析失败，跳过:${e?.message || e}`);
+        continue; // 无 manifest 的子目录直接忽略
+      }
+      if (!manifest?.id || !manifest?.entry) {
+        console.warn(`[tangu] 插件 ${name} manifest 缺 id/entry，跳过`);
+        continue;
+      }
+      if (manifest.apiVersion !== TANGU_PLUGIN_API) {
+        console.warn(`[tangu] 插件 ${manifest.id} apiVersion=${manifest.apiVersion} 与宿主 ${TANGU_PLUGIN_API} 不兼容，跳过`);
+        continue;
+      }
+      if (seen.has(manifest.id)) {
+        console.warn(`[tangu] 插件 ${manifest.id} 重复(${dir})，已被更高优先级目录加载，跳过`);
+        continue;
+      }
+      seen.add(manifest.id);
+      found.push({ manifest, dir, entryUrl: pathToFileURL(path.resolve(dir, manifest.entry)).href });
     }
-    if (manifest.apiVersion !== TANGU_PLUGIN_API) {
-      console.warn(`[tangu] 插件 ${manifest.id} apiVersion=${manifest.apiVersion} 与宿主 ${TANGU_PLUGIN_API} 不兼容，跳过`);
-      continue;
-    }
-    found.push({ manifest, dir, entryUrl: pathToFileURL(path.resolve(dir, manifest.entry)).href });
   }
   // 确定性:按 id 排序（与 MCP 的字母序纪律一致，保证工具/路由注册顺序稳定）。
   found.sort((a, b) => (a.manifest.id < b.manifest.id ? -1 : a.manifest.id > b.manifest.id ? 1 : 0));

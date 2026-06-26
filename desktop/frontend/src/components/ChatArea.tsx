@@ -4,10 +4,11 @@
  * 释放期间右下角浮出「跳到底部」按钮,点一下平滑回底并重新吸附。
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, Copy, Check, Pencil, RefreshCw, Quote } from 'lucide-react'
+import { ArrowDown, Copy, Check, Pencil, RefreshCw, Quote, GitBranch } from 'lucide-react'
 import type { UiMessage } from '../types'
 import { Markdown } from './Markdown'
 import { ThinkingBlock } from './ThinkingBlock'
+import { SystemPromptBlock } from './SystemPromptBlock'
 import { ToolCallCard } from './ToolCallCard'
 import { ApprovalCard } from './ApprovalCard'
 import { InquiryCard, PlanCard, TodoList } from './InquiryCard'
@@ -33,6 +34,12 @@ const GroupVoteChip: React.FC<{ vote: NonNullable<UiMessage['groupVote']> }> = (
   )
 }
 
+/** 取名字首字符(汉字/字母/emoji 安全)做头像占位。 */
+function firstChar(s?: string): string {
+  const t = (s || '').trim()
+  return t ? Array.from(t)[0].toUpperCase() : '?'
+}
+
 export const ChatArea: React.FC<{
   messages: UiMessage[]
   containerRef?: React.RefObject<HTMLDivElement | null> // 由 App 提供以与右侧「目录」共享滚动容器
@@ -42,11 +49,23 @@ export const ChatArea: React.FC<{
   onEditResend?: (messageId: string, newText: string) => void
   /** 重新生成某条助手消息(截断到其上一条用户消息后,以原输入重跑)。running 时禁用。 */
   onRegenerate?: (messageId: string) => void
+  /** 从某条助手消息(含)处分支出新会话(继承到该点为止的历史)。running 时禁用。 */
+  onBranch?: (messageId: string) => void
   /** 是否有在飞 run:为真时禁用编辑/重生成(避免截断正在跑的会话)。 */
   running?: boolean
   /** 划线引用:在聊天区选中文字 → 浮出「引用」→ 回调把选中文本提升到输入框。 */
   onQuote?: (text: string) => void
-}> = ({ messages, containerRef, onApproval, onInquiry, onEditResend, onRegenerate, running, onQuote }) => {
+  /** 当前会话激活 agent 的名/头像(非群聊单 agent 时显示在 AI 气泡;无头像用首字母)。 */
+  agentName?: string
+  agentAvatarUrl?: string
+  /** 当前登录用户的名/头像(显示在用户气泡;无头像用首字母)。 */
+  userName?: string
+  userAvatarUrl?: string
+  /** 群聊各发言人头像:slug → objectURL(无则首字母)。 */
+  avatars?: Record<string, string>
+  /** 群聊正在投票:底部「正在投票」动画(App 已 && running 兜底)。 */
+  groupVoting?: boolean
+}> = ({ messages, containerRef, onApproval, onInquiry, onEditResend, onRegenerate, onBranch, running, groupVoting, onQuote, agentName, agentAvatarUrl, userName, userAvatarUrl, avatars }) => {
   const { t } = useI18n()
   const internalRef = useRef<HTMLDivElement>(null)
   // 划线引用浮动按钮:坐标相对外层 .chat-area(不随聊天滚动漂移)。
@@ -236,6 +255,12 @@ export const ChatArea: React.FC<{
                 </div>
               ) : (
                 <div className="msg-user-wrap">
+                  <div className="msg-role msg-role-with-avatar user">
+                    {userAvatarUrl
+                      ? <img className="msg-avatar" src={userAvatarUrl} alt="" />
+                      : <span className="msg-avatar fallback">{firstChar(userName)}</span>}
+                    <span>{userName || t('chat.you')}</span>
+                  </div>
                   <div className="msg-user-bubble">
                     {m.attachments?.length ? (
                       <div className="msg-attach-grid">
@@ -287,14 +312,22 @@ export const ChatArea: React.FC<{
               ref={m.id === streamingId ? streamingNodeRef : undefined}
             >
               {m.agentName ? (
-                <div className="msg-role" style={m.agentColor ? { color: m.agentColor } : undefined} title={m.agentId}>
-                  <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: m.agentColor || 'currentColor', marginRight: 6, verticalAlign: 'middle' }} />
-                  {m.agentName}
+                <div className="msg-role msg-role-with-avatar" style={m.agentColor ? { color: m.agentColor } : undefined} title={m.agentId}>
+                  {m.agentId && avatars?.[m.agentId]
+                    ? <img className="msg-avatar" src={avatars[m.agentId]} alt="" />
+                    : <span className="msg-avatar fallback" style={m.agentColor ? { background: m.agentColor } : undefined}>{firstChar(m.agentName)}</span>}
+                  <span>{m.agentName}</span>
                 </div>
               ) : (
-                <div className="msg-role">TANGU</div>
+                <div className="msg-role msg-role-with-avatar">
+                  {agentAvatarUrl
+                    ? <img className="msg-avatar" src={agentAvatarUrl} alt="" />
+                    : <span className="msg-avatar fallback">{firstChar(agentName)}</span>}
+                  <span>{agentName || 'Tangu'}</span>
+                </div>
               )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {m.systemPrompt ? <SystemPromptBlock content={m.systemPrompt} /> : null}
                 {m.reasoning ? <ThinkingBlock reasoning={m.reasoning} streaming={m.status === 'streaming' && !m.content} /> : null}
                 {m.toolEvents?.map((t) => <ToolCallCard key={t.id} ev={t} />)}
                 {m.approvals?.map((a) => (
@@ -341,6 +374,16 @@ export const ChatArea: React.FC<{
                         <RefreshCw size={13} />
                       </button>
                     )}
+                    {onBranch && (
+                      <button
+                        className="msg-action-btn"
+                        title={t('chat.action.branch')}
+                        disabled={running}
+                        onClick={() => onBranch(m.id)}
+                      >
+                        <GitBranch size={13} />
+                      </button>
+                    )}
                   </div>
                 ) : null}
               </div>
@@ -349,6 +392,12 @@ export const ChatArea: React.FC<{
         )}
         </div>
       </div>
+      {groupVoting && (
+        <div className="voting-indicator">
+          <span className="voting-dots"><span /><span /><span /></span>
+          <span>{t('group.voting.inProgress')}</span>
+        </div>
+      )}
       {showJump && (
         <button className="jump-bottom" title={t('chat.jumpToBottom')} onClick={() => scrollToBottom(true)}>
           <ArrowDown size={16} />

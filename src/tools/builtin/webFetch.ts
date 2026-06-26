@@ -62,13 +62,13 @@ export const webFetchProvider: ToolProvider = {
         function: {
           name: 'web_fetch',
           description:
-            '抓取一个公网网页/文本/JSON 的内容并转为可读文本(HTML 自动去标签,链接保留)。' +
-            '适合读取 web_search 找到的链接、文档页、API 响应。仅 http/https 公网地址。',
+            'Fetch the content of a public web page / text / JSON and convert it to readable text (HTML tags are stripped automatically, links are kept). ' +
+            'Good for reading links found by web_search, documentation pages, or API responses. Only http/https public addresses.',
           parameters: {
             type: 'object',
             properties: {
-              url: { type: 'string', description: '要抓取的完整 URL(http/https)' },
-              max_chars: { type: 'number', description: `返回文本上限字符数(默认 ${DEFAULT_MAX_CHARS},封顶 ${HARD_MAX_CHARS})` },
+              url: { type: 'string', description: 'The full URL to fetch (http/https)' },
+              max_chars: { type: 'number', description: `Max number of characters to return (default ${DEFAULT_MAX_CHARS}, capped at ${HARD_MAX_CHARS})` },
             },
             required: ['url'],
           },

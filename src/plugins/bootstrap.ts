@@ -10,6 +10,7 @@
  *   - `activateAllPlugins`（standalone `tangu-server`）:激活全部（tool provider 全局注册 + 收集路由挂载器）。
  */
 import { registerToolProvider } from '../tools/toolRegistry.js';
+import { registerPlugin } from './registry.js';
 import { createTanguModule } from '../index.js';
 import { createHttpBrain } from '../adapters/standalone/httpBrain.js';
 import { createNoopBilling } from '../adapters/standalone/noopBilling.js';
@@ -66,6 +67,8 @@ function makeContext(d: DiscoveredPlugin, state: HostState): TanguPluginContext 
   return {
     registerCommand: (cmd) => state.commands.set(cmd.name, cmd),
     registerToolProvider: (p) => registerToolProvider(p), // 全局注册表，append 在核心 builtin 之后
+    registerPlugin: (meta) => registerPlugin({ ...meta, source: 'folder' }), // folder 插件进统一注册表
+
     registerProfile: (p) => state.profiles.set(p.appId, p),
     registerHostAdapter: (id, build) => state.hostAdapters.set(id, build),
     registerBrainAdapter: (id, build) => state.brainAdapters.set(id, build),

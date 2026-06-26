@@ -117,8 +117,9 @@ export function buildBrain(cfg: StandaloneConfig): { brain: CloudBrainServices; 
   const base = providers.length ? createMultiBrain(httpBrain, createProviderRegistry(providers)) : httpBrain;
   const localMemory = createLocalMemoryBrain();
   const brain = { ...base, assets: createLocalAssets(base.assets), memory: localMemory };
-  // 同步源:本地 store(运行时记忆来源)+ 云端 httpBrain.memory(out-of-band 推/拉)。
-  setSyncSources({ store: localMemory.store, cloud: httpBrain.memory });
+  // 同步源:云端 httpBrain(有 agentFiles 每-agent 镜像 + memory 旧全局端点)。每-agent 桶在 syncNow 内
+  // 按 cloudSync + 固定 baseDir 解析,不再依赖单 store/ALS(根治「只同步 xyra」bug)。
+  setSyncSources({ brain: httpBrain });
   return { brain, providers };
 }
 

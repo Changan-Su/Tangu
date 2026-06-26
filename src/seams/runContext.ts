@@ -14,13 +14,19 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 interface RunCtx {
   userId: string;
   runId?: string;
+  /** 本 run 激活的 Normal Agent slug —— 记忆/日志据此落到 ~/.tangu/agents/<slug>/(缺省 = 默认 agent)。 */
+  agentSlug?: string;
 }
 
 const als = new AsyncLocalStorage<RunCtx>();
 
-/** 在当前 run 的异步子树建立上下文(runLoop 顶部调用一次)。 */
-export function enterRunContext(userId: string, runId?: string): void {
-  als.enterWith({ userId, runId });
+/**
+ * 在当前 run 的异步子树建立上下文(runLoop 顶部调用一次;slug 解析出来后可再调一次覆盖)。
+ * 用 enterWith 而非 run:改写当前同步帧之后整个异步子树的 store,故 system prompt 的 getMemory
+ * 与每个 executeTool 都能读到 agentSlug。
+ */
+export function enterRunContext(userId: string, runId?: string, agentSlug?: string): void {
+  als.enterWith({ userId, runId, agentSlug });
 }
 
 /** 当前 run 的 userId(不在 run 上下文内时 undefined)。 */
@@ -31,4 +37,18 @@ export function currentRunUserId(): string | undefined {
 /** 当前 run 的 runId(thin worker 据此取该 run 的 per-dispatch token)。 */
 export function currentRunId(): string | undefined {
   return als.getStore()?.runId;
+}
+
+/** 当前 run 激活的 agent slug(本地记忆层据此选 agent 文件夹;不在 run 上下文内时 undefined)。 */
+export function currentAgentSlug(): string | undefined {
+  return als.getStore()?.agentSlug;
+}
+
+/**
+ * 在子作用域内临时把 agentSlug 改成另一个(子代理:让被委派的具名 agent 的 remember/log_event
+ * 落到它自己的文件夹),fn 结束后**自动恢复**父作用域。用 als.run(非 enterWith)故不污染父 run。
+ */
+export function runWithAgentSlug<T>(agentSlug: string, fn: () => Promise<T>): Promise<T> {
+  const cur = als.getStore();
+  return als.run({ userId: cur?.userId || '', runId: cur?.runId, agentSlug }, fn);
 }

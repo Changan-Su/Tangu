@@ -146,12 +146,12 @@ export function compactContext(msgs: ChatMessage[]): CompactResult {
     if (m.role === 'tool' && len > TOOL_FOLD_THRESHOLD) {
       m.content =
         m.content.slice(0, TOOL_FOLD_HEAD) +
-        `\n…[上下文压缩:工具输出已折叠,原 ${len} 字符]`;
+        `\n…[context compacted: tool output folded, was ${len} chars]`;
       savedChars += len - m.content.length;
     } else if ((m.role === 'user' || m.role === 'assistant') && len > MSG_TRUNC_THRESHOLD) {
       m.content =
         m.content.slice(0, MSG_TRUNC_HEAD) +
-        `\n…[上下文压缩:省略 ${len - MSG_TRUNC_HEAD - MSG_TRUNC_TAIL} 字符]…\n` +
+        `\n…[context compacted: omitted ${len - MSG_TRUNC_HEAD - MSG_TRUNC_TAIL} chars]…\n` +
         m.content.slice(-MSG_TRUNC_TAIL);
       savedChars += len - m.content.length;
     }
@@ -165,7 +165,7 @@ export function capToolResult(text: string): string {
   const omitted = text.length - TOOL_RESULT_HEAD - TOOL_RESULT_TAIL;
   return (
     text.slice(0, TOOL_RESULT_HEAD) +
-    `\n…[单条工具输出超限,省略 ${omitted} 字符]…\n` +
+    `\n…[single tool output too large, omitted ${omitted} chars]…\n` +
     text.slice(-TOOL_RESULT_TAIL)
   );
 }
@@ -176,7 +176,7 @@ export function capHistoryContent(text: string): string {
   const omitted = text.length - MSG_TRUNC_HEAD - MSG_TRUNC_TAIL;
   return (
     text.slice(0, MSG_TRUNC_HEAD) +
-    `\n…[历史消息超限,省略 ${omitted} 字符]…\n` +
+    `\n…[history message too large, omitted ${omitted} chars]…\n` +
     text.slice(-MSG_TRUNC_TAIL)
   );
 }

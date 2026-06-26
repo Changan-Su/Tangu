@@ -6,7 +6,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Send, Square, Plus, Mic, ImagePlus, X, ClipboardList, Check, ChevronDown, FileText, Users,
+  Send, Square, Plus, Mic, ImagePlus, X, ClipboardList, Check, ChevronDown, FileText, Users, Sparkles,
 } from 'lucide-react'
 import type { AgentConfig, Attachment, ModelInfo, NormalAgentDef, SkillInfo } from '../types'
 import { ModelPill, type ModelPillGroup } from './ModelPill'
@@ -65,20 +65,18 @@ export const MessageInput: React.FC<{
   groupIntensity?: AgentConfig['groupIntensity']
   groupMaxRounds?: number
   onGroupChange?: (patch: Pick<AgentConfig, 'groupChat' | 'groupAgents' | 'groupTempAgents' | 'groupIntensity' | 'groupMaxRounds'>) => void
-  /** 斜杠命令数据源:技能列表 + 本会话已启用技能 + 各动作回调。 */
+  /** 斜杠命令数据源:技能列表(/skill:<id> 把技能作为本条消息的「指定技能」chip 附上,加性、不收窄目录)。 */
   skills?: SkillInfo[] | null
-  enabledSkillIds?: string[]
-  onToggleSkill?: (id: string) => void
-  /** Normal Agent 选用(斜杠 /agent:<slug>;''=取消)。 */
+  /** Normal Agent 列表(@ 提及候选:单聊 @=委派 subagent,群聊 @=优先发言)。 */
   agents?: NormalAgentDef[]
-  activeAgentSlug?: string
-  onSelectAgent?: (slug: string) => void
   onNewSession?: () => void
+  /** 斜杠 /branch:从当前会话最近一条 AI 回复分支出新会话(继承历史)。 */
+  onBranch?: () => void
   onOpenSettings?: () => void
   onExecConfigChange: (patch: Pick<AgentConfig, 'execMode' | 'approvalMode' | 'cwd'>) => void
   /** 返回是否已受理:失败(连接/参数错)返回 false,草稿保留不清空。
    *  workspaceFiles:云沙箱拖入消息区的文件,发送时上传到会话工作区。 */
-  onSend: (text: string, attachments: Attachment[], workspaceFiles?: Attachment[]) => Promise<boolean>
+  onSend: (text: string, attachments: Attachment[], workspaceFiles?: Attachment[], skillIds?: string[], mentions?: { priorityAgent?: string; mentionAgents?: string[] }) => Promise<boolean>
   onStop: () => void
   /** 划线引用:聊天区选中的待引用文本(发送时以 markdown 引用 `> ` 拼到消息前)。 */
   quotedText?: string
@@ -94,9 +92,9 @@ export const MessageInput: React.FC<{
   engineModels, engineModelId, onEngineModelChange, engineCommands,
   thinkingLevel, onThinkingChange,
   maxIterations, onMaxIterationsChange,
-  planMode, onPlanModeChange, skills, enabledSkillIds, onToggleSkill,
+  planMode, onPlanModeChange, skills,
   groupChat, groupAgents, groupTempAgents, groupIntensity, groupMaxRounds, onGroupChange,
-  agents, activeAgentSlug, onSelectAgent, onNewSession, onOpenSettings,
+  agents, onNewSession, onBranch, onOpenSettings,
   onExecConfigChange, onSend, onStop,
   quotedText, onClearQuote,
   contextWindow, ctxTokens, sessionTokens, onCompact,
@@ -105,12 +103,18 @@ export const MessageInput: React.FC<{
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [wsFiles, setWsFiles] = useState<Attachment[]>([]) // 云沙箱待传工作区的文件
+  const [pinnedSkills, setPinnedSkills] = useState<SkillInfo[]>([]) // 本条消息经 /skill 指定的技能(chip,随消息发送;加性不收窄)
   const [hint, setHint] = useState<string | null>(null)
   const [slashIndex, setSlashIndex] = useState(0)
   const [slashSubMenu, setSlashSubMenu] = useState<'model' | null>(null) // /model 的二级菜单
   const [slashDismissed, setSlashDismissed] = useState(false) // Esc 关菜单但保留草稿
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null) // 框外控制排弹出菜单
   const [groupSetupOpen, setGroupSetupOpen] = useState(false) // 群聊设置浮层
+  const [cursorPos, setCursorPos] = useState(0) // textarea 光标(@ 提及检测用)
+  const [mentionIndex, setMentionIndex] = useState(0)
+  const [mentionDismissed, setMentionDismissed] = useState(false) // Esc 关 @ 菜单
+  const [mentionedSlug, setMentionedSlug] = useState('') // 群聊:本条 @ 的优先发言 agent(发送后清空)
+  const [mentionAgents, setMentionAgents] = useState<string[]>([]) // 单聊:本条 @ 的 subagent 委派目标(发送后清空)
   const [dragOver, setDragOver] = useState(false)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -174,31 +178,22 @@ export const MessageInput: React.FC<{
       items.push({ cmd: '/loop', desc: t('input.slash.loop', { current: maxIterations || 90 }), run: () => { setDraft('/loop '); setSlashIndex(0); requestAnimationFrame(autoGrow) } })
     }
     if (onNewSession) items.push({ cmd: '/new', desc: t('input.slash.new'), run: () => { onNewSession(); close() } })
+    if (onBranch) items.push({ cmd: '/branch', desc: t('input.slash.branch'), run: () => { onBranch(); close() } })
     if (onOpenSettings) items.push({ cmd: '/skills', desc: t('input.slash.skills'), run: () => { onOpenSettings(); close() } })
     if (onCompact) items.push({ cmd: '/compact', desc: t('input.slash.compact'), run: () => { onCompact(); close() } })
-    if (onSelectAgent && agents && agents.length) {
-      for (const a of agents) {
-        items.push({
-          cmd: `/agent:${a.slug}`,
-          desc: `${activeAgentSlug === a.slug ? '✓ ' : ''}${a.name}${a.description ? ` — ${a.description}` : ''}`,
-          run: () => { onSelectAgent(a.slug); close() },
-        })
-      }
-      if (activeAgentSlug) items.push({ cmd: '/agent:off', desc: t('input.agentCleared'), run: () => { onSelectAgent(''); close() } })
-    }
-    if (onToggleSkill) {
-      const enabled = new Set(enabledSkillIds || [])
-      for (const s of skills || []) {
+    // /skill:<id> → 把技能作为本条消息的「指定技能」chip 附上(加性,不收窄目录;参考 Codex 的 per-message skill)。
+    if (skills?.length) {
+      for (const s of skills) {
         items.push({
           cmd: `/skill:${s.id}`,
-          desc: enabled.has(s.id) ? t('input.slash.skillDisable', { name: s.name }) : t('input.slash.skillEnable', { name: s.name }),
-          run: () => { onToggleSkill(s.id); close() },
+          desc: t('input.slash.skillUse', { name: s.name }),
+          run: () => { setPinnedSkills((prev) => (prev.some((p) => p.id === s.id) ? prev : [...prev, s])); close() },
         })
       }
     }
     return items
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [planMode, thinkingLevel, maxIterations, onMaxIterationsChange, models, skills, enabledSkillIds, onPlanModeChange, onThinkingChange, onModelChange, onNewSession, onOpenSettings, onToggleSkill, onCompact, agents, activeAgentSlug, onSelectAgent, engineId, engineCommands])
+  }, [planMode, thinkingLevel, maxIterations, onMaxIterationsChange, models, skills, onPlanModeChange, onThinkingChange, onModelChange, onNewSession, onBranch, onOpenSettings, onCompact, engineId, engineCommands])
 
   const slashActive = draft.startsWith('/') && !draft.includes('\n') && !disabled && !slashDismissed
   const slashMatches = useMemo<SlashItem[]>(() => {
@@ -232,6 +227,45 @@ export const MessageInput: React.FC<{
     ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`
   }
 
+  // ── @ 提及 agent:打 @ 弹出可选 agent;群聊=该 agent 本场优先发言,非群聊=切换接下来回复的 agent ──
+  const inGroup = !!groupChat && (groupAgents?.length || 0) >= 2
+  // 候选:群聊只列群内 agent(已存 + 临时);非群聊列全部 Normal Agent。
+  const mentionPool = useMemo<NormalAgentDef[]>(() => {
+    if (!inGroup) return agents || []
+    const saved = (agents || []).filter((a) => groupAgents!.includes(a.slug))
+    const seen = new Set(saved.map((a) => a.slug))
+    return [...saved, ...(groupTempAgents || []).filter((a) => !seen.has(a.slug))]
+  }, [inGroup, agents, groupAgents, groupTempAgents])
+  // 活跃的 @ token:光标前最近一个词首 @ 到光标之间无空格。
+  const mention = useMemo(() => {
+    if (disabled || slashActive || mentionDismissed) return null
+    const m = /(?:^|\s)@([^\s@]*)$/.exec(draft.slice(0, cursorPos))
+    return m ? { query: m[1], start: cursorPos - m[1].length - 1 } : null
+  }, [draft, cursorPos, disabled, slashActive, mentionDismissed])
+  const mentionMatches = useMemo<NormalAgentDef[]>(() => {
+    if (!mention) return []
+    const q = mention.query.toLowerCase()
+    return mentionPool.filter((a) => !q || a.name.toLowerCase().includes(q) || a.slug.toLowerCase().includes(q)).slice(0, 10)
+  }, [mention, mentionPool])
+  const mentionActive = !!mention && mentionMatches.length > 0
+  useEffect(() => { setMentionIndex(0) }, [mention?.start, mention?.query])
+
+  const pickMention = (a: NormalAgentDef) => {
+    if (!mention) return
+    const before = draft.slice(0, mention.start)
+    const insert = `@${a.name} `
+    const next = before + insert + draft.slice(cursorPos)
+    setDraft(next)
+    if (inGroup) setMentionedSlug(a.slug)  // 群聊:本场优先发言
+    else setMentionAgents((prev) => (prev.includes(a.slug) ? prev : [...prev, a.slug])) // 单聊:作 subagent 委派目标
+    const caret = before.length + insert.length
+    requestAnimationFrame(() => {
+      const ta = taRef.current
+      if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = caret; setCursorPos(caret) }
+      autoGrow()
+    })
+  }
+
   const send = () => {
     const text = draft.trim()
     if (!text) return
@@ -258,11 +292,17 @@ export const MessageInput: React.FC<{
       return
     }
     setHint(null)
-    void onSend(outgoing, attachments, wsFiles).then((accepted) => {
+    const mentions = inGroup
+      ? { priorityAgent: mentionedSlug || undefined }
+      : { mentionAgents: mentionAgents.length ? mentionAgents : undefined }
+    void onSend(outgoing, attachments, wsFiles, pinnedSkills.map((s) => s.id), mentions).then((accepted) => {
       if (!accepted) return // 失败保留草稿
       setDraft('')
       setAttachments([])
       setWsFiles([])
+      setPinnedSkills([])
+      setMentionedSlug('')
+      setMentionAgents([])
       onClearQuote?.()
       requestAnimationFrame(autoGrow)
     })
@@ -455,6 +495,19 @@ export const MessageInput: React.FC<{
               ))}
             </div>
           )}
+          {pinnedSkills.length > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+              {pinnedSkills.map((s) => (
+                <span className="attach-chip" key={`skill-${s.id}`} title={t('input.skillChipTitle')}>
+                  <Sparkles size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                  <span>{s.name}</span>
+                  <button title={t('input.remove')} onClick={() => setPinnedSkills(pinnedSkills.filter((x) => x.id !== s.id))}>
+                    <X size={12} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           <textarea
             ref={taRef}
             rows={1}
@@ -463,9 +516,13 @@ export const MessageInput: React.FC<{
             disabled={disabled}
             onChange={(e) => {
               setDraft(e.target.value)
+              setCursorPos(e.target.selectionStart || 0)
               setSlashDismissed(false)
+              setMentionDismissed(false)
+              if (!e.target.value.includes('@')) { setMentionedSlug(''); setMentionAgents([]) } // @ 文本清空 → 撤销
               autoGrow()
             }}
+            onSelect={(e) => setCursorPos((e.target as HTMLTextAreaElement).selectionStart || 0)}
             onPaste={(e) => {
               // 粘贴图片(剪贴板含文件)→ 走附件;纯文本粘贴不受影响。
               if (e.clipboardData?.files?.length) {
@@ -474,6 +531,17 @@ export const MessageInput: React.FC<{
               }
             }}
             onKeyDown={(e) => {
+              // @ 提及菜单导航:↑↓ 选择,Enter/Tab 选中(不发送),Esc 关菜单
+              if (mentionActive) {
+                if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIndex((i) => (i + 1) % mentionMatches.length); return }
+                if (e.key === 'ArrowUp') { e.preventDefault(); setMentionIndex((i) => (i - 1 + mentionMatches.length) % mentionMatches.length); return }
+                if ((e.key === 'Enter' || e.key === 'Tab') && !e.nativeEvent.isComposing) {
+                  e.preventDefault()
+                  pickMention(mentionMatches[Math.min(mentionIndex, mentionMatches.length - 1)])
+                  return
+                }
+                if (e.key === 'Escape') { e.preventDefault(); setMentionDismissed(true); return }
+              }
               // 斜杠菜单导航:↑↓ 选择,Enter/Tab 执行(不发送),Esc 关菜单(保留草稿)
               if (slashActive && slashMatches.length) {
                 if (e.key === 'ArrowDown') {
@@ -523,6 +591,32 @@ export const MessageInput: React.FC<{
                 >
                   <span className="file-name" style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5 }}>{it.cmd}</span>
                   <span className="file-size">{it.desc}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {mentionActive && (
+            <div
+              style={{
+                position: 'absolute', bottom: '100%', left: 0, right: 0, marginBottom: 6,
+                background: 'var(--bg-card)', border: 'var(--border-width) solid var(--border)',
+                borderRadius: 'var(--radius-md)', maxHeight: 240, overflowY: 'auto', zIndex: 30,
+                boxShadow: '0 -4px 16px rgba(0,0,0,0.08)',
+              }}
+            >
+              <div className="menu-section" style={{ padding: '5px 10px 3px', fontSize: 11 }}>
+                {inGroup ? t('input.mention.groupNote') : t('input.mention.delegateNote')}
+              </div>
+              {mentionMatches.map((a, i) => (
+                <button
+                  key={a.slug}
+                  className="file-row"
+                  style={{ width: '100%', background: i === Math.min(mentionIndex, mentionMatches.length - 1) ? 'var(--bg-hover, rgba(127,127,127,0.12))' : undefined }}
+                  onMouseEnter={() => setMentionIndex(i)}
+                  onClick={() => pickMention(a)}
+                >
+                  <span className="file-name" style={{ fontSize: 12.5, fontWeight: 600 }}>@{a.name}</span>
+                  <span className="file-size">{a.description || a.slug}</span>
                 </button>
               ))}
             </div>

@@ -12,6 +12,7 @@
  */
 import type { Router } from 'express';
 import type { ToolProvider } from '../tools/toolRegistry.js';
+import type { PluginMeta } from './registry.js';
 import type { AppProfile } from '../seams/appProfile.js';
 import type { HostServices } from '../seams/hostServices.js';
 import type { CloudBrainServices } from '../seams/cloudBrain.js';
@@ -79,6 +80,8 @@ export interface TanguPluginContext {
   registerCommand(cmd: PluginCommand): void;
   /** 注册工具 provider（一律 append 在核心 builtin 之后，按插件加载序——保 tool-def 稳定）。 */
   registerToolProvider(p: ToolProvider): void;
+  /** 登记进统一插件注册表（在「设置 → 插件」露出 + schema 面板;带 toolProvider 则顺带注册工具）。 */
+  registerPlugin(meta: PluginMeta): void;
   /** 注册一个可被 profileStore 选用的 AppProfile（预留扩展，worker 不用）。 */
   registerProfile(p: AppProfile): void;
   /** 注册一个可命名选用的 host/brain/billing 适配器工厂（预留扩展，worker 不用）。 */

@@ -9,25 +9,28 @@ import { listThemes } from '../theme/registry'
 import { applyTheme } from '../theme/loader'
 import { testConnection } from '../services/agentRunService'
 import {
-  deleteUserCloudSkill, disconnectWechat as disconnectWechatAccount, fetchProviderModels, getSessionConfig,
-  getWechatStatus, listMessages, listModels, listSkills, listTools, pollWechatLogin, startWechatLogin,
+  deleteUserCloudSkill, disconnectWechat as disconnectWechatAccount, fetchProviderModels,
+  getWechatStatus, listModels, listSkills, listTools, pollWechatLogin, startWechatLogin,
   testProviderConnection, uploadSkillToCloud, syncNow as backendSyncNow, getSyncStatus as backendGetSyncStatus,
   type SyncStatusResult,
 } from '../services/backendService'
 import type { WechatStatusResponse } from '../services/backendService'
+import { buildSessionLogPayload, sessionLogFilename } from '../services/sessionLog'
 import type {
   AuthStatusInfo, BackendStatusInfo, DirectProviderConfig, DiscoveryResult, McpServerConfigEntry, ModelsResponse,
-  SessionRecord, SkillInfo, StoredDesktopConfig, TanguDesktopConfig, ToolsResponse,
+  SessionRecord, SkillInfo, StoredDesktopConfig, TanguDesktopConfig, ToolsResponse, UpdaterStatusInfo,
 } from '../types'
+import { SHOW_SYSTEM_PROMPT_KEY } from '../types'
 import { useI18n } from '../i18n'
 import { LocaleToggle } from './LocaleToggle'
 import { CHANGELOG } from '../changelog'
 import { ModelGroupList } from './ModelGroupList'
 import { AgentsSettings } from './AgentsSettings'
+import { PluginsTab } from './PluginsTab'
 import { AgentClisTab } from './AgentClisTab'
 import { QrImage } from './QrImage'
 
-export type Tab = 'connection' | 'forsion' | 'model' | 'mcp' | 'skills' | 'agents' | 'agent-clis' | 'browser' | 'wechat' | 'theme' | 'advanced' | 'developer' | 'about'
+export type Tab = 'connection' | 'forsion' | 'model' | 'mcp' | 'skills' | 'agents' | 'plugins' | 'agent-clis' | 'browser' | 'wechat' | 'theme' | 'advanced' | 'developer' | 'about'
 
 const DEV_MODE_KEY = 'forsion_tangu_dev_mode'
 
@@ -77,12 +80,18 @@ export const SettingsModal: React.FC<{
   const { t } = useI18n()
   const [tab, setTab] = useState<Tab>(p.initialTab ?? 'connection')
   const [appVersion, setAppVersion] = useState<string>('')
+  // 应用内自动更新状态(经 window.tangu.onUpdaterStatus 广播驱动;mac 仅检测引导手动下载)。
+  const [upd, setUpd] = useState<UpdaterStatusInfo>({ phase: 'idle' })
   // 开发者模式:关于页连点版本号 10 次解锁(持久化);解锁后多出「开发者选项」tab。
   const [devMode, setDevMode] = useState<boolean>(() => {
     try { return localStorage.getItem(DEV_MODE_KEY) === '1' } catch { return false }
   })
   const [devClicks, setDevClicks] = useState(0)
   const [devMsg, setDevMsg] = useState('')
+  // 开发者「回复前显示 system prompt」(localStorage;App.send 读同一 key 决定是否请求后端回传)。
+  const [showSysPrompt, setShowSysPrompt] = useState<boolean>(() => {
+    try { return localStorage.getItem(SHOW_SYSTEM_PROMPT_KEY) === '1' } catch { return false }
+  })
   const [draft, setDraft] = useState(p.cfg)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState('')
@@ -124,34 +133,9 @@ export const SettingsModal: React.FC<{
     setExporting(true)
     setExportMsg('')
     try {
-      // 对话与会话配置走后端 REST(messages 取后端硬上限 500 条);后端日志走主进程托管缓冲(仅 managed 模式有)。
-      const [messages, agentConfig, backendLogs] = await Promise.all([
-        listMessages(p.cfg, session.id, 500).catch(() => []),
-        getSessionConfig(p.cfg, session.id).catch(() => ({})),
-        window.tangu?.backendLogs?.().catch(() => []) ?? Promise.resolve([]),
-      ])
-      // 后端日志仅 managed(本机托管)模式有(主进程 200 行环形缓冲);external 模式恒为空——
-      // 显式标注 backendLogsAvailable,免得开发者把「空日志」当成采集失败。messagesTruncated 标注是否被 500 条上限截断。
-      const connectionMode = stored?.mode || 'external'
-      const payload = {
-        exportedAt: new Date().toISOString(),
-        app: 'Tangu Agent Desktop',
-        appVersion: appVersion || null,
-        connectionMode,
-        backendLogsAvailable: connectionMode === 'managed',
-        session: {
-          id: session.id, title: session.title, model_id: session.model_id,
-          project_path: session.project_path ?? null, project_name: session.project_name ?? null,
-          created_at: session.created_at, updated_at: session.updated_at,
-        },
-        agentConfig,
-        messageCount: messages.length,
-        messagesTruncated: messages.length >= 500,
-        messages,
-        backendLogs,
-      }
+      const payload = await buildSessionLogPayload(p.cfg, session)
       const json = JSON.stringify(payload, null, 2)
-      const filename = `tangu-session-${session.id.slice(0, 8)}-${new Date().toISOString().slice(0, 10)}.json`
+      const filename = sessionLogFilename(session)
       if (window.tangu?.saveTextFile) {
         const r = await window.tangu.saveTextFile(filename, json)
         setExportMsg(r.ok && r.path ? t('settings.advanced.exportOk', { path: r.path }) : t('settings.advanced.exportCanceled'))
@@ -269,7 +253,7 @@ export const SettingsModal: React.FC<{
     try {
       const r = await backendSyncNow(p.cfg)
       if (r.ok) {
-        setSyncMsg(t('settings.forsion.syncOk', { memory: r.memory, logs: r.logs.length }))
+        setSyncMsg(t('settings.forsion.syncOk', { memory: r.memory, logs: r.logs.length }) + (r.agents ? ` · ${r.agents} agent ↑${r.pushed ?? 0} ↓${r.pulled ?? 0}` : ''))
         if (window.tangu?.setConfig) void window.tangu.setConfig({ forsionLastSyncedAt: Date.now() }).then(setStored)
       } else {
         setSyncMsg(t('settings.forsion.syncFail', { e: r.error || '?' }))
@@ -500,6 +484,12 @@ export const SettingsModal: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.open, tab])
 
+  // 订阅更新状态(主进程经 App 启动检查或本页「检查更新」触发,事件流回这里驱动按钮态)。
+  useEffect(() => {
+    const off = window.tangu?.onUpdaterStatus?.((st) => setUpd(st))
+    return () => off?.()
+  }, [])
+
   useEffect(() => {
     if (!p.open || tab !== 'wechat' || !wechatLogin) return
     let canceled = false
@@ -554,7 +544,7 @@ export const SettingsModal: React.FC<{
     ['connection', t('settings.tab.connection')],
     ...(isDesktop ? ([['forsion', t('settings.tab.forsion')]] as Array<[Tab, string]>) : []),
     ['model', t('settings.tab.model')],
-    ...(isDesktop ? ([['mcp', 'MCP'], ['skills', t('settings.tab.skills')], ['agents', t('settings.tab.agents')], ['agent-clis', t('settings.tab.agentClis')], ['browser', t('settings.tab.browser')], ['wechat', t('settings.tab.wechat')]] as Array<[Tab, string]>) : []),
+    ...(isDesktop ? ([['mcp', 'MCP'], ['skills', t('settings.tab.skills')], ['agents', t('settings.tab.agents')], ['plugins', t('settings.tab.plugins')], ['agent-clis', t('settings.tab.agentClis')], ['browser', t('settings.tab.browser')], ['wechat', t('settings.tab.wechat')]] as Array<[Tab, string]>) : []),
     ['theme', t('settings.tab.theme')],
     ['advanced', t('settings.tab.advanced')],
     ...(isDesktop && devMode ? ([['developer', t('settings.tab.developer')]] as Array<[Tab, string]>) : []),
@@ -1302,6 +1292,7 @@ export const SettingsModal: React.FC<{
                 )}
 
                 {tab === 'agents' && <AgentsSettings cfg={p.cfg} />}
+                {tab === 'plugins' && <PluginsTab cfg={p.cfg} />}
                 {tab === 'agent-clis' && <AgentClisTab cfg={p.cfg} />}
 
                 {tab === 'browser' && stored && (
@@ -1778,10 +1769,28 @@ export const SettingsModal: React.FC<{
                       <div className="hint">{t('settings.developer.relaunchHint')}</div>
                     </div>
                     <div className="field">
+                      <label className="inline-check">
+                        <input
+                          type="checkbox"
+                          checked={showSysPrompt}
+                          onChange={(e) => {
+                            const on = e.target.checked
+                            setShowSysPrompt(on)
+                            try { localStorage.setItem(SHOW_SYSTEM_PROMPT_KEY, on ? '1' : '0') } catch { /* ignore */ }
+                          }}
+                        />
+                        {t('settings.developer.showSystemPrompt')}
+                      </label>
+                      <div className="hint">{t('settings.developer.showSystemPromptHint')}</div>
+                    </div>
+                    <div className="field">
                       <button
                         className="btn ghost sm"
                         onClick={() => {
                           try { localStorage.removeItem(DEV_MODE_KEY) } catch { /* ignore */ }
+                          // 关开发者模式顺手清掉「显示 system prompt」,免得关了 tab 还在聊天里冒调试块。
+                          try { localStorage.removeItem(SHOW_SYSTEM_PROMPT_KEY) } catch { /* ignore */ }
+                          setShowSysPrompt(false)
                           setDevMode(false)
                           setDevClicks(0)
                           setTab('about')
@@ -1827,13 +1836,45 @@ export const SettingsModal: React.FC<{
                         ) : null}
                       </div>
                       <span className="grow" />
-                      <button
-                        className="btn ghost sm"
-                        onClick={() => window.open('https://forsion.net', '_blank')}
-                      >
-                        <ExternalLink size={12} /> {t('about.checkUpdates')}
-                      </button>
+                      {(() => {
+                        const isMac = window.tangu?.platform === 'darwin'
+                        const releasesUrl = 'https://github.com/Changan-Su/Tangu/releases/latest'
+                        // 无 IPC(浏览器/旧 preload)→ 回退打开站点(保持原行为)。
+                        const check = (): void => {
+                          if (window.tangu?.checkForUpdates) void window.tangu.checkForUpdates()
+                          else window.open('https://forsion.net', '_blank')
+                        }
+                        switch (upd.phase) {
+                          case 'checking':
+                            return <button className="btn ghost sm" disabled><Loader2 size={12} className="spin" /> {t('about.update.checking')}</button>
+                          case 'available':
+                            return isMac
+                              ? <button className="btn primary sm" onClick={() => window.open(releasesUrl, '_blank')}><ExternalLink size={12} /> {t('about.update.goToDownload')}</button>
+                              : <button className="btn primary sm" onClick={() => window.tangu?.downloadUpdate?.()}><Download size={12} /> {t('about.update.download')}</button>
+                          case 'downloading':
+                            return <button className="btn ghost sm" disabled><Loader2 size={12} className="spin" /> {t('about.update.downloading', { percent: upd.percent ?? 0 })}</button>
+                          case 'downloaded':
+                            return <button className="btn primary sm" onClick={() => window.tangu?.installUpdate?.()}><RefreshCw size={12} /> {t('about.update.install')}</button>
+                          case 'not-available':
+                            return <button className="btn ghost sm" onClick={check}><Check size={12} /> {t('about.update.upToDate')}</button>
+                          case 'unsupported':
+                            return <span className="hint">{t('about.update.unsupported')}</span>
+                          default:
+                            return <button className="btn ghost sm" onClick={check}><RefreshCw size={12} /> {t('about.update.check')}</button>
+                        }
+                      })()}
                     </div>
+                    {(upd.phase === 'available' || upd.phase === 'downloaded') && (
+                      <div className="field">
+                        <div style={{ fontWeight: 600 }}>{t('about.update.available', { version: upd.version || '' })}</div>
+                        {upd.releaseNotes ? (
+                          <div className="hint" style={{ marginTop: 4, whiteSpace: 'pre-wrap', maxHeight: 160, overflow: 'auto' }}>{upd.releaseNotes}</div>
+                        ) : null}
+                      </div>
+                    )}
+                    {upd.phase === 'error' && upd.error ? (
+                      <div className="field"><div className="hint" style={{ color: 'var(--danger, #c0392b)' }}>{t('about.update.error', { error: upd.error })}</div></div>
+                    ) : null}
                     <div className="field">
                       <label>{t('about.changelogTitle')}</label>
                       <div className="changelog">

@@ -1,6 +1,6 @@
 /** 顶栏:侧栏开关 + 会话标题 + 模型 + 右上角(语言/深浅模式/右栏开关)。整条可拖拽(Electron hiddenInset)。 */
 import React from 'react'
-import { PanelLeft, PanelRight } from 'lucide-react'
+import { PanelLeft, PanelRight, MessageSquare } from 'lucide-react'
 import { useI18n } from '../i18n'
 import { LocaleToggle } from './LocaleToggle'
 import { ModeToggle } from './ModeToggle'
@@ -16,6 +16,9 @@ export const ChatHeader: React.FC<{
   onToggleSidebar: () => void
   onToggleRight: () => void
   onToggleMode: () => void
+  /** 已登录 Forsion 才显示反馈入口(提交需云端 token)。 */
+  showFeedback?: boolean
+  onFeedback?: () => void
 }> = (p) => {
   const { t } = useI18n()
   return (
@@ -32,7 +35,12 @@ export const ChatHeader: React.FC<{
           {t('header.offline')}
         </span>
       )}
-      {/* 右上角:语言 / 深浅模式 / 右栏开关 */}
+      {/* 右上角:反馈(登录后) / 语言 / 深浅模式 / 右栏开关 */}
+      {p.showFeedback && p.onFeedback ? (
+        <button className="icon-btn" onClick={p.onFeedback} title={t('feedback.title')}>
+          <MessageSquare size={16} />
+        </button>
+      ) : null}
       <LocaleToggle compact />
       <ModeToggle mode={p.themeMode} onToggle={p.onToggleMode} />
       <button className={`icon-btn${p.rightOpen ? ' active' : ''}`} onClick={p.onToggleRight} title={t('header.workspacePanel')}>

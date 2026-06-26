@@ -9,10 +9,18 @@
 import path from 'node:path';
 import os from 'node:os';
 import type { ToolContext } from './toolTypes.js';
+import { agentsDir, DEFAULT_AGENT_SLUG } from '../core/tanguHome.js';
+import { currentAgentSlug } from '../seams/runContext.js';
 
-/** 本次 run 的可写根:当前工作目录(v1;后续可经 profile 扩展为多根/自定义)。 */
+/** 本次 run 的可写根:当前工作目录 + 当前 agent 的专属文件夹。 */
 export function writableRoots(ctx: ToolContext): string[] {
-  return [path.resolve(ctx.cwd || process.cwd())];
+  const roots = [path.resolve(ctx.cwd || process.cwd())];
+  // agent 的 ~/.tangu/agents/<slug>/ 是它自己的私有目录(Library/ 在此):系统提示承诺它能主动
+  // 往 Library 存取资料,故须可写,否则每次写都触发「越界写」审批 → agent 放弃使用 Library。
+  try {
+    roots.push(path.join(agentsDir(), currentAgentSlug() || DEFAULT_AGENT_SLUG));
+  } catch { /* ignore */ }
+  return roots;
 }
 
 const HOME = os.homedir();

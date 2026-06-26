@@ -113,7 +113,7 @@ describe('runGroupChat', () => {
     const flat = alpha2.messages.map((m: any) => String(m.content || '')).join('\n');
     expect(alpha2.messages.some((m: any) => m.role === 'assistant' && m.content === 'alpha-speech-1')).toBe(true);
     expect(flat).toContain('beta-speech-1');
-    expect(flat).toContain('你是 Alpha');         // 自己的人格在
+    expect(flat).toContain('You are "Alpha"');    // 自己的人格在
     expect(flat).not.toContain('只有 Beta 知道');  // 他人私有人格不泄露
     // 终态 done
     expect(events.some((e) => e.type === 'done')).toBe(true);

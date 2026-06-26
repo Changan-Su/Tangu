@@ -105,13 +105,13 @@ async function folderHint(folders: string[]): Promise<string> {
   for (const f of folders.slice(0, 10)) {
     try {
       const entries = await fs.readdir(f, { withFileTypes: true });
-      const names = entries.slice(0, 20).map((e) => e.name + (e.isDirectory() ? '/' : '')).join('、');
-      lines.push(`- ${f}（${names || '空'}）`);
+      const names = entries.slice(0, 20).map((e) => e.name + (e.isDirectory() ? '/' : '')).join(', ');
+      lines.push(`- ${f} (${names || 'empty'})`);
     } catch {
-      lines.push(`- ${f}（无法读取）`);
+      lines.push(`- ${f} (unreadable)`);
     }
   }
-  return `\n\n你被授权读取以下本地文件夹，可用 read_file/list_files（绝对路径）探索：\n${lines.join('\n')}`;
+  return `\n\nYou are authorized to read the following local folders; explore them with read_file/list_dir (absolute paths):\n${lines.join('\n')}`;
 }
 
 async function recentSessionTitles(userId: string): Promise<string> {
@@ -122,7 +122,7 @@ async function recentSessionTitles(userId: string): Promise<string> {
       [userId],
     );
     const titles = (rows || []).map((r) => String(r.title || '').trim()).filter(Boolean);
-    return titles.length ? `\n\n用户近期会话主题：${titles.join('；')}` : '';
+    return titles.length ? `\n\nUser's recent conversation topics: ${titles.join('; ')}` : '';
   } catch {
     return '';
   }
@@ -134,8 +134,8 @@ async function startCycle(cfg: MuseConfig): Promise<void> {
   const hint = (await folderHint(cfg.allowedFolders)) + (await recentSessionTitles(userId)) + (await existingTodoHint(userId));
   const system =
     `${cfg.prompt || DEFAULT_MUSE_PROMPT}\n\n` +
-    `约束：本时段最多新增 ${cfg.maxTodosPerWindow} 条 TODO，请珍惜额度，只提交真正高价值、可执行的建议。` +
-    `你只能通过 add_muse_todo 写入；其余一律只读。` + hint;
+    `Constraint: add at most ${cfg.maxTodosPerWindow} TODOs this period; use the quota sparingly and only submit genuinely high-value, actionable suggestions. ` +
+    `You may only write via add_muse_todo; everything else is read-only.` + hint;
   const runId = uuidv4();
   await createRun({
     id: runId,
@@ -146,8 +146,8 @@ async function startCycle(cfg: MuseConfig): Promise<void> {
     assistantMessageId: uuidv4(),
     input: {
       message:
-        '开始这一轮思考：先用 read_log 查看近期日志，再结合注入的记忆、近期会话主题与授权文件夹，' +
-        '找出当前最值得为用户做的 1-3 件事。务必避开下方「你已提过的 TODO」，只用 add_muse_todo 记录真正新的高价值待办（珍惜额度）。完成后简要说明你的判断依据。',
+        'Start this round of thinking: first use read_log to review recent logs, then combine the injected memory, recent conversation topics, and authorized folders ' +
+        'to find the 1-3 most worthwhile things to do for the user right now. Be sure to avoid the "TODOs you have already proposed" below, and use only add_muse_todo to record genuinely new, high-value todos (use the quota sparingly). When done, briefly explain your reasoning.',
       userMessageId: uuidv4(),
       attachments: [],
       agentConfig: {

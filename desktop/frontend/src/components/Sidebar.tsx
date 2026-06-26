@@ -387,7 +387,7 @@ export const Sidebar: React.FC<SidebarProps> = (p) => {
                     </span>
                   </button>
                 ) : (
-                  <button className="ws-group-toggle" onClick={() => p.onOpenWorkspace(ws.key)} title={ws.path || undefined}>
+                  <button className="ws-group-toggle" onClick={() => { p.onOpenWorkspace(ws.key); if (isCollapsed) toggleGroup(ws.key) }} title={ws.path || undefined}>
                     <span className="session-emoji" onClick={(e) => { e.stopPropagation(); toggleGroup(ws.key) }}>
                       {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
                     </span>

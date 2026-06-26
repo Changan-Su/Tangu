@@ -14,7 +14,7 @@
  */
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 export function tanguHome(): string {
   return process.env.TANGU_HOME || join(homedir(), '.tangu');
@@ -53,8 +53,23 @@ export const mcpConfigFile = (): string => join(tanguHome(), 'mcp.json');
 /** 外部 agent 引擎偏好(每引擎默认模型等):{ [engineId]: { defaultModel } }。 */
 export const enginePrefsFile = (): string => join(tanguHome(), 'engine-prefs.json');
 export const skillsDir = (): string => join(tanguHome(), 'skills');
-/** 本地 Normal Agent 定义目录(<slug>.md,frontmatter + 正文人格;镜像 skills 范式)。 */
+/** 用户安装的全局插件目录(~/.tangu/plugins;可写、跨升级保留)。首方插件随包发在 <pkg>/plugins。 */
+export const pluginsDir = (): string => join(tanguHome(), 'plugins');
+/** 本地 Normal Agent 目录:每个 agent 一个子文件夹 <slug>/(config.toml + SOUL.md + MEMORY.md + LOG/ + Library/)。 */
 export const agentsDir = (): string => join(tanguHome(), 'agents');
+/** 默认 Agent 的 slug(承载迁移自旧全局记忆/日志;无 agentSlug 时记忆落此)。 */
+export const DEFAULT_AGENT_SLUG = 'xyra';
+/** 全局用户画像文件(所有 agent 可见,用户主改、agent 可改)。 */
+export const userMdFile = (): string => join(tanguHome(), 'USER.md');
+/** 读全局 USER.md(不存在/读失败返回空串)。 */
+export function readUserMd(): string {
+  try { return readFileSync(userMdFile(), 'utf8'); } catch { return ''; }
+}
+/** 写全局 USER.md。 */
+export function writeUserMd(content: string): void {
+  mkdirSync(tanguHome(), { recursive: true });
+  writeFileSync(userMdFile(), content, 'utf8');
+}
 /** Special Agent(Historian/Muse)配置文件(默认关;桌面/TUI 经端点读写)。 */
 export const specialAgentsConfigFile = (): string => join(tanguHome(), 'special-agents.json');
 export const pgdataDir = (): string => join(tanguHome(), 'pgdata');

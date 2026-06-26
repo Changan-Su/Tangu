@@ -15,8 +15,8 @@ import { deps } from '../seams/runtime.js';
 import type { ChatMessage } from '../core/types.js';
 
 const COMPACT_SYSTEM_PROMPT =
-  '请把下面整段对话压缩成简洁、信息完整的中文要点总结，供后续延续对话使用，需覆盖：用户目标、' +
-  '关键决定/结论、已完成与待办、产出的文件路径与重要事实。只输出总结本身，不要寒暄、不要加引导语。';
+  'Compress the entire conversation below into a concise, information-complete summary of key points, in the same language as the conversation, for use in continuing the conversation later. Cover: ' +
+  "the user's goals, key decisions/conclusions, what is done and what is pending, output file paths, and important facts. Output only the summary itself — no pleasantries, no lead-in.";
 
 const MAX_TRANSCRIPT_CHARS = 60_000; // 兜成本：超长历史只取尾部
 const SUMMARY_MAX_TOKENS = 1200;
@@ -75,13 +75,13 @@ export async function compactSession(sessionId: string, modelId: string): Promis
     const role = m.role === 'model' ? 'assistant' : m.role;
     if (role !== 'user' && role !== 'assistant') continue;
     const content = String(m.content || '').trim();
-    if (content) lines.push(`${role === 'user' ? '用户' : 'AI'}：${content}`);
+    if (content) lines.push(`${role === 'user' ? 'User' : 'AI'}: ${content}`);
     if (ts > maxTs) maxTs = ts;
   }
   if (lines.length < 2) return { ok: false, reason: 'nothing to compact' };
 
   let transcript = lines.join('\n');
-  if (prev?.summary) transcript = `【已有摘要】\n${prev.summary}\n\n【新对话】\n${transcript}`;
+  if (prev?.summary) transcript = `[Existing Summary]\n${prev.summary}\n\n[New Conversation]\n${transcript}`;
   if (transcript.length > MAX_TRANSCRIPT_CHARS) transcript = transcript.slice(-MAX_TRANSCRIPT_CHARS);
 
   let summary = '';
@@ -122,6 +122,6 @@ export function foldWorkingWithSummary(msgs: ChatMessage[], summary: string, tai
   let head = 0;
   while (head < msgs.length && (msgs[head] as any).role === 'system') head++;
   if (msgs.length - head <= tail + 1) return; // 太短不值得折
-  const summaryMsg = { role: 'system', content: '## 此前对话的压缩摘要\n' + summary } as ChatMessage;
+  const summaryMsg = { role: 'system', content: '## Compacted Summary of Earlier Conversation\n' + summary } as ChatMessage;
   msgs.splice(head, msgs.length - head - tail, summaryMsg);
 }

@@ -74,6 +74,18 @@ router.post('/agent/wechat/connect', authMiddleware, async (req: AuthRequest, re
   }
 });
 
+// 设置某微信会话使用的 Normal Agent。
+router.post('/agent/wechat/session-agent', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const sessionId = String(req.body?.session_id || '');
+    const agentSlug = String(req.body?.agent_slug || '');
+    if (!sessionId || !agentSlug) return res.status(400).json({ detail: 'session_id 与 agent_slug 必填' });
+    res.json(await wechatRemote.setSessionAgent(req.user!.userId, sessionId, agentSlug));
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'set session agent failed' });
+  }
+});
+
 // 在微信 Project 下新建会话(可选立即切为正在连接)。
 router.post('/agent/wechat/sessions/new', authMiddleware, async (req: AuthRequest, res) => {
   try {

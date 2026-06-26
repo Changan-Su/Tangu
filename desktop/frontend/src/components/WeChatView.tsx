@@ -15,10 +15,12 @@ import {
   listWechatSessions,
   setWechatConnectedSession,
   createWechatSession,
+  listAgents,
+  setWechatSessionAgent,
   type WechatStatusResponse,
   type WechatProjectSession,
 } from '../services/backendService'
-import type { MessageRecord, SessionRecord, TanguDesktopConfig } from '../types'
+import type { MessageRecord, NormalAgentDef, SessionRecord, TanguDesktopConfig } from '../types'
 import { useI18n } from '../i18n'
 import { QrImage } from './QrImage'
 
@@ -41,6 +43,7 @@ export const WeChatView: React.FC<{
   const [login, setLogin] = useState<Login | null>(null)
   const [convo, setConvo] = useState<MessageRecord[]>([])
   const [sessions, setSessions] = useState<WechatProjectSession[]>([])
+  const [agentDefs, setAgentDefs] = useState<NormalAgentDef[]>([])
 
   // 正在连接的会话:优先用 Project 会话列表的 connected 标记,回退活跃绑定。
   const boundSessionId = sessions.find((s) => s.connected)?.id || status?.bindings.find((b) => b.is_active)?.session_id || null
@@ -57,10 +60,16 @@ export const WeChatView: React.FC<{
 
   useEffect(() => {
     refresh()
-    const timer = window.setInterval(refresh, 15000)
+    void listAgents(p.cfg).then(setAgentDefs).catch(() => {})
+    const timer = window.setInterval(refresh, 5000) // 微信 /new 等后端动作靠轮询同步,缩短到 5s 更即时
     return () => window.clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.cfg.backendUrl, p.cfg.token])
+
+  const onPickAgent = async (slug: string): Promise<void> => {
+    if (!boundSessionId || !slug) return
+    try { await setWechatSessionAgent(p.cfg, boundSessionId, slug); refresh() } catch { /* ignore */ }
+  }
 
   // 扫码状态轮询(每 2s):confirmed → 刷新绑定;expired/failed → 收起二维码并提示。
   useEffect(() => {
@@ -105,7 +114,8 @@ export const WeChatView: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boundSessionId, p.cfg.backendUrl, p.cfg.token])
 
-  const connected = status?.bindings.filter((b) => b.is_active).length || 0
+  // 绑定在 OR iLink runtime 在线都算已连接(避免「能用却显示掉线」)。
+  const connected = (status?.bindings.filter((b) => b.is_active).length || 0) || (((status as any)?.runtime?.length || 0) > 0 ? 1 : 0)
 
   const start = async (): Promise<void> => {
     setBusy(true)
@@ -193,6 +203,16 @@ export const WeChatView: React.FC<{
             </button>
           )}
         </div>
+
+        {/* 当前会话使用的 Agent(微信主界面也能切) */}
+        {boundSessionId && agentDefs.length > 0 && (
+          <div className="field" style={{ margin: 0 }}>
+            <label>{t('settings.wechat.currentAgent')}</label>
+            <select value={sessions.find((s) => s.id === boundSessionId)?.agentSlug || ''} onChange={(e) => void onPickAgent(e.target.value)}>
+              {agentDefs.map((a) => <option key={a.slug} value={a.slug}>{a.name}</option>)}
+            </select>
+          </div>
+        )}
 
         {/* 已绑定账号 */}
         <div className="field" style={{ margin: 0 }}>

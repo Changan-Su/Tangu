@@ -45,20 +45,20 @@ async function backendDelete(ctx: ToolContext, p: string): Promise<void> {
 }
 
 const PATCH_DESC =
-  '对一个或多个文件做结构化补丁编辑(上下文锚定,优于全量覆盖/单串替换;多文件、多处修改一次提交,原子)。' +
-  '参数 patch 是一段补丁文本,格式:\n' +
+  'Make structured patch edits to one or more files (context-anchored, better than full overwrite / single-string replace; multiple files and multiple edits in one atomic commit). ' +
+  'The patch parameter is a block of patch text, in the format:\n' +
   '*** Begin Patch\n' +
-  '*** Update File: 相对路径\n' +
-  '@@ 可选定位上下文(类/函数名)\n' +
-  ' 不变的上下文行(前导空格)\n' +
-  '-要删除的行\n' +
-  '+要新增的行\n' +
-  '*** Add File: 相对路径\n' +
-  '+新文件每一行(均以 + 开头)\n' +
-  '*** Delete File: 相对路径\n' +
+  '*** Update File: relative path\n' +
+  '@@ optional locating context (class/function name)\n' +
+  ' unchanged context line (leading space)\n' +
+  '-line to delete\n' +
+  '+line to add\n' +
+  '*** Add File: relative path\n' +
+  '+every line of the new file (each starts with +)\n' +
+  '*** Delete File: relative path\n' +
   '*** End Patch\n' +
-  '要点:改动处务必带几行不变的上下文行(以空格开头)以便定位;新建用 Add、删除用 Delete、' +
-  '重命名在 Update File 下紧跟一行「*** Move to: 新路径」。云端工作区暂仅支持 Add/Update。';
+  'Key points: always include a few unchanged context lines (starting with a space) around each change to locate it; use Add to create, Delete to remove, ' +
+  'and to rename put a line "*** Move to: new path" right under Update File. The cloud workspace currently supports only Add/Update.';
 
 export const applyPatchProvider: ToolProvider = {
   id: 'builtin:apply-patch',
@@ -74,7 +74,7 @@ export const applyPatchProvider: ToolProvider = {
           description: PATCH_DESC,
           parameters: {
             type: 'object',
-            properties: { patch: { type: 'string', description: '完整补丁文本(*** Begin Patch … *** End Patch)' } },
+            properties: { patch: { type: 'string', description: 'Complete patch text (*** Begin Patch … *** End Patch)' } },
             required: ['patch'],
           },
         },

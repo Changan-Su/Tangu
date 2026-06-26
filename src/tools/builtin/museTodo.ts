@@ -21,13 +21,13 @@ export const museTodoProvider: ToolProvider = {
         function: {
           name: 'add_muse_todo',
           description:
-            '向 Muse TODO 清单提交一条高价值、可执行的待办（这是你唯一的写操作）。请珍惜每次机会，' +
-            '只提交真正值得用户花时间、且现在就能着手的建议；title 简洁，detail 写清为什么有价值与怎么做。',
+            'Submit one high-value, actionable todo to the Muse TODO list (this is your only write operation). Use each opportunity wisely; ' +
+            'only submit suggestions truly worth the user\'s time and actionable right now; keep the title concise, and in detail explain why it is valuable and how to do it.',
           parameters: {
             type: 'object',
             properties: {
-              title: { type: 'string', description: '简洁的待办标题' },
-              detail: { type: 'string', description: '为什么有价值 + 建议怎么做（将来可一键注入会话执行）' },
+              title: { type: 'string', description: 'A concise todo title' },
+              detail: { type: 'string', description: 'Why it is valuable + suggested how-to (can later be injected into a session to execute with one click)' },
             },
             required: ['title'],
           },

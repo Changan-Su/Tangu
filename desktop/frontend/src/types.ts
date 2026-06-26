@@ -19,6 +19,22 @@ export interface AgentRunEvent {
   payload?: any
 }
 
+/** 子聊天(右栏「子聊天」区)的一段内容:发言文本 / 工具调用 / 投票。 */
+export type SubChatSeg =
+  | { t: 'text'; speaker?: string; color?: string; text: string }
+  | { t: 'tool'; name: string; args?: string; preview?: string; error?: boolean }
+  | { t: 'vote'; text: string }
+
+/** 一个子聊天条目。discussion=独立 run(面板订阅它的事件流);subagent=主 run 内流式片段(主流累积)。 */
+export interface SubChat {
+  id: string                 // subId(subagent)| discussion runId
+  kind: 'discussion' | 'subagent'
+  title: string
+  runId?: string             // discussion:要订阅的 run(= id)
+  streaming: boolean
+  segs: SubChatSeg[]         // subagent 内容随主流累积;discussion 由面板二开 SSE 现拉,segs 保持空
+}
+
 // ── M3 数据 API 形状 ──────────────────────────────────────────────────────────
 
 export interface SessionRecord {
@@ -85,7 +101,16 @@ export interface MuseStatusInfo {
   sessionId: string | null
 }
 
-/** 本地 Normal Agent 定义(~/.tangu/agents/<slug>.md;后端 agentRegistry 解析)。 */
+/** 默认 Agent slug(无 agentSlug 时后端落此;新会话选择器默认高亮)。 */
+export const DEFAULT_AGENT_SLUG = 'xyra'
+
+/** 开发者「回复前显示 system prompt」开关(localStorage;仅 dev 模式可见,App.send 据此带 debugSystemPrompt)。 */
+export const SHOW_SYSTEM_PROMPT_KEY = 'forsion_tangu_show_system_prompt'
+
+/** Agent 列表的全局 meta:展示顺序 + 用户选定的默认 agent。 */
+export interface AgentsMeta { order: string[]; defaultSlug: string }
+
+/** 本地 Normal Agent 定义(~/.tangu/agents/<slug>/;后端 agentRegistry 解析)。 */
 export interface NormalAgentDef {
   slug: string
   name: string
@@ -98,6 +123,14 @@ export interface NormalAgentDef {
   createdBy: 'user' | 'agent'
   createdAt: string
   systemPrompt: string
+  /** 人格(SOUL.md)。 */
+  soul?: string
+  /** 头像文件名(该 agent 的 Library 内);有则选择器显示头像,否则显示首字母。 */
+  avatar?: string
+  /** 共用默认 Agent 的记忆/日志(默认 false=该 agent 有专属记忆/日志)。 */
+  shareDefaultMemory?: boolean
+  /** 开启云同步:该 agent 全部文件跨设备完全镜像(默认 false=纯本地)。 */
+  cloudSync?: boolean
 }
 
 export interface AgentConfig {
@@ -111,6 +144,10 @@ export interface AgentConfig {
   maxIterations?: number
   thinkingLevel?: 'off' | 'low' | 'medium' | 'high'
   enabledSkillIds?: string[]
+  /** 本条消息经 /skill 显式点选的技能 id(per-message,加性:并入可用集 + 强制使用;不持久化、不收窄目录)。 */
+  requestedSkillIds?: string[]
+  /** 开发者调试:置 true 则后端把本 run 组装好的 system prompt 作 `system_prompt` 事件回传(per-message,不持久化)。 */
+  debugSystemPrompt?: boolean
   enabledToolIds?: string[]
   /** 本会话启用的 MCP server 名单(缺省=全部已连接 server)。 */
   enabledMcpServers?: string[]
@@ -125,6 +162,10 @@ export interface AgentConfig {
   groupAgents?: string[]
   /** 临时 Agent 定义(仅本会话群聊用,不持久化到 ~/.tangu/agents)。slug 在 groupAgents 中列出。 */
   groupTempAgents?: NormalAgentDef[]
+  /** 本条消息 @ 的 agent slug(群聊:该 agent 本场优先发言;per-message,发送后清空,不持久化)。 */
+  priorityAgent?: string
+  /** 本条消息 @ 的 agent slug 列表(单聊:提示主 agent 用 delegate 把子任务交给这些 Normal Agent 作 subagent;per-message,不持久化)。 */
+  mentionedAgentSlugs?: string[]
   /** 讨论强度(仅 UI 展示;轮数以 groupMaxRounds 为准)。 */
   groupIntensity?: 'relaxed' | 'medium' | 'intense' | 'custom'
   /** 最大讨论轮数(轻松3/中等7/激烈15/自定义N;后端 clamp 1..30)。 */
@@ -313,6 +354,8 @@ export interface UiMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
   reasoning?: string
+  /** 开发者调试:本条消息发给模型的完整 system prompt(经 `system_prompt` 事件填入;仅 dev 开关开启时有)。 */
+  systemPrompt?: string
   toolEvents?: ToolEvent[]
   approvals?: ApprovalRequest[]
   inquiries?: InquiryRequest[]
@@ -344,6 +387,15 @@ export interface BackendStatusInfo {
   lastError: string | null
   /** dev:dist 重建于子进程启动之后 → 跑的是旧代码,需重启后端。 */
   staleDist?: boolean
+}
+
+/** 应用内自动更新状态(electron-updater 经 'updater:status' 广播;mac 仅检测)。 */
+export interface UpdaterStatusInfo {
+  phase: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error' | 'unsupported'
+  version?: string
+  releaseNotes?: string
+  percent?: number
+  error?: string
 }
 
 /** 主进程持久化的完整配置;getConfig 返回时 backendUrl/token 已折算为有效值(managed 就绪=托管子进程的)。 */
@@ -400,7 +452,14 @@ declare global {
       authProviders?(): Promise<Array<{ id: string; loggedIn: boolean }>>
       providerLogin?(id: string): Promise<{ ok: boolean; id: string }>
       openAccountCenter?(): Promise<{ ok: boolean }>
+      /** 提交反馈到 Forsion 反馈中心(会话日志 JSON 随附为附件;token 留主进程)。 */
+      submitFeedback?(input: { description: string; sessionLogJson?: string; sessionLogName?: string }): Promise<{ ok: boolean; id?: string | null; error?: string; attachmentSkipped?: boolean }>
       appVersion?(): Promise<string>
+      /** 应用内自动更新:检查 / 下载 / 重启安装(mac 仅检测,download/install 为 no-op)。 */
+      checkForUpdates?(): Promise<UpdaterStatusInfo>
+      downloadUpdate?(): Promise<void>
+      installUpdate?(): Promise<{ ok: boolean }>
+      onUpdaterStatus?(cb: (st: UpdaterStatusInfo) => void): () => void
       onAuthDevice?(cb: (info: { url: string; userCode: string }) => void): () => void
       pickDirectory?(): Promise<string | null>
       /** 另存为文本文件(导出日志等);取消返回 { ok:false }。 */

@@ -13,7 +13,8 @@
  */
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { memoryDir as defaultMemoryDir } from '../../core/tanguHome.js';
+import { agentsDir, DEFAULT_AGENT_SLUG } from '../../core/tanguHome.js';
+import { currentAgentSlug } from '../../seams/runContext.js';
 import { getDeviceId } from '../../core/deviceId.js';
 import type { MemoryBrain } from '../../seams/cloudBrain.js';
 
@@ -59,41 +60,51 @@ export interface LocalMemoryStore {
   logLocalUpdatedAt(date: string): number;
 }
 
-export function createLocalMemoryStore(baseDir: string = defaultMemoryDir()): LocalMemoryStore {
-  const memFile = join(baseDir, 'MEMORY.md');
-  const metaFile = join(baseDir, '.sync.json');
-  const logDir = join(baseDir, 'log');
-  const logFile = (date: string): string => join(logDir, `${date}.md`);
+/** 当前 active agent 的记忆目录 ~/.tangu/agents/<slug>/(无 run 上下文时落默认 agent)。 */
+function activeAgentDir(): string {
+  return join(agentsDir(), currentAgentSlug() || DEFAULT_AGENT_SLUG);
+}
+
+/**
+ * fixedBaseDir 显式传入(同步服务/测试/Historian)→ 固定目录;省略 → 每次调用按当前 run 上下文的
+ * active agent 解析(MEMORY.md / LOG/<date>.md / .sync.json 落 ~/.tangu/agents/<slug>/)。
+ */
+export function createLocalMemoryStore(fixedBaseDir?: string): LocalMemoryStore {
+  const base = (): string => fixedBaseDir ?? activeAgentDir();
+  const memFile = (): string => join(base(), 'MEMORY.md');
+  const metaFile = (): string => join(base(), '.sync.json');
+  const logDir = (): string => join(base(), 'LOG');
+  const logFile = (date: string): string => join(logDir(), `${date}.md`);
 
   const ensureDir = (d: string): void => { try { mkdirSync(d, { recursive: true }); } catch { /* ignore */ } };
   const readText = (f: string): string => { try { return readFileSync(f, 'utf8'); } catch { return ''; } };
 
   function readMeta(): SyncMeta {
     try {
-      const m = JSON.parse(readFileSync(metaFile, 'utf8'));
+      const m = JSON.parse(readFileSync(metaFile(), 'utf8'));
       return { memory: m.memory ?? { localUpdatedAt: 0, lastCloudUpdatedAt: null }, logs: m.logs ?? {} };
     } catch {
       return { memory: { localUpdatedAt: 0, lastCloudUpdatedAt: null }, logs: {} };
     }
   }
   function writeMeta(meta: SyncMeta): void {
-    ensureDir(baseDir);
-    try { writeFileSync(metaFile, JSON.stringify(meta, null, 2), 'utf8'); } catch { /* best-effort */ }
+    ensureDir(base());
+    try { writeFileSync(metaFile(), JSON.stringify(meta, null, 2), 'utf8'); } catch { /* best-effort */ }
   }
 
   return {
-    baseDir,
-    readMemory: () => readText(memFile),
+    get baseDir() { return base(); },
+    readMemory: () => readText(memFile()),
     writeMemory(content: string) {
-      ensureDir(baseDir);
-      writeFileSync(memFile, content, 'utf8');
+      ensureDir(base());
+      writeFileSync(memFile(), content, 'utf8');
       const meta = readMeta();
       meta.memory.localUpdatedAt = Date.now();
       writeMeta(meta);
     },
     readLog: (date: string) => readText(logFile(date)),
     writeLog(date: string, content: string) {
-      ensureDir(logDir);
+      ensureDir(logDir());
       writeFileSync(logFile(date), content, 'utf8');
       const meta = readMeta();
       meta.logs[date] = { ...(meta.logs[date] ?? { lastCloudUpdatedAt: null }), localUpdatedAt: Date.now() };
@@ -101,7 +112,7 @@ export function createLocalMemoryStore(baseDir: string = defaultMemoryDir()): Lo
     },
     listLogDates() {
       try {
-        return readdirSync(logDir)
+        return readdirSync(logDir())
           .filter((f) => f.endsWith('.md') && DATE_RE.test(f.slice(0, -3)))
           .map((f) => f.slice(0, -3))
           .sort();

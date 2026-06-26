@@ -149,13 +149,13 @@ export const HOST_TOOLS: Record<string, ToolImpl> = {
       function: {
         name: 'run_bash',
         description:
-          '在用户本机执行一条 shell 命令（/bin/sh -c），工作目录为当前会话的 cwd，返回 stdout/stderr/exit_code。' +
-          '用于运行构建/测试、查看目录、git 操作等。破坏性命令可能需要用户审批。',
+          'Run a single shell command (/bin/sh -c) on the user\'s machine, with the current session cwd as working directory; returns stdout/stderr/exit_code. ' +
+          'Use for running builds/tests, listing directories, git operations, etc. Destructive commands may require user approval.',
         parameters: {
           type: 'object',
           properties: {
-            command: { type: 'string', description: '要执行的 shell 命令' },
-            timeout_ms: { type: 'number', description: '超时毫秒（默认 120000）' },
+            command: { type: 'string', description: 'The shell command to run' },
+            timeout_ms: { type: 'number', description: 'Timeout in milliseconds (default 120000)' },
           },
           required: ['command'],
         },
@@ -188,13 +188,13 @@ export const HOST_TOOLS: Record<string, ToolImpl> = {
       type: 'function',
       function: {
         name: 'read_file',
-        description: '读取本机文件文本内容（路径相对当前工作目录解析）。大文件用 offset/limit 按行分页。',
+        description: 'Read the text content of a file on the machine (path resolved relative to the current working directory). For large files, paginate by line with offset/limit.',
         parameters: {
           type: 'object',
           properties: {
-            path: { type: 'string', description: '文件路径（相对 cwd 或绝对路径）' },
-            offset: { type: 'number', description: '起始行（从 0 计），默认 0' },
-            limit: { type: 'number', description: '最多返回行数（默认读尽，受上限封顶）' },
+            path: { type: 'string', description: 'File path (relative to cwd or absolute)' },
+            offset: { type: 'number', description: 'Starting line (0-based), default 0' },
+            limit: { type: 'number', description: 'Maximum number of lines to return (default reads to the end, capped by an upper limit)' },
           },
           required: ['path'],
         },
@@ -226,12 +226,12 @@ export const HOST_TOOLS: Record<string, ToolImpl> = {
       type: 'function',
       function: {
         name: 'write_file',
-        description: '在本机写入/覆盖一个文本文件（中间目录自动创建，路径相对当前工作目录）。整文件覆盖请用此工具；局部修改优先 edit_file。',
+        description: 'Write/overwrite a text file on the machine (intermediate directories are created automatically, path relative to the current working directory). Use this tool to overwrite a whole file; for partial changes prefer edit_file.',
         parameters: {
           type: 'object',
           properties: {
-            path: { type: 'string', description: '文件路径（相对 cwd 或绝对路径）' },
-            content: { type: 'string', description: '文件文本内容' },
+            path: { type: 'string', description: 'File path (relative to cwd or absolute)' },
+            content: { type: 'string', description: 'File text content' },
           },
           required: ['path', 'content'],
         },
@@ -259,14 +259,14 @@ export const HOST_TOOLS: Record<string, ToolImpl> = {
       function: {
         name: 'edit_file',
         description:
-          '对本机文件做精确字符串替换：把唯一出现的 old_string 换成 new_string（含缩进/空白须完全一致）。' +
-          'old_string 必须在文件中**恰好出现一次**，否则报错——这样改动安全可控。新建文件请用 write_file。',
+          'Make an exact string replacement in a file on the machine: replace the single occurrence of old_string with new_string (indentation/whitespace must match exactly). ' +
+          'old_string must appear **exactly once** in the file, otherwise it errors — this keeps changes safe and controlled. To create a new file, use write_file.',
         parameters: {
           type: 'object',
           properties: {
-            path: { type: 'string', description: '文件路径（相对 cwd 或绝对路径）' },
-            old_string: { type: 'string', description: '要替换的原文（须唯一匹配）' },
-            new_string: { type: 'string', description: '替换后的新文本' },
+            path: { type: 'string', description: 'File path (relative to cwd or absolute)' },
+            old_string: { type: 'string', description: 'The original text to replace (must match uniquely)' },
+            new_string: { type: 'string', description: 'The new text to replace it with' },
           },
           required: ['path', 'old_string', 'new_string'],
         },
@@ -306,10 +306,10 @@ export const HOST_TOOLS: Record<string, ToolImpl> = {
       type: 'function',
       function: {
         name: 'list_dir',
-        description: '列出本机某目录下的文件与子目录（路径相对当前工作目录，默认列 cwd 本身）。',
+        description: 'List the files and subdirectories under a directory on the machine (path relative to the current working directory, defaults to listing cwd itself).',
         parameters: {
           type: 'object',
-          properties: { path: { type: 'string', description: '目录路径（相对 cwd 或绝对路径），默认当前目录' } },
+          properties: { path: { type: 'string', description: 'Directory path (relative to cwd or absolute), defaults to the current directory' } },
           required: [],
         },
       },
@@ -346,21 +346,21 @@ export const HOST_TOOLS: Record<string, ToolImpl> = {
       function: {
         name: 'multi_edit',
         description:
-          '对本机一个文件做多处精确替换(原子:全部匹配才写入,任一失败整体不动)。' +
-          '每个 edit 的 old_string 须在「前序 edit 依次应用后的文本」中恰好出现一次。' +
-          '同文件多处修改用此工具,比连发多次 edit_file 更安全省轮次。',
+          'Make multiple exact replacements in a single file on the machine (atomic: writes only if all match, leaves the file untouched if any fails). ' +
+          'Each edit\'s old_string must appear exactly once in the text after the preceding edits have been applied in order. ' +
+          'Use this tool for multiple edits to the same file; it is safer and saves turns versus firing off several edit_file calls.',
         parameters: {
           type: 'object',
           properties: {
-            path: { type: 'string', description: '文件路径(相对 cwd 或绝对路径)' },
+            path: { type: 'string', description: 'File path (relative to cwd or absolute)' },
             edits: {
               type: 'array',
-              description: '按序应用的替换列表',
+              description: 'List of replacements to apply in order',
               items: {
                 type: 'object',
                 properties: {
-                  old_string: { type: 'string', description: '要替换的原文(须唯一匹配)' },
-                  new_string: { type: 'string', description: '替换后的新文本' },
+                  old_string: { type: 'string', description: 'The original text to replace (must match uniquely)' },
+                  new_string: { type: 'string', description: 'The new text to replace it with' },
                 },
                 required: ['old_string', 'new_string'],
               },
@@ -412,13 +412,13 @@ export const HOST_TOOLS: Record<string, ToolImpl> = {
       function: {
         name: 'view_image',
         description:
-          '查看本机图片文件:把图片作为图像内容提供给你"看",用于识别截图、分析图表/照片/设计稿/UI 等。' +
-          '支持 png/jpg/jpeg/gif/webp/bmp;路径相对当前工作目录解析。需要"看图/识图"时用本工具,' +
-          '不要用 read_file(它对图片只返回文本提示)。',
+          'View an image file on the machine: provides the image as visual content for you to "see", for recognizing screenshots, analyzing charts/photos/design mockups/UI, etc. ' +
+          'Supports png/jpg/jpeg/gif/webp/bmp; path resolved relative to the current working directory. Use this tool when you need to "look at / read an image"; ' +
+          'do not use read_file (it only returns a text hint for images).',
         parameters: {
           type: 'object',
           properties: {
-            path: { type: 'string', description: '图片文件路径(相对 cwd 或绝对路径)' },
+            path: { type: 'string', description: 'Image file path (relative to cwd or absolute)' },
           },
           required: ['path'],
         },

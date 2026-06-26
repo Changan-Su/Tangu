@@ -11,7 +11,10 @@
 import { Router } from 'express';
 import { authMiddleware, AuthRequest } from '../core/http.js';
 import { deps } from '../seams/runtime.js';
-import { listAgents, getAgent, saveAgent, deleteAgent } from '../agents/agentRegistry.js';
+import { listAgents, getAgent, saveAgent, deleteAgent, saveAgentAvatar, readAgentAvatar, readAgentsMeta, writeAgentsMeta, resolveMemorySlug, listLibraryFiles, readLibraryFile, writeLibraryFile, deleteLibraryFile } from '../agents/agentRegistry.js';
+import path from 'node:path';
+import { agentsDir, readUserMd, writeUserMd } from '../core/tanguHome.js';
+import { createLocalMemoryStore } from '../adapters/standalone/localMemoryBrain.js';
 
 const router = Router();
 
@@ -48,6 +51,9 @@ router.post('/agent/agents', authMiddleware, async (req: AuthRequest, res) => {
       maxIterations: b.maxIterations,
       approvalMode: b.approvalMode,
       systemPrompt: String(b.systemPrompt),
+      soul: b.soul != null ? String(b.soul) : undefined,
+      shareDefaultMemory: b.shareDefaultMemory != null ? !!b.shareDefaultMemory : undefined,
+      cloudSync: b.cloudSync != null ? !!b.cloudSync : undefined,
       createdBy: 'user',
     });
     res.json({ agent });
@@ -73,6 +79,9 @@ router.patch('/agent/agents/:slug', authMiddleware, async (req: AuthRequest, res
       maxIterations: b.maxIterations !== undefined ? b.maxIterations : cur.maxIterations,
       approvalMode: b.approvalMode != null ? b.approvalMode : cur.approvalMode,
       systemPrompt: b.systemPrompt != null ? String(b.systemPrompt) : cur.systemPrompt,
+      soul: b.soul != null ? String(b.soul) : cur.soul,
+      shareDefaultMemory: b.shareDefaultMemory != null ? !!b.shareDefaultMemory : cur.shareDefaultMemory,
+      cloudSync: b.cloudSync != null ? !!b.cloudSync : cur.cloudSync,
     });
     res.json({ agent });
   } catch (e: any) {
@@ -87,6 +96,185 @@ router.delete('/agent/agents/:slug', authMiddleware, async (req: AuthRequest, re
     res.json({ ok });
   } catch (e: any) {
     res.status(500).json({ detail: e?.message || 'delete agent failed' });
+  }
+});
+
+// 头像:base64 上传(≤1MB,写进该 agent 的 Library/ 并由 config.avatar 引用)/ 二进制读取。
+router.post('/agent/agents/:slug/avatar', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    const b = req.body || {};
+    if (!b.data || !b.mimeType) return res.status(400).json({ detail: 'data 与 mimeType 必填' });
+    const avatar = await saveAgentAvatar(req.params.slug, String(b.data), String(b.mimeType));
+    res.json({ ok: true, avatar });
+  } catch (e: any) {
+    res.status(400).json({ detail: e?.message || 'upload avatar failed' });
+  }
+});
+
+router.get('/agent/agents/:slug/avatar', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    const av = await readAgentAvatar(req.params.slug);
+    if (!av) return res.status(404).json({ detail: 'no avatar' });
+    res.setHeader('Content-Type', av.mimeType);
+    res.setHeader('Cache-Control', 'no-cache');
+    res.send(av.data);
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'read avatar failed' });
+  }
+});
+
+// 列表顺序 + 默认 agent(.meta.json)。
+router.get('/agent/agents-meta', authMiddleware, async (_req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    res.json(readAgentsMeta());
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'read meta failed' });
+  }
+});
+
+router.put('/agent/agents-meta', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    const b = req.body || {};
+    res.json(await writeAgentsMeta({ order: b.order, defaultSlug: b.defaultSlug }));
+  } catch (e: any) {
+    res.status(400).json({ detail: e?.message || 'update meta failed' });
+  }
+});
+
+// 某 agent 的 MEMORY/LOG。按 resolveMemorySlug 解析作用域(共用默认的 agent → 读写默认 agent 文件夹,
+// 与写入端 agentLoop/subAgent 的 resolveMemorySlug 一致),保证面板看到的就是该 agent 真正读写的那份。
+async function storeForAgent(slug: string): Promise<ReturnType<typeof createLocalMemoryStore> | null> {
+  const def = await getAgent(slug);
+  if (!def) return null;
+  return createLocalMemoryStore(path.join(agentsDir(), resolveMemorySlug(def)));
+}
+
+router.get('/agent/agents/:slug/memory', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    const store = await storeForAgent(req.params.slug);
+    if (!store) return res.status(404).json({ detail: 'Agent not found' });
+    res.json({ content: store.readMemory() });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'read memory failed' });
+  }
+});
+
+router.put('/agent/agents/:slug/memory', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    const store = await storeForAgent(req.params.slug);
+    if (!store) return res.status(404).json({ detail: 'Agent not found' });
+    store.writeMemory(String(req.body?.content ?? ''));
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(400).json({ detail: e?.message || 'write memory failed' });
+  }
+});
+
+router.get('/agent/agents/:slug/logs', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    const store = await storeForAgent(req.params.slug);
+    if (!store) return res.status(404).json({ detail: 'Agent not found' });
+    res.json({ dates: store.listLogDates() });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'list logs failed' });
+  }
+});
+
+router.get('/agent/agents/:slug/log', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    const store = await storeForAgent(req.params.slug);
+    if (!store) return res.status(404).json({ detail: 'Agent not found' });
+    const date = String(req.query.date || '');
+    res.json({ date, content: date ? store.readLog(date) : '' });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'read log failed' });
+  }
+});
+
+// 覆写某日日志正文(设置面板可编辑)。ponytail: 直写本地 LOG/<date>.md;cloudSync agent 下次同步走块合并
+router.put('/agent/agents/:slug/log', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    const store = await storeForAgent(req.params.slug);
+    if (!store) return res.status(404).json({ detail: 'Agent not found' });
+    const date = String(req.query.date || '');
+    if (!date) return res.status(400).json({ detail: 'date 必填' });
+    store.writeLog(date, String(req.body?.content ?? ''));
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(400).json({ detail: e?.message || 'write log failed' });
+  }
+});
+
+// ── Library 文件:列表 / 读 / 写 / 删(用 agent 自身 slug,非 resolveMemorySlug)。──
+router.get('/agent/agents/:slug/library', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    if (!(await getAgent(req.params.slug))) return res.status(404).json({ detail: 'Agent not found' });
+    res.json({ files: await listLibraryFiles(req.params.slug) });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'list library failed' });
+  }
+});
+
+router.get('/agent/agents/:slug/library/file', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    const f = await readLibraryFile(req.params.slug, String(req.query.name || ''));
+    if (!f) return res.status(404).json({ detail: 'file not found' });
+    res.json(f);
+  } catch (e: any) {
+    res.status(400).json({ detail: e?.message || 'read library file failed' });
+  }
+});
+
+router.post('/agent/agents/:slug/library/file', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    if (!(await getAgent(req.params.slug))) return res.status(404).json({ detail: 'Agent not found' });
+    const b = req.body || {};
+    const r = await writeLibraryFile(req.params.slug, String(b.name || ''), { content: b.content, dataBase64: b.dataBase64, isBinary: !!b.isBinary });
+    res.json({ ok: true, name: r.name });
+  } catch (e: any) {
+    res.status(400).json({ detail: e?.message || 'write library file failed' });
+  }
+});
+
+router.delete('/agent/agents/:slug/library/file', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    await deleteLibraryFile(req.params.slug, String(req.query.name || ''));
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(400).json({ detail: e?.message || 'delete library file failed' });
+  }
+});
+
+// 全局用户画像 USER.md。
+router.get('/agent/user-profile', authMiddleware, async (_req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    res.json({ content: readUserMd() });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'read user profile failed' });
+  }
+});
+
+router.put('/agent/user-profile', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    writeUserMd(String(req.body?.content ?? ''));
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(400).json({ detail: e?.message || 'write user profile failed' });
   }
 });
 

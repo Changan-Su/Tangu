@@ -48,11 +48,11 @@ export const wechatToolsProvider: ToolProvider = {
         function: {
           name: 'wechat_send_file',
           description:
-            '把工作区里的一个文件以「文件」形式发送给当前微信会话连接的微信用户。仅在「微信远程」会话(已扫码连接微信)里有效;在普通会话调用会报「未连接微信」。path 相对工作目录或绝对路径;任意类型(文档/压缩包/音频等),上限 50MB。图片想内联显示请改用 wechat_send_image。',
+            'Send a file from the workspace as a "file" to the WeChat user connected to the current WeChat session. Only works in a "WeChat Remote" session (WeChat connected via QR scan); calling it in a normal session returns "WeChat not connected". path is relative to the working directory or an absolute path; any type (document/archive/audio etc.), up to 50MB. To display an image inline, use wechat_send_image instead.',
           parameters: {
             type: 'object',
             properties: {
-              path: { type: 'string', description: '要发送的文件路径(相对工作目录或绝对路径)' },
+              path: { type: 'string', description: 'Path of the file to send (relative to the working directory or an absolute path)' },
             },
             required: ['path'],
           },
@@ -70,11 +70,11 @@ export const wechatToolsProvider: ToolProvider = {
         function: {
           name: 'wechat_send_image',
           description:
-            '把工作区里的一张图片以「图片」气泡形式内联发送给当前微信会话连接的微信用户。仅在「微信远程」会话里有效。path 相对工作目录或绝对路径;适合截图/图表/生成的图片(png/jpg/gif 等),上限 50MB。非图片或想保留原文件名请用 wechat_send_file。',
+            'Send an image from the workspace inline as an "image" bubble to the WeChat user connected to the current WeChat session. Only works in a "WeChat Remote" session. path is relative to the working directory or an absolute path; good for screenshots/charts/generated images (png/jpg/gif etc.), up to 50MB. For non-images or to keep the original filename, use wechat_send_file.',
           parameters: {
             type: 'object',
             properties: {
-              path: { type: 'string', description: '要发送的图片路径(png/jpg/gif 等)' },
+              path: { type: 'string', description: 'Path of the image to send (png/jpg/gif etc.)' },
             },
             required: ['path'],
           },

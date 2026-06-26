@@ -158,6 +158,30 @@ export interface StorageBrain {
   deleteItem(...args: any[]): Promise<any>;
 }
 
+/**
+ * Tangu 每-agent 云文件镜像(Phase 2):跨设备同步(agentFileSync 读写)+ 云端运行水合共用。
+ * 一行 = 一个 agent 的一个文件(config.toml/SOUL.md/MEMORY.md/LOG/<date>.md/Library/*),哨兵
+ * slug '__user__'(USER.md) / '__meta__'(.meta.json)。文本内联,二进制 base64。可选:旧云端 404 → 调用方降级。
+ */
+export interface AgentFileMeta { relPath: string; mtimeMs: number; size: number; isBinary: boolean; deleted: boolean }
+export interface AgentFileContent { content?: string; contentBase64?: string; isBinary: boolean; mtimeMs: number; deleted: boolean }
+export interface AgentFilePutBody { content?: string; contentBase64?: string; isBinary: boolean; size: number; mtimeMs: number; deviceId?: string }
+export interface AgentFilesBrain {
+  getManifest(userId: string): Promise<Array<{ slug: string; files: AgentFileMeta[] }>>;
+  getFile(userId: string, slug: string, relPath: string): Promise<AgentFileContent | null>;
+  putFile(userId: string, slug: string, relPath: string, body: AgentFilePutBody): Promise<{ mtimeMs: number }>;
+  deleteFile(userId: string, slug: string, relPath: string, mtimeMs: number, deviceId?: string): Promise<void>;
+}
+
+/**
+ * 云端运行水合(Phase 2,B):云端 worker 的 `~/.tangu/agents/` 是空的,getAgent(本地 FS)拿不到人格 →
+ * 经此从云端 tangu_agent_files 读 config.toml+SOUL.md 组装 def(人格/模型/库顺序),agentLoop 兜底用之。
+ * 可选:旧云端/纯本地未注入 → agentLoop 回落今天行为(无 per-agent 人格)。
+ */
+export interface AgentsBrain {
+  getAgent(userId: string, slug: string): Promise<import('../agents/agentRegistry.js').NormalAgentDef | null>;
+}
+
 export interface CloudBrainServices {
   llm: LlmBrain;
   users: UsersBrain;
@@ -166,4 +190,8 @@ export interface CloudBrainServices {
   search: SearchBrain;
   models: ModelsBrain;
   storage: StorageBrain;
+  /** 每-agent 云文件(Phase 2);可选:旧云端/纯本地未注入 → 同步/水合调用方跳过。 */
+  agentFiles?: AgentFilesBrain;
+  /** 每-agent 人格(Phase 2 云端运行水合);可选:未注入 → agentLoop 回落本地 getAgent。 */
+  agents?: AgentsBrain;
 }

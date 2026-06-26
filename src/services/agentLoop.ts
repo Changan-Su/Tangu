@@ -11,6 +11,8 @@ import { LlmError, type ThinkingLevel, type ChatMessage, type ToolCall } from '.
 import { publish, drain, cleanup } from './eventBus.js';
 import { gateToolCall, requestApproval, type ApprovalDecision } from './approvals.js';
 import { enterRunContext } from '../seams/runContext.js';
+import path from 'node:path';
+import { agentsDir, readUserMd, DEFAULT_AGENT_SLUG } from '../core/tanguHome.js';
 import { getRun, updateRunStatus, appendStep, listPendingRunsForRecovery } from './runStore.js';
 import { getToolDefinitions, executeTool, getToolCapabilities, type ToolContext } from '../tools/registry.js';
 import { loadSkillLoadout } from './skillLoadout.js';
@@ -21,12 +23,14 @@ import {
   estimateTokensRough, estimateMessagesTokens, compactContext, capToolResult, capHistoryContent, pinMessage,
 } from './contextBudget.js';
 import { getLatestSummary, compactSession, foldWorkingWithSummary } from './compaction.js';
-import { getAgent } from '../agents/agentRegistry.js';
+import { getAgent, resolveActiveSlug, resolveMemorySlug } from '../agents/agentRegistry.js';
 import { onUserRunDone } from './localHistorian.js';
 import { normalizeImageAttachments, toImageParts } from './imageAttachments.js';
 import { looksLikeToolCallText } from '../llm/textToolCalls.js';
 import { runCostCeiling, isOverRunCost } from './runBudget.js';
 import { runGroupChat } from './groupChat.js';
+import { listPluginMetas } from '../plugins/registry.js';
+import { isPluginEnabledSync } from '../plugins/settingsStore.js';
 
 // ── 注入依赖的 lazy 别名:保持下方调用点不变(接缝装配后才会真正取到 deps)──
 const resolveModelAndKey = (modelId: string) => deps().brain.llm.resolveModelAndKey(modelId);
@@ -297,7 +301,7 @@ async function hydrateHistory(sessionId: string, excludeMessageId: string): Prom
   }
   // 图片物化在前(用 out 内下标)、摘要 unshift 在后,避免下标错位。
   if (checkpoint && through > 0) {
-    out.unshift({ role: 'system', content: '## 此前对话的压缩摘要\n' + checkpoint.summary } as ChatMessage);
+    out.unshift({ role: 'system', content: '## Compacted Summary of Earlier Conversation\n' + checkpoint.summary } as ChatMessage);
   }
   return out;
 }
@@ -326,11 +330,23 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
   const agentConfig = input.agentConfig || {};
   // Normal Agent 激活:会话 agent_config.agentSlug → 合并 agent 定义里「会话未显式覆盖」的字段。
   // 仅本地形态有 agents 目录;不存在/读失败不阻断 run。模型覆盖由客户端在激活时写入会话 model_id。
+  let activeAgentSlug = DEFAULT_AGENT_SLUG;
+  let memScopeSlug = DEFAULT_AGENT_SLUG; // 记忆/日志作用域(共用默认 → DEFAULT;否则该 agent)
   if (agentConfig.agentSlug) {
     try {
-      const def = await getAgent(String(agentConfig.agentSlug));
+      let def = await getAgent(String(agentConfig.agentSlug));
+      // 云端运行水合(Phase 2 B):worker 的 ~/.tangu/agents 是空的,本地 getAgent 拿不到 → 从云端
+      // tangu_agent_files 读人格(config.toml+SOUL.md)。软失败 → null,回落今天行为(无 per-agent 人格)。
+      const agentsBrain = deps().brain.agents;
+      if (!def && agentsBrain) {
+        def = await agentsBrain.getAgent(userId, String(agentConfig.agentSlug)).catch(() => null);
+      }
       if (def) {
+        activeAgentSlug = resolveActiveSlug(agentConfig.agentSlug);
+        memScopeSlug = resolveMemorySlug(def);
         if (!agentConfig.systemPrompt && def.systemPrompt) agentConfig.systemPrompt = def.systemPrompt;
+        if (!agentConfig.soul && def.soul) agentConfig.soul = def.soul;
+        if (!agentConfig.libraryOrder && def.libraryOrder?.length) agentConfig.libraryOrder = def.libraryOrder;
         if (agentConfig.maxIterations == null && def.maxIterations != null) agentConfig.maxIterations = def.maxIterations;
         if (!agentConfig.thinkingLevel && def.thinkingLevel) agentConfig.thinkingLevel = def.thinkingLevel;
         if (!agentConfig.approvalMode && def.approvalMode) agentConfig.approvalMode = def.approvalMode;
@@ -340,6 +356,10 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
       }
     } catch { /* 加载失败不阻断 */ }
   }
+  // 把激活的 agent slug 穿透进 run 上下文:本地记忆层(remember/log_event/Historian)据此落到
+  // ~/.tangu/agents/<slug>/;未选/无效 slug → 默认 agent。enterWith 覆盖整个异步子树。
+  // memScopeSlug=共用默认时落 DEFAULT,否则该 agent 自己——保证「每个 agent 只写自己的(或显式共用默认的)」。
+  enterRunContext(userId, runId, memScopeSlug);
   // 默认 90(原 20):重试型模型/多步任务很容易把少量轮数耗光被迫收尾;可经会话级 agentConfig.maxIterations
   // (桌面/TUI 的 /loop 指令)调节,安全上限 200 防失控。
   const maxIterations = Math.min(Math.max(1, agentConfig.maxIterations || 90), 200);
@@ -392,9 +412,11 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
     await publish(runId, 'status', { state: 'running' });
 
     // 群聊模式(Group Chat):≥2 个 Normal Agent 轮流发言 —— 走独立编排,不进下方单 agent 装载。
-    // host-only(本地形态);在 try 内 return → runLoop 的 finally 仍跑(flush + advanceQueue + cleanup),
-    // runGroupChat 自管终态(done/failed/aborted),不碰会话队列。
-    if (agentConfig.groupChat && profile.capabilities.hostExec) {
+    // gate 在 capabilities.groupChat(host baseline 恒 true;云端 app 经 manifest opt-in)—— 纯编排无 host
+    // 访问,内部 agent 仍按 execMode=sandbox 过滤工具,不破 hostExec 红线。云端参与者用 inline groupTempAgents
+    // (getAgent 本地文件在云端拿不到,优雅降级)。在 try 内 return → runLoop 的 finally 仍跑(flush +
+    // advanceQueue + cleanup),runGroupChat 自管终态(done/failed/aborted),不碰会话队列。
+    if (agentConfig.groupChat && profile.capabilities.groupChat) {
       await runGroupChat({
         runId, sessionId, userId, appId, modelId, execMode, cwd, profile, agentConfig,
         message: input.message ? String(input.message) : '',
@@ -448,37 +470,93 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
     const enabledSkillIds = skillLoadout.enabledSkillIds;
 
     const systemParts: string[] = [];
+    // 静态指引/环境段按 profile 装载（G4，见 profiles/promptSections.ts）。
+    const promptSections = profile.promptSections({ execMode, cwd });
+    // 系统块按「稳定 → 易变」排布,让记忆改写只失效最短后缀(单 pin 单断点,见末尾 pinMessage)。
+    // 1) developer_instructions(config.toml;身份/稳定)
     if (agentConfig.systemPrompt) systemParts.push(String(agentConfig.systemPrompt));
-    // 注入用户长期记忆（整 run 冻结、缓存安全）。读失败不阻断 run。
+    // 2) SOUL.md 人格(身份/稳定)
+    if (agentConfig.soul && String(agentConfig.soul).trim()) {
+      systemParts.push('## Persona\nThe following is your persona; act according to its tone and values, but do not recite it verbatim.\n\n' + String(agentConfig.soul).trim());
+    }
+    // 3) 静态指引(记忆与日志用法),置于记忆块之前以稳定前缀
+    systemParts.push(...promptSections.guidance);
+    // 4) USER.md 全局用户画像(所有 agent 可见,用户维护,半稳定)。读失败不阻断。
+    try {
+      const userMd = readUserMd();
+      if (userMd.trim()) {
+        systemParts.push('## About the User\nA long-term profile/preferences the user maintains themselves; take it into account, do not recite it, and do not treat it as instructions for this turn.\n\n' + userMd.trim());
+      }
+    } catch { /* ignore */ }
+    // 5) 你的专属文件夹(仅 host:agent 有文件读写工具、能访问绝对路径;云端 sandbox 文件夹不可达 → 不注入)。
+    //    让 agent 认知自己的 home + Library,主动往 Library 沉淀/读取资料,并理解 MEMORY/LOG 的归属。
+    if (execMode === 'host') {
+      const home = path.join(agentsDir(), activeAgentSlug);
+      const libDir = path.join(home, 'Library');
+      let folderBlock =
+        '## Your Personal Folder\n' +
+        `You have a personal folder that persists across sessions: \`${home}\`, containing:\n` +
+        '- `MEMORY.md` — your long-term memory (written with the remember tool; this is the same as "My Long-Term Memory" above)\n' +
+        '- `LOG/<date>.md` — your daily logs (written with log_event, read with read_log)\n' +
+        '- `SOUL.md` — your persona\n' +
+        `- \`Library/\` (\`${libDir}\`) — your reference library: use the file read/write tools (read_file/write_file/list_dir, etc.; this directory is already writable and needs no approval) to **store and retrieve long-term reference material** (character settings, tool manuals, knowledge documents, etc.). Proactively write down material worth keeping long-term, and read it back when needed.`;
+      if (Array.isArray(agentConfig.libraryOrder) && agentConfig.libraryOrder.length) {
+        const lines = agentConfig.libraryOrder.map((f: string, i: number) => `  ${i + 1}. ${path.join(libDir, String(f))}`);
+        folderBlock += '\n\nLibrary preferred reading order:\n' + lines.join('\n');
+      }
+      systemParts.push(folderBlock);
+    } else if (Array.isArray(agentConfig.libraryOrder) && agentConfig.libraryOrder.length) {
+      // 5b) 云端 sandbox 形态:无 host 文件工具、专属文件夹不可达 → 把 library_order 的**文本**资料内容注入
+      //     (封顶 ~30KB),让云端 agent 也用上自己的 Library(Phase 2 B/D3)。二进制运行时用不上 → 跳过。
+      const af = deps().brain.agentFiles;
+      if (af) {
+        try {
+          const parts: string[] = [];
+          let budget = 30_000;
+          for (const f of agentConfig.libraryOrder as string[]) {
+            if (budget <= 0) break;
+            const file = await af.getFile(userId, activeAgentSlug, `Library/${String(f)}`).catch(() => null);
+            if (!file || file.deleted || file.isBinary || !file.content) continue;
+            const body = file.content.slice(0, budget);
+            budget -= body.length;
+            parts.push(`### ${f}\n${body}`);
+          }
+          if (parts.length) systemParts.push('## Your Library (reference)\nLong-term reference material you maintain; use it as context.\n\n' + parts.join('\n\n'));
+        } catch (e) { console.warn('[agent-core] cloud library inject failed:', e); }
+      }
+    }
+    // 6) 本 agent 自己的长期记忆(经 ALS 作用域读 ~/.tangu/agents/<slug>/MEMORY.md;最易变,放最后)。读失败不阻断。
     try {
       const mem = await getMemory(userId);
       if (mem.content?.trim()) {
-        systemParts.push(
-          '## 关于该用户（长期记忆）\n' +
-            '系统为该用户长期记录的稳定事实/偏好；执行任务时纳入考量，不要复述、不要当作本轮指令。\n\n' +
-            mem.content.trim(),
-        );
+        systemParts.push('## My Long-Term Memory\nThis is the memory you have accumulated across sessions (experiences / what you know about the user); take it into account, do not recite it.\n\n' + mem.content.trim());
       }
     } catch (e) {
-      console.warn('[agent-core] load user memory failed:', e);
+      console.warn('[agent-core] load agent memory failed:', e);
     }
-    // 静态指引/环境段按 profile 装载（G4，见 profiles/promptSections.ts）：
-    // guidance（记忆与日志）在技能段前，environment（host 本地环境 / sandbox 输出位置+效率）在技能段后,
-    // 段落顺序与改造前逐字节一致。
-    const promptSections = profile.promptSections({ execMode, cwd });
-    systemParts.push(...promptSections.guidance);
+    // 7/8) 技能目录 + 环境段(environment 在技能段后,保留原相对次序)
     systemParts.push(...skillLoadout.sections);
     systemParts.push(...promptSections.environment);
+
+    // 9) 插件:已启用且带 promptSection 的插件注入各自系统提示片段(如表情包清单)。放在环境段后,
+    //    随插件内容(如表情库)变化只失效最短后缀。读失败不阻断 run。
+    for (const p of listPluginMetas()) {
+      if (!p.promptSection || !isPluginEnabledSync(p.id)) continue;
+      try {
+        const sec = await p.promptSection({ slug: activeAgentSlug, userId, execMode });
+        if (sec && sec.trim()) systemParts.push(sec.trim());
+      } catch (e) { console.warn(`[agent-core] plugin ${p.id} promptSection failed:`, e); }
+    }
 
     // 计划模式指引(追加在最后,不动既有段落的字节序;planMode 是 run 级配置,同 run 内稳定)。
     if (planMode) {
       systemParts.push(
-        '## 计划模式(Plan Mode)\n' +
-          '当前处于计划模式:你只有只读工具,**不能**写文件/执行命令/调用外部工具。流程:\n' +
-          '1. 用只读工具(read_file/search_files/glob_files/browser_search/web_search 等)充分调研\n' +
-          '2. 需求有歧义或方案需取舍时用 ask_user 问清楚\n' +
-          '3. 产出完整实施计划(目标/步骤/涉及文件/验证方式),调用 exit_plan_mode 提交审批\n' +
-          '4. 用户批准前不要承诺"已完成"任何改动;被要求修改就完善计划后重新提交',
+        '## Plan Mode\n' +
+          'You are currently in plan mode: you have only read-only tools and **cannot** write files / run commands / call external tools. Process:\n' +
+          '1. Research thoroughly using read-only tools (read_file/search_files/glob_files/browser_search/web_search, etc.)\n' +
+          '2. When requirements are ambiguous or trade-offs are needed, use ask_user to clarify\n' +
+          '3. Produce a complete implementation plan (goals/steps/files involved/how to verify), then call exit_plan_mode to submit for approval\n' +
+          '4. Do not claim any change is "done" before the user approves; if asked to revise, refine the plan and resubmit',
       );
     }
 
@@ -488,7 +566,63 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
       // 把「靠位置保护」升级为「显式 pin」,日后消息排序变化也不丢注入上下文)。
       workingMessages.push(pinMessage({ role: 'system', content: systemParts.join('\n\n') } as ChatMessage));
     }
+    // 开发者「显示 system prompt」:把本 run 组装好的系统提示原样作事件发出(仅 agentConfig.debugSystemPrompt)。
+    // 纯只读文本,无 host 访问 → cloud/standalone/desktop 同一路径安全;前缀缓存不受影响(不改 workingMessages)。
+    if (agentConfig.debugSystemPrompt && systemParts.length) {
+      await publish(runId, 'system_prompt', { content: systemParts.join('\n\n') });
+    }
     workingMessages.push(...history);
+
+    // /skill 点名技能(参考 Hermes 的「指针+按需加载」):强指令拼到**尾部 user 消息**,正文由模型
+    // 按需 use_skill 取回、作为工具结果落对话尾部。不进 system → /skill 轮不改 system 前缀字节,前缀
+    // 缓存照常命中(旧做法把正文塞 system,/skill 轮整段前缀 miss)。同图片回流的「尾部追加」策略。
+    if (skillLoadout.requested.length) {
+      const directive =
+        '## Designated Skills for This Turn (must use)\n' +
+        'The user has named the following skills for this message via /skill. Before answering, **first** call `use_skill` (passing its id) for each one to obtain the full instructions, then act accordingly; other skills can still be loaded on demand via use_skill:\n' +
+        skillLoadout.requested
+          .map((s) => `- ${s.name} (id: \`${s.id}\`)${s.description ? ` — ${s.description}` : ''}`)
+          .join('\n');
+      for (let i = workingMessages.length - 1; i >= 0; i--) {
+        const m = workingMessages[i];
+        if (m.role !== 'user') continue;
+        if (typeof m.content === 'string') {
+          workingMessages[i] = { ...m, content: m.content ? `${m.content}\n\n${directive}` : directive };
+        } else if (Array.isArray(m.content)) {
+          workingMessages[i] = { ...m, content: [...m.content, { type: 'text', text: directive }] } as ChatMessage;
+        }
+        break;
+      }
+    }
+
+    // @ 提及的 agent(单聊):用户 @ 了别的 Normal Agent → 提示主 agent 用 delegate(agentSlug=…) 把相关
+    // 子任务交给它们(子代理用该 agent 人格跑),再综合回复。仅 host(delegate 可见)注入;同尾部 user 指令策略。
+    const mentionSlugs: string[] = Array.isArray(agentConfig.mentionedAgentSlugs)
+      ? agentConfig.mentionedAgentSlugs.map(String)
+      : [];
+    if (mentionSlugs.length && profile.capabilities.hostExec) {
+      const mentioned = (await Promise.all(mentionSlugs.map((s) => getAgent(s).catch(() => null))))
+        .filter(Boolean) as Array<{ slug: string; name: string; description?: string }>;
+      if (mentioned.length) {
+        const directive =
+          '## Mentioned Agents for This Turn\n' +
+          'The user @-mentioned the following agents for this message. When their expertise fits the request, involve them and then synthesize the result into your reply. Two ways, pick per the task:\n' +
+          '- `delegate` with the matching `agentSlug` — a quick one-shot subtask (the subagent runs with that agent\'s persona and returns a single report). Use for fetch/search/analysis you just need an answer to.\n' +
+          '- `start_discussion` with `peer` = the matching slug — a genuine back-and-forth deliberation (a fork of you debates them over rounds until they vote to end; collect it with `wait_discussion`). Use when the question benefits from real discussion/disagreement.\n' +
+          'Mentioned agents:\n' +
+          mentioned.map((a) => `- ${a.name} (slug: \`${a.slug}\`)${a.description ? ` — ${a.description}` : ''}`).join('\n');
+        for (let i = workingMessages.length - 1; i >= 0; i--) {
+          const m = workingMessages[i];
+          if (m.role !== 'user') continue;
+          if (typeof m.content === 'string') {
+            workingMessages[i] = { ...m, content: m.content ? `${m.content}\n\n${directive}` : directive };
+          } else if (Array.isArray(m.content)) {
+            workingMessages[i] = { ...m, content: [...m.content, { type: 'text', text: directive }] } as ChatMessage;
+          }
+          break;
+        }
+      }
+    }
 
     // 运行时转向的「回合切分」:把当前累积的助手段 A 落库 → 持久化注入的用户消息 U(们) → 清空累加器、
     // 铸新 assistantId(段 B)→ 发 turn_boundary 让前端关闭 A、插入 U 气泡、开 B 流。在迭代边界调用,
@@ -555,6 +689,8 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
       userId, sessionId, appId, runId, signal: ac.signal, customTools, mcpTools,
       enabledSkillIds, execMode, cwd, approvalMode, profile, modelId, planMode,
       muse: !!agentConfig.muse,
+      // 激活的 agent 定义 slug → start_discussion 的「分身」据此取主 agent 人设(memScopeSlug 可能是共用默认,不可混用)。
+      agentSlug: activeAgentSlug,
       collectImage: (img) => {
         if (img && typeof img.url === 'string' && img.url && pendingToolImages.length < MAX_TOOL_IMAGES_PER_ROUND) {
           pendingToolImages.push({ url: img.url });
@@ -894,7 +1030,7 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
         const imgs = pendingToolImages.splice(0);
         workingMessages.push({
           role: 'user',
-          content: toImageParts('(以上工具读取到的图片如下,请据此分析)', imgs),
+          content: toImageParts('(The images read by the tools above are shown below; analyze them accordingly)', imgs),
         } as ChatMessage);
       }
       allToolResults.push(...toolResults);
@@ -917,7 +1053,7 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
     await updateRunStatus(runId, 'done', { result: { content: finalContent }, tokensTotal });
     // 本地 Historian（Special Agent）：本「轮」完成 → 按 X/Y 轮触发标题/记忆维护。
     // fire-and-forget，绝不阻断/影响 run；非本地形态或未启用时内部 no-op。
-    void onUserRunDone(sessionId, userId);
+    void onUserRunDone(sessionId, userId, activeAgentSlug);
   } catch (err: any) {
     const aborted = err?.name === 'AbortError' || err instanceof AbortLikeError;
     const status = aborted ? 'aborted' : 'failed';

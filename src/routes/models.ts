@@ -66,8 +66,13 @@ router.get('/agent/models', authMiddleware, async (req: AuthRequest, res) => {
       }
     }
 
+    // 选择器按 id 选用(value={m.id}),同 id 重复(如某模型既在云端又在直连 provider)无法区分且会撞
+    // React key —— 按 id 去重,保留首次出现(cloud 优先于 direct,因 cloud 先 push)。
+    const seenId = new Set<string>();
+    const uniqueModels = models.filter((m) => (seenId.has(m.id) ? false : (seenId.add(m.id), true)));
+
     // 默认模型:admin 的 project 默认 > profile 静态默认。
-    res.json({ models, directProviders, defaultModelId: projectDefaultModelId || profile.defaultModelId || null, forsion });
+    res.json({ models: uniqueModels, directProviders, defaultModelId: projectDefaultModelId || profile.defaultModelId || null, forsion });
   } catch (e: any) {
     res.status(500).json({ detail: e?.message || 'list models failed' });
   }

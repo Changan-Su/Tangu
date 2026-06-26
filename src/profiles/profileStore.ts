@@ -20,7 +20,7 @@ export interface ProfileView {
   displayName: string;
   defaultModelId: string | null;
   sandboxMode: 'docker' | 'none';
-  capabilities: { hostExec: boolean; memory: boolean; log: boolean };
+  capabilities: { hostExec: boolean; groupChat: boolean; memory: boolean; log: boolean };
   features: { sandbox: boolean; webSearch: boolean; historian: boolean; customTools: boolean };
   toolBuiltins: 'all' | string[];
   promptGuidance: string[];

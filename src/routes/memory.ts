@@ -10,6 +10,8 @@ import { Router } from 'express';
 import { authMiddleware, AuthRequest } from '../core/http.js';
 import { deps } from '../seams/runtime.js';
 import { syncNow, getSyncStatus } from '../services/memorySyncService.js';
+import { runWithAgentSlug } from '../seams/runContext.js';
+import { getAgent, resolveMemorySlug } from '../agents/agentRegistry.js';
 
 const router = Router();
 
@@ -25,9 +27,15 @@ router.post('/agent/memory', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const text = String(req.body?.text ?? '').trim();
     if (!text) return res.status(400).json({ detail: 'text is required' });
-    res.json(await deps().brain.memory.appendMemoryEntry(req.user!.userId, text, {
-      dedup: req.body?.dedup !== false,
-    }));
+    const append = () => deps().brain.memory.appendMemoryEntry(req.user!.userId, text, { dedup: req.body?.dedup !== false });
+    // slug 指定(面板按当前 agent 追加)→ 在该 agent 记忆作用域内写(共用默认则落默认);否则按默认 agent。
+    const slug = req.body?.slug ? String(req.body.slug) : '';
+    if (slug) {
+      const def = await getAgent(slug).catch(() => null);
+      res.json(await runWithAgentSlug(def ? resolveMemorySlug(def) : slug, append));
+    } else {
+      res.json(await append());
+    }
   } catch (e: any) {
     res.status(500).json({ detail: e?.message || 'append memory failed' });
   }

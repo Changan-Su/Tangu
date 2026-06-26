@@ -106,8 +106,8 @@ describe('compactContext', () => {
     expect(msgs[2].content.length).toBe(1000);
     expect(msgs[45].content.length).toBe(1000);
     // middle folded/truncated
-    expect(msgs[10].content).toContain('工具输出已折叠');
-    expect(msgs[15].content).toContain('上下文压缩:省略');
+    expect(msgs[10].content).toContain('tool output folded');
+    expect(msgs[15].content).toContain('context compacted: omitted');
   });
 
   it('is idempotent (second pass is a no-op)', () => {
@@ -129,7 +129,7 @@ describe('capToolResult / capHistoryContent', () => {
     const s = 'a'.repeat(200_000);
     const out = capToolResult(s);
     expect(out.length).toBeLessThan(s.length);
-    expect(out).toContain('单条工具输出超限');
+    expect(out).toContain('single tool output too large');
     expect(out.startsWith('a'.repeat(4_000))).toBe(true);
     expect(out.endsWith('a'.repeat(1_500))).toBe(true);
   });
@@ -137,7 +137,7 @@ describe('capToolResult / capHistoryContent', () => {
     const s = 'a'.repeat(200_000);
     const out = capHistoryContent(s);
     expect(out.length).toBeLessThan(s.length);
-    expect(out).toContain('历史消息超限');
+    expect(out).toContain('history message too large');
     expect(out.startsWith('a'.repeat(2_000))).toBe(true);
     expect(out.endsWith('a'.repeat(500))).toBe(true);
   });

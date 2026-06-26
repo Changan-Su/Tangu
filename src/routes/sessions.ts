@@ -15,6 +15,7 @@ import { authMiddleware, AuthRequest } from '../core/http.js';
 import { query, getNowSql } from '../core/db.js';
 import { resolveProfile } from '../seams/appProfile.js';
 import { compactSession } from '../services/compaction.js';
+import { branchSession } from '../services/sessionBranch.js';
 
 const router = Router();
 
@@ -82,6 +83,25 @@ router.post('/agent/sessions', authMiddleware, async (req: AuthRequest, res) => 
     res.json({ session: rowToSession(rows[0]) });
   } catch (e: any) {
     res.status(500).json({ detail: e?.message || 'create session failed' });
+  }
+});
+
+// 从某条消息(含)处分支出新会话:继承到该点为止的历史(区别于 POST /agent/sessions 的空会话)。
+// message_id 为分支点(通常是某条 AI 回复);title 可选(缺省取源会话标题)。
+router.post('/agent/sessions/:id/branch', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.user!.userId;
+    const s = await getOwnSession(req.params.id, userId);
+    if (!s) return res.status(404).json({ detail: 'Session not found' });
+    const messageId = typeof req.body?.message_id === 'string' ? req.body.message_id : '';
+    if (!messageId) return res.status(400).json({ detail: 'message_id required' });
+    const title = typeof req.body?.title === 'string' ? req.body.title : undefined;
+    const r = await branchSession({ sourceSessionId: req.params.id, userId, appId: s.app_id, messageId, title });
+    if (!r) return res.status(404).json({ detail: 'branch source/message not found' });
+    const rows = await query<any[]>(`SELECT ${SESSION_COLS} FROM chat_sessions WHERE id = ?`, [r.id]);
+    res.json({ session: rowToSession(rows[0]), copied: r.copied });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'branch session failed' });
   }
 });
 

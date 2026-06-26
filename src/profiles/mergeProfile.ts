@@ -72,6 +72,7 @@ export function mergeProfile(
     },
     capabilities: {
       hostExec: base.capabilities.hostExec, // 强制(红线,永不可经覆盖授予)
+      groupChat: ov.capabilities?.groupChat ?? base.capabilities.groupChat, // 可覆盖(云端可授予的安全编排能力)
       memory: ov.capabilities?.memory ?? base.capabilities.memory,
       log: ov.capabilities?.log ?? base.capabilities.log,
     },

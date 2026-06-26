@@ -39,19 +39,19 @@ export const todoProvider: ToolProvider = {
         function: {
           name: 'todo_write',
           description:
-            '维护本会话的任务清单(整单替换)。规划多步任务时先写清单;每完成一步就更新状态再继续。' +
-            'status ∈ pending | in_progress | completed;同一时刻至多一项 in_progress。',
+            'Maintain this session\'s todo list (replaces the whole list). Write a list before planning a multi-step task; update the status after each step before continuing. ' +
+            'status ∈ pending | in_progress | completed; at most one item in_progress at a time.',
           parameters: {
             type: 'object',
             properties: {
               todos: {
                 type: 'array',
-                description: '完整的任务清单(整单替换旧清单)',
+                description: 'The complete todo list (replaces the old list in full)',
                 items: {
                   type: 'object',
                   properties: {
-                    content: { type: 'string', description: '任务描述(祈使句)' },
-                    status: { type: 'string', enum: ['pending', 'in_progress', 'completed'], description: '任务状态' },
+                    content: { type: 'string', description: 'Task description (imperative)' },
+                    status: { type: 'string', enum: ['pending', 'in_progress', 'completed'], description: 'Task status' },
                   },
                   required: ['content', 'status'],
                 },
@@ -81,7 +81,7 @@ export const todoProvider: ToolProvider = {
         type: 'function',
         function: {
           name: 'todo_read',
-          description: '读取本会话当前的任务清单(恢复上下文/检查剩余步骤时用)。',
+          description: 'Read this session\'s current todo list (use it to restore context or check remaining steps).',
           parameters: { type: 'object', properties: {}, required: [] },
         },
       },

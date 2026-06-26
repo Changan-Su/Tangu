@@ -79,10 +79,10 @@ describe('buildTodoDedupHint (Muse 去重提示)', () => {
       { title: '写发布说明', status: 'done' },
     ]);
     expect(h).toContain('给 muse 加单测');
-    expect(h).toMatch(/请勿重复/);
+    expect(h).toMatch(/do not resubmit/);
     expect(h).toContain('重构 X');
     expect(h).toContain('写发布说明');
-    expect(h).toMatch(/驳回/);
+    expect(h).toMatch(/dismissed/);
   });
   it('忽略空白标题，单项不产生分隔符', () => {
     const h = buildTodoDedupHint([
@@ -90,7 +90,7 @@ describe('buildTodoDedupHint (Muse 去重提示)', () => {
       { title: '   ', status: 'pending' },
     ]);
     expect(h).toContain('真待办');
-    expect(h.match(/；/g) || []).toHaveLength(0);
+    expect(h.match(/; /g) || []).toHaveLength(0);
   });
 });
 

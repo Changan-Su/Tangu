@@ -24,15 +24,15 @@ export const hostProcessProvider: ToolProvider = {
         function: {
           name: 'run_background',
           description:
-            '在本机后台启动一条长跑 shell 命令(dev server、watch、长测试等),立即返回 process_id。' +
-            '用 read_process_output 看输出、list_processes 看状态、kill_process 终止。' +
-            '一次性命令请用 run_bash;只有需要持续运行/不能阻塞后续步骤的才用这个。' +
-            '也可启动**交互式**进程(如 `python3 -i`、`node`、问答式 CLI),再用 write_process_input 向其 stdin 喂输入。' +
-            '注意:管道而非真 TTY——支持行式输入(REPL/调试器/逐行提示),但不支持全屏 TUI(vim/top)、' +
-            '检测 isatty 才变交互的程序、以及从 /dev/tty 读密码(sudo/ssh)。',
+            'Start a long-running shell command in the background on this machine (dev server, watch, long test, etc.) and return a process_id immediately. ' +
+            'Use read_process_output to view output, list_processes to check status, kill_process to terminate. ' +
+            'Use run_bash for one-off commands; only use this for things that must keep running or must not block subsequent steps. ' +
+            'You can also start **interactive** processes (such as `python3 -i`, `node`, a question-and-answer CLI), then feed input to their stdin with write_process_input. ' +
+            'Note: this is a pipe, not a real TTY — it supports line-based input (REPL/debugger/line-by-line prompts), but not full-screen TUIs (vim/top), ' +
+            'programs that only become interactive when isatty is detected, or reading passwords from /dev/tty (sudo/ssh).',
           parameters: {
             type: 'object',
-            properties: { command: { type: 'string', description: '要后台执行的 shell 命令' } },
+            properties: { command: { type: 'string', description: 'The shell command to run in the background' } },
             required: ['command'],
           },
         },
@@ -53,7 +53,7 @@ export const hostProcessProvider: ToolProvider = {
         type: 'function',
         function: {
           name: 'list_processes',
-          description: '列出本会话启动的后台进程(id/命令/状态/运行时长)。',
+          description: 'List the background processes started in this session (id/command/status/uptime).',
           parameters: { type: 'object', properties: {}, required: [] },
         },
       },
@@ -77,12 +77,12 @@ export const hostProcessProvider: ToolProvider = {
         type: 'function',
         function: {
           name: 'read_process_output',
-          description: '读取某后台进程的累计输出(stdout+stderr 合流)。offset 为字符偏移,省略则读尾部。',
+          description: 'Read the accumulated output of a background process (stdout+stderr merged). offset is a character offset; omit it to read the tail.',
           parameters: {
             type: 'object',
             properties: {
-              process_id: { type: 'string', description: 'run_background 返回的进程 id' },
-              offset: { type: 'number', description: '起始字符偏移(默认读最近 20000 字符)' },
+              process_id: { type: 'string', description: 'The process id returned by run_background' },
+              offset: { type: 'number', description: 'Starting character offset (defaults to the most recent 20000 characters)' },
             },
             required: ['process_id'],
           },
@@ -106,10 +106,10 @@ export const hostProcessProvider: ToolProvider = {
         type: 'function',
         function: {
           name: 'kill_process',
-          description: '终止某个后台进程(SIGTERM→3s→SIGKILL)。',
+          description: 'Terminate a background process (SIGTERM→3s→SIGKILL).',
           parameters: {
             type: 'object',
-            properties: { process_id: { type: 'string', description: '要终止的进程 id' } },
+            properties: { process_id: { type: 'string', description: 'The id of the process to terminate' } },
             required: ['process_id'],
           },
         },
@@ -126,17 +126,17 @@ export const hostProcessProvider: ToolProvider = {
         function: {
           name: 'write_process_input',
           description:
-            '向某后台进程的 stdin 写入一行输入,用于驱动交互式进程(REPL/调试器/问答式 CLI)。' +
-            '默认在末尾补换行(多数行式程序需要换行才处理)。写入后会等待该进程产出新输出并稳定下来,返回**新增**输出。' +
-            'input 留空=只轮询(不写,看进程又吐了什么);input 传单个 Ctrl-C 字符则发送中断信号。' +
-            '进程须由 run_background 启动且仍在运行。',
+            'Write one line of input to a background process\'s stdin to drive an interactive process (REPL/debugger/Q&A CLI). ' +
+            'A trailing newline is appended by default (most line-based programs need a newline to process input). After writing, it waits for the process to produce new output and settle, then returns the **new** output. ' +
+            'Leave input empty to only poll (don\'t write, just see what else the process emitted); pass a single Ctrl-C character as input to send an interrupt signal. ' +
+            'The process must have been started by run_background and still be running.',
           parameters: {
             type: 'object',
             properties: {
-              process_id: { type: 'string', description: 'run_background 返回的进程 id' },
-              input: { type: 'string', description: '要写入 stdin 的文本(留空=仅轮询新输出)' },
-              append_newline: { type: 'boolean', description: '是否在末尾补换行(默认 true)' },
-              yield_ms: { type: 'number', description: `最多等待新输出的毫秒数(默认 ${WRITE_YIELD_DEFAULT_MS},范围 ${WRITE_YIELD_MIN_MS}-${WRITE_YIELD_MAX_MS})` },
+              process_id: { type: 'string', description: 'The process id returned by run_background' },
+              input: { type: 'string', description: 'The text to write to stdin (leave empty to only poll for new output)' },
+              append_newline: { type: 'boolean', description: 'Whether to append a trailing newline (default true)' },
+              yield_ms: { type: 'number', description: `Maximum milliseconds to wait for new output (default ${WRITE_YIELD_DEFAULT_MS}, range ${WRITE_YIELD_MIN_MS}-${WRITE_YIELD_MAX_MS})` },
             },
             required: ['process_id'],
           },

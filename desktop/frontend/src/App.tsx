@@ -4,15 +4,17 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
-  AgentConfig, AgentRunEvent, Attachment, ModelsResponse, NormalAgentDef, SessionRecord, SkillInfo, TanguDesktopConfig, UiMessage, WorkspaceDescriptor,
+  AgentConfig, AgentRunEvent, Attachment, AuthStatusInfo, ModelsResponse, NormalAgentDef, SessionRecord, SkillInfo, SubChat, TanguDesktopConfig, UiMessage, WorkspaceDescriptor,
   StoredDesktopConfig,
 } from './types'
-import { CLOUD_WORKSPACE_KEY } from './types'
+import { CLOUD_WORKSPACE_KEY, SHOW_SYSTEM_PROMPT_KEY } from './types'
 import * as api from './services/backendService'
 import { abortRun, listActiveRuns, resolveApproval, resolveInquiry, startRun, steerRun, subscribeRunEvents, testConnection } from './services/agentRunService'
 import { Sidebar } from './components/Sidebar'
 import { ChatHeader } from './components/ChatHeader'
+import { FeedbackModal } from './components/FeedbackModal'
 import { EnginePicker } from './components/EnginePicker'
+import { AgentPicker } from './components/AgentPicker'
 import { ChatArea } from './components/ChatArea'
 import { MessageInput } from './components/MessageInput'
 import { SettingsModal, type Tab as SettingsTab } from './components/SettingsModal'
@@ -86,6 +88,15 @@ function groupColor(slug: string): string {
   return `hsl(${h % 360} 62% 45%)`
 }
 
+/** 把流式 delta 追加到子聊天最后一段文本(末段非文本则起新段)——subagent 单发言人累积用。 */
+function appendSubText(s: SubChat, delta: string): SubChat {
+  const segs = s.segs.slice()
+  const last = segs[segs.length - 1]
+  if (last && last.t === 'text') segs[segs.length - 1] = { ...last, text: last.text + delta }
+  else segs.push({ t: 'text', text: delta })
+  return { ...s, segs }
+}
+
 export function App(): React.JSX.Element {
   const { t } = useI18n()
   const [cfg, setCfg] = useState<TanguDesktopConfig>({ backendUrl: 'http://localhost:8787', token: '', modelId: '' })
@@ -106,6 +117,10 @@ export function App(): React.JSX.Element {
   const [modelsResp, setModelsResp] = useState<ModelsResponse | null>(null)
   const [skillsList, setSkillsList] = useState<SkillInfo[] | null>(null)
   const [agentDefs, setAgentDefs] = useState<NormalAgentDef[]>([])
+  const [agentAvatars, setAgentAvatars] = useState<Record<string, string>>({}) // slug → object URL(选择器头像)
+  const [defaultAgentSlug, setDefaultAgentSlug] = useState('xyra') // 用户选定的默认 agent(新会话默认选中)
+  const [authInfo, setAuthInfo] = useState<AuthStatusInfo | null>(null) // 当前登录用户(聊天界面用户头像/名)
+  const [feedbackOpen, setFeedbackOpen] = useState(false) // 反馈弹窗(登录 Forsion 后顶栏入口)
   const [engines, setEngines] = useState<Array<{ id: string; name: string; available?: boolean; defaultModel?: string }>>([]) // host 端外部 agent 引擎(含 available 检测;云端=空)
   const [engineCaps, setEngineCaps] = useState<Record<string, { models: Array<{ id: string; name: string; description?: string }>; commands: Array<{ name: string; description: string; hint?: string }> }>>({}) // engineId → 探测到的模型/命令(懒拉缓存)
   // 主区面板:微信远程 / 后台智能体详情 / 记忆 / 工作区详情(null=会话或空白新对话)。
@@ -123,6 +138,10 @@ export function App(): React.JSX.Element {
   const [messagesBySession, setMessagesBySession] = useState<Record<string, UiMessage[]>>({})
   const [configBySession, setConfigBySession] = useState<Record<string, AgentConfig>>({})
   const [runningBySession, setRunningBySession] = useState<Record<string, string>>({})
+  const [groupVoting, setGroupVoting] = useState<Record<string, boolean>>({}) // 群聊「正在投票」动画(sessionId→bool)
+  // 子聊天(右栏「子聊天」区,sessionId→列表):discussion/subagent 的实时内容。subagent 随主流累积;
+  // discussion 仅存条目(runId),内容由面板二开 SSE 现拉。按 sessionId 隔离 → 切会话即看对应列表。
+  const [subChatsBySession, setSubChatsBySession] = useState<Record<string, SubChat[]>>({})
   // 会话上下文/消耗:ctx=最近一轮真实 prompt tokens(占比用);base=已完成 run 累计;live=当前 run 累计。
   const [usageBySession, setUsageBySession] = useState<Record<string, { ctx: number; base: number; live: number }>>({})
   const [unread, setUnread] = useState<Set<string>>(loadUnread)
@@ -134,6 +153,9 @@ export function App(): React.JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false)
   // 设置页打开时定位到的 tab(null=默认 connection);微信/技能等入口跳到对应分区。
   const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null)
+  // 启动静默检查到的新版本(非侵入横幅;dismiss 后本会话不再提示)。
+  const [updateAvailable, setUpdateAvailable] = useState<{ version?: string } | null>(null)
+  const [updateDismissed, setUpdateDismissed] = useState(false)
   const [onboarding, setOnboarding] = useState(false)
   const [themePreset, setThemePreset] = useState(resolveInitialPreset)
   const [themeMode, setThemeMode] = useState<'light' | 'dark'>(resolveInitialMode)
@@ -152,9 +174,14 @@ export function App(): React.JSX.Element {
   newChatCfgRef.current = newChatCfg
   const newChatModelRef = useRef(newChatModel)
   newChatModelRef.current = newChatModel
+  const defaultAgentSlugRef = useRef(defaultAgentSlug)
+  defaultAgentSlugRef.current = defaultAgentSlug
   // 给轮询读「当前会话是否在本地 streaming」用,避免把 runningBySession 列进 effect 依赖导致定时器频繁重建。
   const runningRef = useRef(runningBySession)
   runningRef.current = runningBySession
+  // 给 send 盖「本 run agent 身份」用(解析名字),避免把 agentDefs 列进 send 依赖。
+  const agentDefsRef = useRef(agentDefs)
+  agentDefsRef.current = agentDefs
   const runAborts = useRef(new Map<string, AbortController>())
   const subscribedRuns = useRef(new Set<string>())
   // 用户主动停止的 run:SSE 本地中止后,subscribeRun 的 .catch 据此把消息标「已停止」而非「错误」。
@@ -217,6 +244,21 @@ export function App(): React.JSX.Element {
   // run 完成后 Historian 异步可能改了标题——经 ref 延迟刷新会话列表(避免 reduceEvent 依赖后定义的 refreshSessions)。
   const refreshSessionsRef = useRef<((c: TanguDesktopConfig) => Promise<unknown>) | null>(null)
 
+  // 子聊天 upsert(按 id 合并;无则新建)。subagent 内容随主流累积,discussion 仅建条目(内容面板二开 SSE 拉)。
+  const upsertSubChat = useCallback((sessionId: string, id: string, fn: (s: SubChat) => SubChat, init?: Partial<SubChat>) => {
+    setSubChatsBySession((prev) => {
+      const list = prev[sessionId] || []
+      const idx = list.findIndex((s) => s.id === id)
+      if (idx < 0) {
+        const base: SubChat = { id, kind: 'subagent', title: id.slice(0, 8), streaming: true, segs: [], ...init }
+        return { ...prev, [sessionId]: [...list, fn(base)] }
+      }
+      const next = list.slice()
+      next[idx] = fn(next[idx])
+      return { ...prev, [sessionId]: next }
+    })
+  }, [])
+
   // ── SSE 事件归约 ──
   const reduceEvent = useCallback((sessionId: string, runId: string, assistantRef: { current: string }, ev: AgentRunEvent) => {
     const pl = ev.payload || {}
@@ -228,6 +270,9 @@ export function App(): React.JSX.Element {
         break
       case 'reasoning':
         patchMessage(sessionId, assistantId, (m) => ({ ...m, reasoning: (m.reasoning || '') + (pl.delta || '') }))
+        break
+      case 'system_prompt': // 开发者「显示 system prompt」:整段一次性回传,挂到本条助手消息(回复前显示)
+        patchMessage(sessionId, assistantId, (m) => ({ ...m, systemPrompt: pl.content || '' }))
         break
       case 'tool_stream':
         patchMessage(sessionId, assistantId, (m) => {
@@ -364,7 +409,11 @@ export function App(): React.JSX.Element {
         }
         break
       }
+      case 'group_voting': // 投票阶段开始 → 底部「正在投票」动画(渲染时再 && running 兜底)
+        setGroupVoting((prev) => ({ ...prev, [sessionId]: true }))
+        break
       case 'group_vote': {
+        setGroupVoting((prev) => ({ ...prev, [sessionId]: false })) // 投票结果已出,关动画
         const votes = Array.isArray(pl.votes) ? pl.votes : []
         setMessagesBySession((prev) => ({
           ...prev,
@@ -406,6 +455,7 @@ export function App(): React.JSX.Element {
         setMessagesBySession((prev) => {
           const list = prev[sessionId] || []
           const have = new Set(list.map((m) => m.id))
+          const prevSeg = list.find((m) => m.id === finalizedId) // 新段继承上一段的 agent 身份(同一 run 同一 agent)
           const next = list
             .map((m) => (m.id === finalizedId
               ? { ...m, content: pl.finalizedContent || m.content, status: 'done' as const }
@@ -416,7 +466,7 @@ export function App(): React.JSX.Element {
           for (const u of users) {
             if (!have.has(u.id)) additions.push({ id: u.id, role: 'user', content: u.content, status: 'done', timestamp: Date.now() })
           }
-          if (newId && !have.has(newId)) additions.push({ id: newId, role: 'assistant', content: '', status: 'streaming', timestamp: Date.now() + 1 })
+          if (newId && !have.has(newId)) additions.push({ id: newId, role: 'assistant', content: '', status: 'streaming', timestamp: Date.now() + 1, agentId: prevSeg?.agentId, agentName: prevSeg?.agentName })
           return { ...prev, [sessionId]: [...next, ...additions] }
         })
         if (newId) assistantRef.current = newId
@@ -452,10 +502,29 @@ export function App(): React.JSX.Element {
         }))
         endRun(sessionId, runId)
         break
+      case 'subchat': {
+        // 主 run 流宣告一个子聊天(discussion/subagent)→ 右栏「子聊天」区建/更新条目。
+        const id = String(pl.id || '')
+        const kind = pl.kind === 'discussion' ? 'discussion' : 'subagent'
+        if (id) upsertSubChat(sessionId, id,
+          (s) => ({ ...s, kind, title: pl.title || s.title, runId: pl.runId || s.runId }),
+          { kind, title: pl.title, runId: pl.runId })
+        break
+      }
+      case 'subagent': {
+        // 子代理(delegate)在主 run 内的流式内容 → 累积进对应子聊天条目(主聊天不渲染 subagent 事件)。
+        const id = String(pl.subId || '')
+        if (!id) break
+        if (pl.phase === 'token' && pl.delta) upsertSubChat(sessionId, id, (s) => appendSubText(s, String(pl.delta)))
+        else if (pl.phase === 'tool') upsertSubChat(sessionId, id, (s) => ({ ...s, segs: [...s.segs, { t: 'tool', name: String(pl.name || ''), args: pl.args, preview: pl.preview, error: !!pl.isError }] }))
+        else if (pl.phase === 'start') upsertSubChat(sessionId, id, (s) => ({ ...s, title: pl.label || s.title, streaming: true }), { kind: 'subagent', title: pl.label })
+        else if (pl.phase === 'done') upsertSubChat(sessionId, id, (s) => ({ ...s, streaming: false }))
+        break
+      }
       default:
         break
     }
-  }, [patchMessage, endRun, toast, t])
+  }, [patchMessage, endRun, toast, t, upsertSubChat])
 
   const subscribeRun = useCallback(
     (sessionId: string, runId: string, assistantId: string) => {
@@ -502,8 +571,7 @@ export function App(): React.JSX.Element {
     void api.listModels(c).then(setModelsResp).catch(() => setModelsResp(null))
     // 技能目录(斜杠命令 /skill:* 用);失败静默。
     void api.listSkills(c).then(setSkillsList).catch(() => setSkillsList(null))
-    // 本地 Normal Agent 目录(斜杠 /agent:* 用;云端 404 → 空)。
-    void api.listAgents(c).then(setAgentDefs).catch(() => setAgentDefs([]))
+    // 本地 Normal Agent 目录由下方 effect([connState, settingsOpen])统一拉取——含「关闭设置后自动刷新」。
     // 外部 agent 引擎(host-only;云端 → 空 → 输入栏不显示引擎选择器)。
     void api.listEngines(c).then(setEngines).catch(() => setEngines([]))
     // Special Agents 开关(侧栏入口显隐;云端 hostExec=false → 404 → 全 false)。
@@ -585,6 +653,16 @@ export function App(): React.JSX.Element {
     })
     return () => off?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── 启动静默检查更新 + 订阅状态(检测到新版/已下载 → 顶部横幅,引导去关于页操作)──
+  useEffect(() => {
+    const off = window.tangu?.onUpdaterStatus?.((st) => {
+      if (st.phase === 'available' || st.phase === 'downloaded') setUpdateAvailable({ version: st.version })
+      else if (st.phase === 'not-available' || st.phase === 'idle') setUpdateAvailable(null)
+    })
+    void window.tangu?.checkForUpdates?.() // dev 返回 unsupported,不弹横幅
+    return () => off?.()
   }, [])
 
   // ── 选中会话:懒加载历史 + 恢复在飞 run + 清未读 ──
@@ -694,6 +772,26 @@ export function App(): React.JSX.Element {
     const timer = window.setInterval(() => { void refreshSpecialEnabled(cfgRef.current) }, 2500)
     return () => window.clearInterval(timer)
   }, [settingsOpen, connState, refreshSpecialEnabled])
+
+  // ── Normal Agent 目录:连接后 + 每次关闭设置面板后拉取(设置页新建/编辑/改头像即时反映到新会话选择器)──
+  useEffect(() => {
+    if (connState !== 'ok' || settingsOpen) return
+    const c = cfgRef.current
+    void api.listAgents(c).then((defs) => {
+      setAgentDefs(defs)
+      void Promise.all(defs.filter((a) => a.avatar).map(async (a) => [a.slug, await api.fetchAgentAvatar(c, a.slug)] as const))
+        .then((pairs) => setAgentAvatars((prev) => {
+          Object.values(prev).forEach((u) => { try { URL.revokeObjectURL(u) } catch { /* ignore */ } })
+          return Object.fromEntries(pairs.filter(([, u]) => u) as Array<[string, string]>)
+        }))
+    }).catch(() => setAgentDefs([]))
+    void api.getAgentsMeta(c).then((m) => setDefaultAgentSlug(m.defaultSlug || 'xyra')).catch(() => { /* ignore */ })
+  }, [connState, settingsOpen])
+
+  // 当前登录用户(聊天界面用户头像/名;登录态变化时刷新)。
+  useEffect(() => {
+    void window.tangu?.authStatus?.().then((a) => setAuthInfo(a)).catch(() => setAuthInfo(null))
+  }, [connState])
 
   // ── 工作区 / 会话操作 ──
   /** 默认本地工作区(Tangu 默认工作区;cwd=defaultWsDir,空时回退主目录)。 */
@@ -840,7 +938,7 @@ export function App(): React.JSX.Element {
   }, [sessions, archivedSessions, refreshSessions, toast, t])
 
   // ── 发送 / 停止 / 审批 ──
-  const send = useCallback(async (text: string, attachments: Attachment[], workspaceFiles?: Attachment[]): Promise<boolean> => {
+  const send = useCallback(async (text: string, attachments: Attachment[], workspaceFiles?: Attachment[], skillIds?: string[], mentions?: { priorityAgent?: string; mentionAgents?: string[] }): Promise<boolean> => {
     let sid = activeIdRef.current
     const wasNewChat = !sid
     let implicitInit: AgentConfig | null = null
@@ -877,6 +975,15 @@ export function App(): React.JSX.Element {
     }
     const sessionId = sid
     const agentConfig = { ...(implicitInit || configBySession[sessionId] || {}) }
+    // 没显式选 agent → 用用户设定的默认 agent(记忆/人格据此;默认 xyra)。
+    if (!agentConfig.agentSlug && defaultAgentSlugRef.current) agentConfig.agentSlug = defaultAgentSlugRef.current
+    // 本条消息经 /skill 指定的技能(per-message,加性):只放进本 run 的 agentConfig,不回写会话配置、不收窄目录。
+    if (skillIds?.length) agentConfig.requestedSkillIds = skillIds
+    // 本条消息 @(per-message,不持久化):群聊→优先发言;单聊→提示主 agent delegate 给这些 subagent。
+    if (mentions?.priorityAgent) agentConfig.priorityAgent = mentions.priorityAgent
+    if (mentions?.mentionAgents?.length) agentConfig.mentionedAgentSlugs = mentions.mentionAgents
+    // 开发者「显示 system prompt」:开启则请求后端把本 run 组装好的系统提示作 system_prompt 事件回传。
+    try { if (localStorage.getItem(SHOW_SYSTEM_PROMPT_KEY) === '1') agentConfig.debugSystemPrompt = true } catch { /* ignore */ }
     // 云沙箱拖入的文件:发送前先上传到会话工作区(agent run 时即可 list/read)。
     if (workspaceFiles?.length) {
       try {
@@ -916,12 +1023,18 @@ export function App(): React.JSX.Element {
       : (sessions.find((s) => s.id === sessionId)?.model_id || undefined)
     try {
       const r = await startRun(cfgRef.current, { sessionId, message: text, modelId: sessionModelId, attachments, agentConfig })
+      // 非群聊:给助手气泡盖上「本 run 的 agent」身份(slug+名)——之后切 agent 时旧消息不再跟着变名/头像。
+      // 群聊不盖(group_speaker 事件逐发言人盖)。无对应 def(默认未加载/已删)→ 不盖,回退全局显示。
+      const runAgent = (!agentConfig.groupChat && agentConfig.agentSlug)
+        ? agentDefsRef.current.find((a) => a.slug === agentConfig.agentSlug)
+        : undefined
+      const stamp = runAgent ? { agentId: runAgent.slug, agentName: runAgent.name } : {}
       setMessagesBySession((prev) => ({
         ...prev,
         [sessionId]: [
           ...(prev[sessionId] || []),
           { id: r.userMessageId, role: 'user', content: text, attachments, status: 'done', timestamp: Date.now() },
-          { id: r.assistantMessageId, role: 'assistant', content: '', status: 'streaming', timestamp: Date.now() + 1 },
+          { id: r.assistantMessageId, role: 'assistant', content: '', status: 'streaming', timestamp: Date.now() + 1, ...stamp },
         ],
       }))
       subscribeRun(sessionId, r.runId, r.assistantMessageId)
@@ -1002,6 +1115,28 @@ export function App(): React.JSX.Element {
     if (u < 0) { toast(t('app.regenNoUser'), true); return }
     void truncateAndResend(u, list[u].content, list[u].attachments || [])
   }, [messagesBySession, runningBySession, truncateAndResend, toast, t])
+
+  // 从某条助手消息(含)处分支出新会话:继承到该点为止的历史(区别于空的 /new),并切入新会话续聊。
+  // messageId 缺省(/branch 斜杠)时取当前会话最近一条助手回复。
+  const branchFromMessage = useCallback(async (messageId?: string) => {
+    const sid = activeIdRef.current
+    if (!sid) return
+    const list = messagesBySession[sid] || []
+    let id = messageId
+    if (!id) {
+      for (let i = list.length - 1; i >= 0; i--) { if (list[i].role === 'assistant') { id = list[i].id; break } }
+    }
+    if (!id) { toast(t('chat.branchEmpty'), true); return }
+    const srcTitle = sessions.find((s) => s.id === sid)?.title || ''
+    try {
+      const s = await api.branchSession(cfgRef.current, sid, id, srcTitle ? t('chat.branchTitle', { title: srcTitle }) : undefined)
+      setSessions((prev) => [s, ...prev])
+      setActiveId(s.id)
+      toast(t('chat.branched'))
+    } catch (e: any) {
+      toast(t('app.branchFail', { e: e?.message || e }), true)
+    }
+  }, [messagesBySession, sessions, toast, t])
 
   // 手动压缩上下文(/compact 或输入栏按钮):生成持久化总结检查点,后续 run 起步即精简。
   const compact = useCallback(async () => {
@@ -1147,21 +1282,6 @@ export function App(): React.JSX.Element {
     })
   }, [])
 
-  /** 会话内技能启停(/skill:<id> 斜杠命令):合并进 agent_config.enabledSkillIds。 */
-  const toggleSessionSkill = useCallback((skillId: string) => {
-    const sid = activeIdRef.current
-    if (!sid) return
-    setConfigBySession((prev) => {
-      const cur = new Set(prev[sid]?.enabledSkillIds || [])
-      cur.has(skillId) ? cur.delete(skillId) : cur.add(skillId)
-      const next = { ...(prev[sid] || {}), enabledSkillIds: [...cur] }
-      void api.putSessionConfig(cfgRef.current, sid, next).catch(() => {})
-      return { ...prev, [sid]: next }
-    })
-    const willEnable = !(configBySession[sid]?.enabledSkillIds || []).includes(skillId)
-    pushNotice(willEnable ? t('app.skillEnabled', { id: skillId }) : t('app.skillDisabled', { id: skillId }))
-  }, [configBySession, pushNotice, t])
-
   /** 会话内选用 Normal Agent(/agent:<slug> 斜杠命令;''=取消):写 agent_config.agentSlug,有模型则应用会话模型。 */
   const selectSessionAgent = useCallback((slug: string) => {
     const sid = activeIdRef.current
@@ -1173,8 +1293,16 @@ export function App(): React.JSX.Element {
       return { ...prev, [sid]: next }
     })
     if (def?.model) setSessionModel(def.model)
+    if (def?.thinkingLevel) setSessionThinking(def.thinkingLevel)
     pushNotice(def ? t('input.agentActive', { name: def.name }) : t('input.agentCleared'))
-  }, [agentDefs, setSessionModel, pushNotice, t])
+  }, [agentDefs, setSessionModel, setSessionThinking, pushNotice, t])
+
+  /** 新会话选用 Normal Agent:写 agentSlug,并应用该 agent 的默认模型/思考强度(为空则不覆盖当前)。 */
+  const selectNewChatAgent = useCallback((slug: string) => {
+    const def = slug ? agentDefs.find((a) => a.slug === slug) : null
+    setNewChatCfg((c) => ({ ...c, agentSlug: slug || undefined, ...(def?.thinkingLevel ? { thinkingLevel: def.thinkingLevel } : {}) }))
+    if (def?.model) setNewChatModel(def.model)
+  }, [agentDefs])
 
   /** 兑现询问(ask_user/exit_plan_mode 的询问卡)。 */
   const answerInquiry = useCallback(
@@ -1278,6 +1406,13 @@ export function App(): React.JSX.Element {
     ? null
     : (isCloudSession ? modelsResp.models.filter((m) => m.source === 'forsion') : modelsResp.models)
   const wechatFeatureEnabled = !!window.tangu?.backendStatus && desktopConfig?.wechatEnabled !== false
+  // 主聊天界面头像/名称:当前会话激活的 agent(无则默认 agent)+ 当前登录用户。
+  const chatAgentSlug = mvCfg.agentSlug || defaultAgentSlug
+  const chatAgent = agentDefs.find((a) => a.slug === chatAgentSlug) || null
+  const chatAgentName = chatAgent?.name || 'Tangu'
+  const chatAgentAvatar = chatAgentSlug ? agentAvatars[chatAgentSlug] : undefined
+  const chatUserName = authInfo?.nickname || authInfo?.username || t('chat.you')
+  const chatUserAvatar = authInfo?.avatar || undefined
 
   if (!cfgLoaded) return <div className="app" />
 
@@ -1320,6 +1455,13 @@ export function App(): React.JSX.Element {
         }}
       />
       <main className="main">
+        {updateAvailable && !updateDismissed ? (
+          <div className="update-banner">
+            <span>{t('app.update.bannerTitle', { version: updateAvailable.version || '' })}</span>
+            <button className="btn primary sm" onClick={() => openSettings('about')}>{t('app.update.bannerAction')}</button>
+            <button className="update-banner-x" title={t('app.update.bannerDismiss')} onClick={() => setUpdateDismissed(true)}>×</button>
+          </div>
+        ) : null}
         <ChatHeader
           title={settingsOpen ? t('settings.title') : (activeSession?.title || 'Tangu Agent')}
           engineName={curEngineName}
@@ -1335,6 +1477,8 @@ export function App(): React.JSX.Element {
             applyTheme(themePreset, m) // 切换 + 持久化(forsion_theme)
             setThemeMode(m)
           }}
+          showFeedback={!!authInfo?.loggedIn}
+          onFeedback={() => setFeedbackOpen(true)}
         />
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
           {settingsOpen ? (
@@ -1398,6 +1542,9 @@ export function App(): React.JSX.Element {
                   sessions={[...sessions, ...archivedSessions].filter((s) => (s.project_path || CLOUD_WORKSPACE_KEY) === detailWsKey)}
                   onOpenSession={(id) => { setSpecialView(null); setActiveId(id) }}
                   onNewChat={() => { const w = workspaces.find((x) => x.key === detailWsKey) || null; setSpecialView(null); setActiveId(null); setNewChatWs(w); setNewChatCfg({}); setNewChatModel(null) }}
+                  onRename={(id, title) => void renameSession(id, title)}
+                  onArchive={(id, a) => void archiveSession(id, a)}
+                  onDelete={(id) => void deleteSession(id)}
                 />
               ) : specialView === 'wechat' ? (
                 <WeChatView
@@ -1417,17 +1564,39 @@ export function App(): React.JSX.Element {
                   onInquiry={(mid, iid, answer) => void answerInquiry(mid, iid, answer)}
                   onEditResend={editUserMessage}
                   onRegenerate={regenerate}
+                  onBranch={(mid) => void branchFromMessage(mid)}
                   running={running}
+                  groupVoting={!!(activeId && running && groupVoting[activeId])}
                   onQuote={setQuote}
+                  agentName={chatAgentName}
+                  agentAvatarUrl={chatAgentAvatar}
+                  avatars={agentAvatars}
+                  userName={chatUserName}
+                  userAvatarUrl={chatUserAvatar}
                 />
                 {/* 引擎选择器仅在 host(本地)会话且未开群聊时出现:外部引擎是本地 CLI(云端沙箱会话无法用),且与群聊互斥。 */}
-                {activeMessages.length === 0 && availableEngines.length > 0 && mvCfg.execMode === 'host' && !mvCfg.groupChat && (
-                  <EnginePicker
-                    engines={availableEngines}
-                    selectedId={mvCfg.engineId || ''}
-                    warmingId={mvCfg.engineId && !engineCaps[mvCfg.engineId] ? mvCfg.engineId : null}
-                    onSelect={(id) => (activeId ? setSessionEngine(id) : setNewChatCfg((c) => ({ ...c, engineId: id || undefined, engineModelId: undefined, ...(id ? { groupChat: false } : {}) })))}
-                  />
+                {/* 引擎(上)+ Agent(下)选择器成一组,出现在欢迎区下方:host、非群聊、新会话时。 */}
+                {activeMessages.length === 0 && mvCfg.execMode === 'host' && !mvCfg.groupChat && (
+                  <div className="newchat-pickers">
+                    {availableEngines.length > 0 && (
+                      <EnginePicker
+                        engines={availableEngines}
+                        selectedId={mvCfg.engineId || ''}
+                        warmingId={mvCfg.engineId && !engineCaps[mvCfg.engineId] ? mvCfg.engineId : null}
+                        onSelect={(id) => (activeId ? setSessionEngine(id) : setNewChatCfg((c) => ({ ...c, engineId: id || undefined, engineModelId: undefined, ...(id ? { groupChat: false } : {}) })))}
+                      />
+                    )}
+                    {/* Agent 选择器:仅 Tangu 自有引擎(非外部 ACP)时出现;默认 Xyra,引擎在上、它在下。 */}
+                    {!mvCfg.engineId && agentDefs.length > 0 && (
+                      <AgentPicker
+                        agents={agentDefs}
+                        selectedSlug={mvCfg.agentSlug || ''}
+                        defaultSlug={defaultAgentSlug}
+                        avatars={agentAvatars}
+                        onSelect={activeId ? selectSessionAgent : selectNewChatAgent}
+                      />
+                    )}
+                  </div>
                 )}
                 {!activeId && (
                   <div className="newchat-projectbar">
@@ -1473,12 +1642,9 @@ export function App(): React.JSX.Element {
                   groupMaxRounds={mvCfg.groupMaxRounds}
                   onGroupChange={activeId ? setSessionGroup : (patch) => setNewChatCfg((c) => ({ ...c, ...patch }))}
                   skills={skillsList}
-                  enabledSkillIds={mvCfg.enabledSkillIds || []}
-                  onToggleSkill={activeId ? toggleSessionSkill : (id) => setNewChatCfg((c) => { const s = new Set(c.enabledSkillIds || []); s.has(id) ? s.delete(id) : s.add(id); return { ...c, enabledSkillIds: [...s] } })}
                   agents={agentDefs}
-                  activeAgentSlug={mvCfg.agentSlug}
-                  onSelectAgent={activeId ? selectSessionAgent : (slug) => setNewChatCfg((c) => ({ ...c, agentSlug: slug }))}
                   onNewSession={() => void newSession()}
+                  onBranch={activeId ? () => void branchFromMessage() : undefined}
                   onOpenSettings={() => openSettings('skills')}
                   onExecConfigChange={activeId ? setExecConfig : (patch) => setNewChatCfg((c) => ({ ...c, ...patch }))}
                   onSend={send}
@@ -1503,12 +1669,17 @@ export function App(): React.JSX.Element {
                   chatScrollRef={chatScrollRef}
                   onToast={toast}
                   onOpenPreview={setFilePreview}
+                  subChats={subChatsBySession[activeId] || []}
                 />
               )}
             </>
           )}
         </div>
       </main>
+
+      {feedbackOpen ? (
+        <FeedbackModal cfg={cfg} activeSession={activeSession} onClose={() => setFeedbackOpen(false)} />
+      ) : null}
 
       <div className="toast-wrap">
         {toasts.map((t) => (

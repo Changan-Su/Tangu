@@ -22,11 +22,11 @@ export const memoryLogProvider: ToolProvider = {
         function: {
           name: 'remember',
           description:
-            '把一条关于用户的稳定、长期有用的事实/偏好写入长期记忆（跨会话保留，会注入到后续对话）。' +
-            '仅用于持久信息（如长期偏好、背景设定、称呼），不要记录一次性任务细节或临时上下文。重复内容会被自动忽略。',
+            'Write a stable, durably useful fact/preference about the user into long-term memory (kept across sessions, injected into later conversations). ' +
+            'Use only for persistent information (such as long-term preferences, background, how to address the user); do not record one-off task details or temporary context. Duplicate content is ignored automatically.',
           parameters: {
             type: 'object',
-            properties: { fact: { type: 'string', description: '要长期记住的一句话事实/偏好' } },
+            properties: { fact: { type: 'string', description: 'A one-sentence fact/preference to remember long-term' } },
             required: ['fact'],
           },
         },
@@ -49,11 +49,11 @@ export const memoryLogProvider: ToolProvider = {
         function: {
           name: 'log_event',
           description:
-            '把本次交互中值得留痕的事件/进展追加到用户「今天」的活动日志（按日期归档，用户可在账户中心查看）。' +
-            '用于记录已完成的事、得出的结论、产出的文件等；不要记录琐碎闲聊。',
+            'Append a noteworthy event/progress from this interaction to the user\'s "today" activity log (archived by date, viewable by the user in the account center). ' +
+            'Use to record completed work, conclusions reached, files produced, etc.; do not record trivial chit-chat.',
           parameters: {
             type: 'object',
-            properties: { text: { type: 'string', description: '要记入今天日志的一句话事件/进展' } },
+            properties: { text: { type: 'string', description: 'A one-sentence event/progress to record in today\'s log' } },
             required: ['text'],
           },
         },
@@ -72,10 +72,10 @@ export const memoryLogProvider: ToolProvider = {
         type: 'function',
         function: {
           name: 'read_log',
-          description: '读取用户某一天的活动日志（markdown）。日期格式 YYYY-MM-DD，缺省读今天。',
+          description: 'Read the user\'s activity log for a given day (markdown). Date format YYYY-MM-DD; defaults to today.',
           parameters: {
             type: 'object',
-            properties: { date: { type: 'string', description: '日期 YYYY-MM-DD，缺省今天' } },
+            properties: { date: { type: 'string', description: 'Date YYYY-MM-DD; defaults to today' } },
             required: [],
           },
         },

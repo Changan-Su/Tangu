@@ -20,16 +20,16 @@ export const sandboxPythonProvider: ToolProvider = {
         function: {
           name: 'pip_install',
           description:
-            '为云端沙箱按需安装缺失的 Python 包（仅二进制 wheel）。装好后 run_python 即可 import；' +
-            '常用库（python-docx/openpyxl/python-pptx/reportlab/pandas/numpy/matplotlib/Pillow 等）已预装，无需安装。' +
-            '安装是全局缓存的，同一个包只需装一次。',
+            'Install missing Python packages on demand for the cloud sandbox (binary wheels only). Once installed, run_python can import them; ' +
+            'common libraries (python-docx/openpyxl/python-pptx/reportlab/pandas/numpy/matplotlib/Pillow, etc.) are preinstalled and need no installation. ' +
+            'Installs are globally cached, so each package only needs to be installed once.',
           parameters: {
             type: 'object',
             properties: {
               packages: {
                 type: 'array',
                 items: { type: 'string' },
-                description: '包名列表，可带版本，如 ["openpyxl", "tqdm==4.66.5"]',
+                description: 'List of package names, optionally with versions, e.g. ["openpyxl", "tqdm==4.66.5"]',
               },
             },
             required: ['packages'],
@@ -57,17 +57,17 @@ export const sandboxPythonProvider: ToolProvider = {
         function: {
           name: 'run_python',
           description:
-            '在隔离的云端沙箱里执行 Python 3.12 代码（无网络），返回 stdout/stderr。' +
-            '执行前把本会话工作区同步进 /workspace（当前目录），执行后新增/修改的文件自动回写工作区——可直接读写已有文件。' +
-            '\n⚠️ 文件只有保存在工作区里才会被保留：用**相对路径**（即当前目录 /workspace，等价 /mnt/data）保存产物。' +
-            '不要写到 /tmp、HOME(~/...) 或其他绝对路径——那些目录不会回流，文件会丢失。' +
-            '\n沙箱是纯 Python（没有 node / pandoc / libreoffice），生成文档请直接用预装库：' +
-            'Word→python-docx，Excel→openpyxl/XlsxWriter，PPT→python-pptx，PDF→reportlab/pypdf/pdfplumber，' +
-            '数据→pandas/numpy，绘图→matplotlib，图片→Pillow。' +
-            '若 import 报 ModuleNotFoundError，先调用 pip_install 安装缺失的包再重试。',
+            'Execute Python 3.12 code in an isolated cloud sandbox (no network) and return stdout/stderr. ' +
+            'Before execution the session workspace is synced into /workspace (the current directory); after execution, newly created/modified files are written back to the workspace automatically — you can read and write existing files directly. ' +
+            '\n⚠️ Files are only kept if saved in the workspace: save outputs using **relative paths** (i.e. the current directory /workspace, equivalent to /mnt/data). ' +
+            'Do not write to /tmp, HOME (~/...) or other absolute paths — those directories are not synced back and files will be lost. ' +
+            '\nThe sandbox is pure Python (no node / pandoc / libreoffice), so generate documents directly with the preinstalled libraries: ' +
+            'Word→python-docx, Excel→openpyxl/XlsxWriter, PPT→python-pptx, PDF→reportlab/pypdf/pdfplumber, ' +
+            'data→pandas/numpy, plotting→matplotlib, images→Pillow. ' +
+            'If an import raises ModuleNotFoundError, call pip_install to install the missing package first, then retry.',
           parameters: {
             type: 'object',
-            properties: { code: { type: 'string', description: '要执行的 Python 代码' } },
+            properties: { code: { type: 'string', description: 'The Python code to execute' } },
             required: ['code'],
           },
         },

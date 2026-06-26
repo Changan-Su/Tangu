@@ -213,14 +213,14 @@ export const fileSearchProvider: ToolProvider = {
         function: {
           name: 'search_files',
           description:
-            '在工作目录下按正则搜索文件内容(grep 式),返回 文件:行号:内容。' +
-            '支持 include 通配符限定文件(如 *.ts、src/**/*.py)。自动跳过 .git/node_modules/二进制文件。',
+            'Search file contents by regex (grep-style) under the working directory, returning file:line:content. ' +
+            'Supports an include glob to restrict files (e.g. *.ts, src/**/*.py). Automatically skips .git/node_modules/binary files.',
           parameters: {
             type: 'object',
             properties: {
-              pattern: { type: 'string', description: '搜索的正则表达式(JS 语法;按行匹配)' },
-              include: { type: 'string', description: '可选:文件名通配符过滤,如 *.ts 或 src/**/*.py' },
-              case_sensitive: { type: 'boolean', description: '区分大小写(默认 false)' },
+              pattern: { type: 'string', description: 'Search regular expression (JS syntax; matched per line)' },
+              include: { type: 'string', description: 'Optional: filename glob filter, e.g. *.ts or src/**/*.py' },
+              case_sensitive: { type: 'boolean', description: 'Case-sensitive (default false)' },
             },
             required: ['pattern'],
           },
@@ -253,12 +253,12 @@ export const fileSearchProvider: ToolProvider = {
         function: {
           name: 'glob_files',
           description:
-            '按通配符模式列出工作目录下匹配的文件路径(如 **/*.test.ts、src/*.py)。' +
-            '找文件用这个;搜内容用 search_files。',
+            'List file paths under the working directory matching a glob pattern (e.g. **/*.test.ts, src/*.py). ' +
+            'Use this to find files; use search_files to search contents.',
           parameters: {
             type: 'object',
             properties: {
-              pattern: { type: 'string', description: '通配符模式:** 跨目录,* 段内,? 单字符,{a,b} 多选' },
+              pattern: { type: 'string', description: 'Glob pattern: ** across directories, * within a segment, ? single character, {a,b} alternation' },
             },
             required: ['pattern'],
           },

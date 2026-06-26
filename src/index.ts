@@ -21,6 +21,7 @@ import providersRouter from './routes/providers.js';
 import memoryRouter from './routes/memory.js';
 import assetsRouter from './routes/assets.js';
 import agentsRouter from './routes/agents.js';
+import pluginsRouter from './routes/plugins.js';
 import specialRouter from './routes/special.js';
 import wechatRouter from './routes/wechat.js';
 import adminRouter from './routes/admin.js';
@@ -78,6 +79,7 @@ export function createTanguModule(d: TanguDeps): TanguModule {
   dataRouter.use(memoryRouter);
   dataRouter.use(assetsRouter);
   dataRouter.use(agentsRouter);
+  dataRouter.use(pluginsRouter);
   dataRouter.use(specialRouter);
   dataRouter.use(wechatRouter);
 
@@ -147,10 +149,21 @@ export type {
   SearchBrain,
   ModelsBrain,
   StorageBrain,
+  AgentFilesBrain,
+  AgentsBrain,
+  AgentFileMeta,
+  AgentFileContent,
+  AgentFilePutBody,
   BuildPayloadOpts,
   StreamOpts,
   StreamResult,
 } from './seams/cloudBrain.js';
+// Phase 2 云端运行水合:forsionSeams 用 parseAgentConfig 把 config.toml+SOUL.md 组装 def;currentAgentSlug/
+// resolveMemorySlug/DEFAULT_AGENT_SLUG 供 memory/log 按 slug 作用域路由。
+export { parseAgentConfig, resolveMemorySlug } from './agents/agentRegistry.js';
+export type { NormalAgentDef } from './agents/agentRegistry.js';
+export { currentAgentSlug } from './seams/runContext.js';
+export { DEFAULT_AGENT_SLUG } from './core/tanguHome.js';
 export type { BillingServices } from './seams/billing.js';
 export type { AppProfile, AppProfileOverride, PromptSectionCtx, PromptSections } from './seams/appProfile.js';
 export { resolveProfile } from './seams/appProfile.js';

@@ -21,7 +21,7 @@ export function createTanguProfile(opts: {
       historian: false,
       customTools: true,
     },
-    capabilities: { hostExec: true, memory: true, log: true },
+    capabilities: { hostExec: true, groupChat: true, memory: true, log: true },
     toolLoadout: { builtins: 'all' },
     promptSections: defaultPromptSections,
   };
