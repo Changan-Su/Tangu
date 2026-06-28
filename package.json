@@ -22,7 +22,6 @@
   ],
   "scripts": {
     "build": "tsc",
-    "postbuild": "npm run build:plugins",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
