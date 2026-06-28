@@ -1,0 +1,110 @@
+{
+  "name": "tangu-agent-desktop",
+  "version": "1.5.0",
+  "description": "Tangu Agent — 本地极简桌面 GUI(Electron),连 standalone 服务",
+  "author": "Forsion",
+  "private": true,
+  "type": "module",
+  "main": "out/main/main.js",
+  "scripts": {
+    "dev": "electron-vite dev --noSandbox",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@codemirror/language-data": "^6.5.1",
+    "@uiw/react-codemirror": "^4.25.2",
+    "diff2html": "^3.4.55",
+    "dockview": "^7.0.2",
+    "dockview-react": "^7.0.2",
+    "docx-preview": "^0.3.5",
+    "electron-updater": "^6.3.9",
+    "framer-motion": "^12.40.0",
+    "jszip": "^3.10.1",
+    "katex": "^0.16.27",
+    "lucide-react": "^1.17.0",
+    "pdfjs-dist": "^5.7.284",
+    "qrcode": "^1.5.4",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.1",
+    "@iarna/toml": "^2.2.5",
+    "@types/node": "^20.10.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.1.4",
+    "electron": "^40.8.0",
+    "electron-builder": "^24.13.3",
+    "electron-vite": "^5.0.0",
+    "gray-matter": "^4.0.3",
+    "typescript": "^5.7.0",
+    "yaml": "^2.9.0"
+  },
+  "build": {
+    "appId": "com.forsion.tangu-desktop",
+    "productName": "Tangu Agent",
+    "publish": {
+      "provider": "github",
+      "owner": "Changan-Su",
+      "repo": "Tangu"
+    },
+    "afterPack": "build/afterPack.cjs",
+    "files": [
+      "out/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist",
+        "to": "tangu-server/dist"
+      },
+      {
+        "from": "../node_modules",
+        "to": "tangu-server/node_modules"
+      },
+      {
+        "from": "../package.json",
+        "to": "tangu-server/package.json"
+      },
+      {
+        "from": "../plugins/stickers/dist",
+        "to": "tangu-server/plugins/stickers/dist"
+      },
+      {
+        "from": "../plugins/stickers/tangu-plugin.json",
+        "to": "tangu-server/plugins/stickers/tangu-plugin.json"
+      },
+      {
+        "from": "../plugins/wechat-segment/dist",
+        "to": "tangu-server/plugins/wechat-segment/dist"
+      },
+      {
+        "from": "../plugins/wechat-segment/tangu-plugin.json",
+        "to": "tangu-server/plugins/wechat-segment/tangu-plugin.json"
+      }
+    ],
+    "linux": {
+      "target": "AppImage",
+      "icon": "build/icon.png"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "build/icon.icns"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    }
+  }
+}

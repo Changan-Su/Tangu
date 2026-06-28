@@ -123,7 +123,7 @@ export interface ModelsBrain {
    * 本地直连 provider 列表(BYO-key,桌面/TUI 模型选择器用;绝不含 apiKey,baseUrl 仅供 UI 展示)。
    * 可选:仅 standalone 的 multiBrain 实现;forsionSeams/httpBrain 不实现 → 调用方跳过。
    */
-  listDirectProviders?(): Array<{ providerId: string; baseUrl?: string; modelIds?: string[] }>;
+  listDirectProviders?(): Array<{ providerId: string; baseUrl?: string; modelIds?: string[]; imageModelIds?: string[] }>;
   /**
    * 按应用过滤的模型列表(遵守 Forsion admin「应用模型配置」project_model_configs)。
    * 可选:旧版云端/brain 未实现 → 调用方回退 listGlobalModels。
@@ -182,6 +182,22 @@ export interface AgentsBrain {
   getAgent(userId: string, slug: string): Promise<import('../agents/agentRegistry.js').NormalAgentDef | null>;
 }
 
+/** 文生图(generate_image 用)。managed:调云端 /v1/images;direct:调 provider 自有 /images/generations。 */
+export interface ImageGenRequest {
+  model: string; // 图像模型 id(managed=Forsion model id;direct=apiModelId 或 <providerId>/<model>)
+  prompt: string;
+  size?: string; // 规范尺寸 '1:1'|'2:3'|'3:2'|'16:9'|'9:16' 或 'WxH';缺省 '1:1'
+  n?: number;
+  transparentBackground?: boolean;
+  signal?: AbortSignal;
+}
+export interface ImageGenResult {
+  images: Array<{ b64: string; mime: string }>;
+}
+export interface ImagesBrain {
+  generate(req: ImageGenRequest): Promise<ImageGenResult>;
+}
+
 export interface CloudBrainServices {
   llm: LlmBrain;
   users: UsersBrain;
@@ -190,6 +206,8 @@ export interface CloudBrainServices {
   search: SearchBrain;
   models: ModelsBrain;
   storage: StorageBrain;
+  /** 文生图;可选:仅 standalone(httpBrain/multiBrain)实现,云端 worker/microserver 未注入 → 工具优雅降级。 */
+  images?: ImagesBrain;
   /** 每-agent 云文件(Phase 2);可选:旧云端/纯本地未注入 → 同步/水合调用方跳过。 */
   agentFiles?: AgentFilesBrain;
   /** 每-agent 人格(Phase 2 云端运行水合);可选:未注入 → agentLoop 回落本地 getAgent。 */

@@ -58,6 +58,8 @@ export interface FinalizeMessageInput {
   reasoning: string;
   toolCalls: any[];
   toolResults: any[];
+  /** agent 在对话区展示给用户的文件(DisplayFileItem[];path 或 dataUrl)。缺省/空=不写。 */
+  displayFiles?: any[];
 }
 
 export interface StateStore {

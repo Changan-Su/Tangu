@@ -11,6 +11,8 @@ export interface ThemeManifest {
   author?: string;
   /** 是否提供独立暗色样式(.dark[data-theme=…])。 */
   supportsDarkMode: boolean;
+  /** 浮卡布局信号:>0 时 Shell 给停靠面板留间距(soft=8)。取代旧的 lang==='soft' 魔法字符串。 */
+  panelGap?: number;
   tags?: string[];
   /** 主题激活时懒加载的 Google Fonts(离线环境会静默失败,主题需有本地字体回退)。 */
   fonts?: { google?: string[] };
@@ -28,5 +30,8 @@ export interface ThemePreview {
 
 export interface ThemeEntry {
   manifest: ThemeManifest;
-  cssUrl: string;
+  /** bundle 主题:Vite 资源 URL,走 <link>。 */
+  cssUrl?: string;
+  /** 磁盘主题:主进程读回的 CSS 文本,走 <style>(CSP 禁 file://)。 */
+  cssText?: string;
 }

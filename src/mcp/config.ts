@@ -10,6 +10,7 @@
  */
 import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { mcpConfigFile, tanguHome } from '../core/tanguHome.js';
+import { getRawSection, saveSection } from '../core/config.js';
 
 export interface McpServerConfig {
   /** stdio:子进程命令(如 npx);与 url 二选一。 */
@@ -38,7 +39,7 @@ export function inferTransport(cfg: McpServerConfig): 'stdio' | 'http' | 'sse' {
   return 'http'; // url 默认 Streamable HTTP(SSE 须显式声明)
 }
 
-export function loadMcpConfig(file = mcpConfigFile()): McpConfig {
+function legacyLoadMcp(file: string): McpConfig {
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8'));
     const servers = parsed?.mcpServers;
@@ -49,10 +50,26 @@ export function loadMcpConfig(file = mcpConfigFile()): McpConfig {
   }
 }
 
-export function saveMcpConfig(cfg: McpConfig, file = mcpConfigFile()): void {
-  mkdirSync(tanguHome(), { recursive: true });
-  writeFileSync(file, JSON.stringify(cfg, null, 2), 'utf8');
-  try { chmodSync(file, 0o600); } catch { /* env/headers 可能含密钥 */ }
+/** 显式传 file → 读该文件(explicit/单测);否则 config.json 的 mcp 段优先,缺失回落 ~/.tangu/mcp.json。 */
+export function loadMcpConfig(file?: string): McpConfig {
+  if (file) return legacyLoadMcp(file);
+  const sec = getRawSection('mcp');
+  if (sec !== undefined) {
+    const servers = sec?.mcpServers;
+    return { mcpServers: servers && typeof servers === 'object' ? servers : {} };
+  }
+  return legacyLoadMcp(mcpConfigFile());
+}
+
+/** 显式传 file → 写该文件(legacy);否则写 config.json 的 mcp 段(唯一真源,chmod 600)。 */
+export function saveMcpConfig(cfg: McpConfig, file?: string): void {
+  if (file) {
+    mkdirSync(tanguHome(), { recursive: true });
+    writeFileSync(file, JSON.stringify(cfg, null, 2), 'utf8');
+    try { chmodSync(file, 0o600); } catch { /* env/headers 可能含密钥 */ }
+    return;
+  }
+  saveSection('mcp', { mcpServers: cfg.mcpServers });
 }
 
 /** 启用的 server 名单(连接顺序按名字典序——确定性,保证工具 defs 字节级稳定)。 */

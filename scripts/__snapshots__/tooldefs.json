@@ -358,6 +358,60 @@
           ]
         }
       }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "display_file",
+        "description": "Show a workspace file to the USER inline in the chat (NOT for you to read it). Images render as a clickable thumbnail the user can click to enlarge/zoom; other file types render as a clickable file card that opens a preview. Use this when you want the user to see a file you created or found (an image, a generated chart, a document, etc.). To read/analyze an image yourself, use view_image instead.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Workspace file path to display (relative to cwd, or absolute on local sessions)."
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "generate_image",
+        "description": "Generate an image from a text prompt and show it to the user inline in the chat (rendered as a clickable thumbnail they can enlarge). Use when the user asks to draw, paint, illustrate, render, or generate a picture. Write a vivid, concrete English `prompt`. After the image lands, give a one-sentence caption — do NOT re-describe it in detail, and do NOT call display_file afterwards (it is already shown).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "description": "Vivid, concrete description of the image to generate."
+            },
+            "size": {
+              "type": "string",
+              "description": "Aspect/size: \"1:1\" | \"2:3\" | \"3:2\" | \"16:9\" | \"9:16\". Default \"1:1\"."
+            },
+            "n": {
+              "type": "integer",
+              "description": "How many images (1-4). Default 1."
+            },
+            "transparent_background": {
+              "type": "boolean",
+              "description": "Transparent background (PNG). Default false."
+            },
+            "model": {
+              "type": "string",
+              "description": "Optional image model id override; defaults to the configured/first available image model."
+            }
+          },
+          "required": [
+            "prompt"
+          ]
+        }
+      }
     }
   ],
   "ai-studio:sandbox+skills": [
@@ -738,6 +792,60 @@
           ]
         }
       }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "display_file",
+        "description": "Show a workspace file to the USER inline in the chat (NOT for you to read it). Images render as a clickable thumbnail the user can click to enlarge/zoom; other file types render as a clickable file card that opens a preview. Use this when you want the user to see a file you created or found (an image, a generated chart, a document, etc.). To read/analyze an image yourself, use view_image instead.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Workspace file path to display (relative to cwd, or absolute on local sessions)."
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "generate_image",
+        "description": "Generate an image from a text prompt and show it to the user inline in the chat (rendered as a clickable thumbnail they can enlarge). Use when the user asks to draw, paint, illustrate, render, or generate a picture. Write a vivid, concrete English `prompt`. After the image lands, give a one-sentence caption — do NOT re-describe it in detail, and do NOT call display_file afterwards (it is already shown).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "description": "Vivid, concrete description of the image to generate."
+            },
+            "size": {
+              "type": "string",
+              "description": "Aspect/size: \"1:1\" | \"2:3\" | \"3:2\" | \"16:9\" | \"9:16\". Default \"1:1\"."
+            },
+            "n": {
+              "type": "integer",
+              "description": "How many images (1-4). Default 1."
+            },
+            "transparent_background": {
+              "type": "boolean",
+              "description": "Transparent background (PNG). Default false."
+            },
+            "model": {
+              "type": "string",
+              "description": "Optional image model id override; defaults to the configured/first available image model."
+            }
+          },
+          "required": [
+            "prompt"
+          ]
+        }
+      }
     }
   ],
   "ai-studio:host": [
@@ -1066,6 +1174,60 @@
           },
           "required": [
             "patch"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "display_file",
+        "description": "Show a workspace file to the USER inline in the chat (NOT for you to read it). Images render as a clickable thumbnail the user can click to enlarge/zoom; other file types render as a clickable file card that opens a preview. Use this when you want the user to see a file you created or found (an image, a generated chart, a document, etc.). To read/analyze an image yourself, use view_image instead.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Workspace file path to display (relative to cwd, or absolute on local sessions)."
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "generate_image",
+        "description": "Generate an image from a text prompt and show it to the user inline in the chat (rendered as a clickable thumbnail they can enlarge). Use when the user asks to draw, paint, illustrate, render, or generate a picture. Write a vivid, concrete English `prompt`. After the image lands, give a one-sentence caption — do NOT re-describe it in detail, and do NOT call display_file afterwards (it is already shown).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "description": "Vivid, concrete description of the image to generate."
+            },
+            "size": {
+              "type": "string",
+              "description": "Aspect/size: \"1:1\" | \"2:3\" | \"3:2\" | \"16:9\" | \"9:16\". Default \"1:1\"."
+            },
+            "n": {
+              "type": "integer",
+              "description": "How many images (1-4). Default 1."
+            },
+            "transparent_background": {
+              "type": "boolean",
+              "description": "Transparent background (PNG). Default false."
+            },
+            "model": {
+              "type": "string",
+              "description": "Optional image model id override; defaults to the configured/first available image model."
+            }
+          },
+          "required": [
+            "prompt"
           ]
         }
       }
@@ -1416,6 +1578,60 @@
           },
           "required": [
             "patch"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "display_file",
+        "description": "Show a workspace file to the USER inline in the chat (NOT for you to read it). Images render as a clickable thumbnail the user can click to enlarge/zoom; other file types render as a clickable file card that opens a preview. Use this when you want the user to see a file you created or found (an image, a generated chart, a document, etc.). To read/analyze an image yourself, use view_image instead.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Workspace file path to display (relative to cwd, or absolute on local sessions)."
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "generate_image",
+        "description": "Generate an image from a text prompt and show it to the user inline in the chat (rendered as a clickable thumbnail they can enlarge). Use when the user asks to draw, paint, illustrate, render, or generate a picture. Write a vivid, concrete English `prompt`. After the image lands, give a one-sentence caption — do NOT re-describe it in detail, and do NOT call display_file afterwards (it is already shown).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "description": "Vivid, concrete description of the image to generate."
+            },
+            "size": {
+              "type": "string",
+              "description": "Aspect/size: \"1:1\" | \"2:3\" | \"3:2\" | \"16:9\" | \"9:16\". Default \"1:1\"."
+            },
+            "n": {
+              "type": "integer",
+              "description": "How many images (1-4). Default 1."
+            },
+            "transparent_background": {
+              "type": "boolean",
+              "description": "Transparent background (PNG). Default false."
+            },
+            "model": {
+              "type": "string",
+              "description": "Optional image model id override; defaults to the configured/first available image model."
+            }
+          },
+          "required": [
+            "prompt"
           ]
         }
       }
@@ -1892,6 +2108,60 @@
           },
           "required": [
             "discussionId"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "display_file",
+        "description": "Show a workspace file to the USER inline in the chat (NOT for you to read it). Images render as a clickable thumbnail the user can click to enlarge/zoom; other file types render as a clickable file card that opens a preview. Use this when you want the user to see a file you created or found (an image, a generated chart, a document, etc.). To read/analyze an image yourself, use view_image instead.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Workspace file path to display (relative to cwd, or absolute on local sessions)."
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "generate_image",
+        "description": "Generate an image from a text prompt and show it to the user inline in the chat (rendered as a clickable thumbnail they can enlarge). Use when the user asks to draw, paint, illustrate, render, or generate a picture. Write a vivid, concrete English `prompt`. After the image lands, give a one-sentence caption — do NOT re-describe it in detail, and do NOT call display_file afterwards (it is already shown).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "description": "Vivid, concrete description of the image to generate."
+            },
+            "size": {
+              "type": "string",
+              "description": "Aspect/size: \"1:1\" | \"2:3\" | \"3:2\" | \"16:9\" | \"9:16\". Default \"1:1\"."
+            },
+            "n": {
+              "type": "integer",
+              "description": "How many images (1-4). Default 1."
+            },
+            "transparent_background": {
+              "type": "boolean",
+              "description": "Transparent background (PNG). Default false."
+            },
+            "model": {
+              "type": "string",
+              "description": "Optional image model id override; defaults to the configured/first available image model."
+            }
+          },
+          "required": [
+            "prompt"
           ]
         }
       }
@@ -2390,6 +2660,60 @@
           ]
         }
       }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "display_file",
+        "description": "Show a workspace file to the USER inline in the chat (NOT for you to read it). Images render as a clickable thumbnail the user can click to enlarge/zoom; other file types render as a clickable file card that opens a preview. Use this when you want the user to see a file you created or found (an image, a generated chart, a document, etc.). To read/analyze an image yourself, use view_image instead.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Workspace file path to display (relative to cwd, or absolute on local sessions)."
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "generate_image",
+        "description": "Generate an image from a text prompt and show it to the user inline in the chat (rendered as a clickable thumbnail they can enlarge). Use when the user asks to draw, paint, illustrate, render, or generate a picture. Write a vivid, concrete English `prompt`. After the image lands, give a one-sentence caption — do NOT re-describe it in detail, and do NOT call display_file afterwards (it is already shown).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "description": "Vivid, concrete description of the image to generate."
+            },
+            "size": {
+              "type": "string",
+              "description": "Aspect/size: \"1:1\" | \"2:3\" | \"3:2\" | \"16:9\" | \"9:16\". Default \"1:1\"."
+            },
+            "n": {
+              "type": "integer",
+              "description": "How many images (1-4). Default 1."
+            },
+            "transparent_background": {
+              "type": "boolean",
+              "description": "Transparent background (PNG). Default false."
+            },
+            "model": {
+              "type": "string",
+              "description": "Optional image model id override; defaults to the configured/first available image model."
+            }
+          },
+          "required": [
+            "prompt"
+          ]
+        }
+      }
     }
   ],
   "tangu-docker:host": [
@@ -2674,6 +2998,29 @@
             "path": {
               "type": "string",
               "description": "Image file path (relative to cwd or absolute)"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_document",
+        "description": "Extract the text/markdown content of a document so you can actually read it — use this instead of read_file for binary documents (read_file would return garbled bytes). PDF works out of the box; docx/xlsx/pptx need LibreOffice installed on the machine. Path resolved relative to the current working directory. Text-based PDFs need no OCR; for scanned/image-only PDFs set ocr:true (slower, fetches a small OCR model on first use).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Document file path (relative to cwd or absolute), e.g. report.pdf"
+            },
+            "ocr": {
+              "type": "boolean",
+              "description": "Enable OCR for scanned/image-only PDFs (default false; off is faster and lighter)"
             }
           },
           "required": [
@@ -3358,6 +3705,60 @@
           },
           "required": [
             "discussionId"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "display_file",
+        "description": "Show a workspace file to the USER inline in the chat (NOT for you to read it). Images render as a clickable thumbnail the user can click to enlarge/zoom; other file types render as a clickable file card that opens a preview. Use this when you want the user to see a file you created or found (an image, a generated chart, a document, etc.). To read/analyze an image yourself, use view_image instead.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Workspace file path to display (relative to cwd, or absolute on local sessions)."
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "generate_image",
+        "description": "Generate an image from a text prompt and show it to the user inline in the chat (rendered as a clickable thumbnail they can enlarge). Use when the user asks to draw, paint, illustrate, render, or generate a picture. Write a vivid, concrete English `prompt`. After the image lands, give a one-sentence caption — do NOT re-describe it in detail, and do NOT call display_file afterwards (it is already shown).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "description": "Vivid, concrete description of the image to generate."
+            },
+            "size": {
+              "type": "string",
+              "description": "Aspect/size: \"1:1\" | \"2:3\" | \"3:2\" | \"16:9\" | \"9:16\". Default \"1:1\"."
+            },
+            "n": {
+              "type": "integer",
+              "description": "How many images (1-4). Default 1."
+            },
+            "transparent_background": {
+              "type": "boolean",
+              "description": "Transparent background (PNG). Default false."
+            },
+            "model": {
+              "type": "string",
+              "description": "Optional image model id override; defaults to the configured/first available image model."
+            }
+          },
+          "required": [
+            "prompt"
           ]
         }
       }
@@ -3675,6 +4076,29 @@
     {
       "type": "function",
       "function": {
+        "name": "read_document",
+        "description": "Extract the text/markdown content of a document so you can actually read it — use this instead of read_file for binary documents (read_file would return garbled bytes). PDF works out of the box; docx/xlsx/pptx need LibreOffice installed on the machine. Path resolved relative to the current working directory. Text-based PDFs need no OCR; for scanned/image-only PDFs set ocr:true (slower, fetches a small OCR model on first use).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Document file path (relative to cwd or absolute), e.g. report.pdf"
+            },
+            "ocr": {
+              "type": "boolean",
+              "description": "Enable OCR for scanned/image-only PDFs (default false; off is faster and lighter)"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "search_files",
         "description": "Search file contents by regex (grep-style) under the working directory, returning file:line:content. Supports an include glob to restrict files (e.g. *.ts, src/**/*.py). Automatically skips .git/node_modules/binary files.",
         "parameters": {
@@ -4348,6 +4772,60 @@
           },
           "required": [
             "discussionId"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "display_file",
+        "description": "Show a workspace file to the USER inline in the chat (NOT for you to read it). Images render as a clickable thumbnail the user can click to enlarge/zoom; other file types render as a clickable file card that opens a preview. Use this when you want the user to see a file you created or found (an image, a generated chart, a document, etc.). To read/analyze an image yourself, use view_image instead.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Workspace file path to display (relative to cwd, or absolute on local sessions)."
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "generate_image",
+        "description": "Generate an image from a text prompt and show it to the user inline in the chat (rendered as a clickable thumbnail they can enlarge). Use when the user asks to draw, paint, illustrate, render, or generate a picture. Write a vivid, concrete English `prompt`. After the image lands, give a one-sentence caption — do NOT re-describe it in detail, and do NOT call display_file afterwards (it is already shown).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "description": "Vivid, concrete description of the image to generate."
+            },
+            "size": {
+              "type": "string",
+              "description": "Aspect/size: \"1:1\" | \"2:3\" | \"3:2\" | \"16:9\" | \"9:16\". Default \"1:1\"."
+            },
+            "n": {
+              "type": "integer",
+              "description": "How many images (1-4). Default 1."
+            },
+            "transparent_background": {
+              "type": "boolean",
+              "description": "Transparent background (PNG). Default false."
+            },
+            "model": {
+              "type": "string",
+              "description": "Optional image model id override; defaults to the configured/first available image model."
+            }
+          },
+          "required": [
+            "prompt"
           ]
         }
       }
@@ -4783,6 +5261,60 @@
           },
           "required": [
             "discussionId"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "display_file",
+        "description": "Show a workspace file to the USER inline in the chat (NOT for you to read it). Images render as a clickable thumbnail the user can click to enlarge/zoom; other file types render as a clickable file card that opens a preview. Use this when you want the user to see a file you created or found (an image, a generated chart, a document, etc.). To read/analyze an image yourself, use view_image instead.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Workspace file path to display (relative to cwd, or absolute on local sessions)."
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "generate_image",
+        "description": "Generate an image from a text prompt and show it to the user inline in the chat (rendered as a clickable thumbnail they can enlarge). Use when the user asks to draw, paint, illustrate, render, or generate a picture. Write a vivid, concrete English `prompt`. After the image lands, give a one-sentence caption — do NOT re-describe it in detail, and do NOT call display_file afterwards (it is already shown).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "description": "Vivid, concrete description of the image to generate."
+            },
+            "size": {
+              "type": "string",
+              "description": "Aspect/size: \"1:1\" | \"2:3\" | \"3:2\" | \"16:9\" | \"9:16\". Default \"1:1\"."
+            },
+            "n": {
+              "type": "integer",
+              "description": "How many images (1-4). Default 1."
+            },
+            "transparent_background": {
+              "type": "boolean",
+              "description": "Transparent background (PNG). Default false."
+            },
+            "model": {
+              "type": "string",
+              "description": "Optional image model id override; defaults to the configured/first available image model."
+            }
+          },
+          "required": [
+            "prompt"
           ]
         }
       }
@@ -5240,6 +5772,60 @@
           ]
         }
       }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "display_file",
+        "description": "Show a workspace file to the USER inline in the chat (NOT for you to read it). Images render as a clickable thumbnail the user can click to enlarge/zoom; other file types render as a clickable file card that opens a preview. Use this when you want the user to see a file you created or found (an image, a generated chart, a document, etc.). To read/analyze an image yourself, use view_image instead.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Workspace file path to display (relative to cwd, or absolute on local sessions)."
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "generate_image",
+        "description": "Generate an image from a text prompt and show it to the user inline in the chat (rendered as a clickable thumbnail they can enlarge). Use when the user asks to draw, paint, illustrate, render, or generate a picture. Write a vivid, concrete English `prompt`. After the image lands, give a one-sentence caption — do NOT re-describe it in detail, and do NOT call display_file afterwards (it is already shown).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "description": "Vivid, concrete description of the image to generate."
+            },
+            "size": {
+              "type": "string",
+              "description": "Aspect/size: \"1:1\" | \"2:3\" | \"3:2\" | \"16:9\" | \"9:16\". Default \"1:1\"."
+            },
+            "n": {
+              "type": "integer",
+              "description": "How many images (1-4). Default 1."
+            },
+            "transparent_background": {
+              "type": "boolean",
+              "description": "Transparent background (PNG). Default false."
+            },
+            "model": {
+              "type": "string",
+              "description": "Optional image model id override; defaults to the configured/first available image model."
+            }
+          },
+          "required": [
+            "prompt"
+          ]
+        }
+      }
     }
   ],
   "tangu-none:host": [
@@ -5524,6 +6110,29 @@
             "path": {
               "type": "string",
               "description": "Image file path (relative to cwd or absolute)"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "read_document",
+        "description": "Extract the text/markdown content of a document so you can actually read it — use this instead of read_file for binary documents (read_file would return garbled bytes). PDF works out of the box; docx/xlsx/pptx need LibreOffice installed on the machine. Path resolved relative to the current working directory. Text-based PDFs need no OCR; for scanned/image-only PDFs set ocr:true (slower, fetches a small OCR model on first use).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Document file path (relative to cwd or absolute), e.g. report.pdf"
+            },
+            "ocr": {
+              "type": "boolean",
+              "description": "Enable OCR for scanned/image-only PDFs (default false; off is faster and lighter)"
             }
           },
           "required": [
@@ -6208,6 +6817,60 @@
           },
           "required": [
             "discussionId"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "display_file",
+        "description": "Show a workspace file to the USER inline in the chat (NOT for you to read it). Images render as a clickable thumbnail the user can click to enlarge/zoom; other file types render as a clickable file card that opens a preview. Use this when you want the user to see a file you created or found (an image, a generated chart, a document, etc.). To read/analyze an image yourself, use view_image instead.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Workspace file path to display (relative to cwd, or absolute on local sessions)."
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "generate_image",
+        "description": "Generate an image from a text prompt and show it to the user inline in the chat (rendered as a clickable thumbnail they can enlarge). Use when the user asks to draw, paint, illustrate, render, or generate a picture. Write a vivid, concrete English `prompt`. After the image lands, give a one-sentence caption — do NOT re-describe it in detail, and do NOT call display_file afterwards (it is already shown).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "description": "Vivid, concrete description of the image to generate."
+            },
+            "size": {
+              "type": "string",
+              "description": "Aspect/size: \"1:1\" | \"2:3\" | \"3:2\" | \"16:9\" | \"9:16\". Default \"1:1\"."
+            },
+            "n": {
+              "type": "integer",
+              "description": "How many images (1-4). Default 1."
+            },
+            "transparent_background": {
+              "type": "boolean",
+              "description": "Transparent background (PNG). Default false."
+            },
+            "model": {
+              "type": "string",
+              "description": "Optional image model id override; defaults to the configured/first available image model."
+            }
+          },
+          "required": [
+            "prompt"
           ]
         }
       }
@@ -6525,6 +7188,29 @@
     {
       "type": "function",
       "function": {
+        "name": "read_document",
+        "description": "Extract the text/markdown content of a document so you can actually read it — use this instead of read_file for binary documents (read_file would return garbled bytes). PDF works out of the box; docx/xlsx/pptx need LibreOffice installed on the machine. Path resolved relative to the current working directory. Text-based PDFs need no OCR; for scanned/image-only PDFs set ocr:true (slower, fetches a small OCR model on first use).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Document file path (relative to cwd or absolute), e.g. report.pdf"
+            },
+            "ocr": {
+              "type": "boolean",
+              "description": "Enable OCR for scanned/image-only PDFs (default false; off is faster and lighter)"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "search_files",
         "description": "Search file contents by regex (grep-style) under the working directory, returning file:line:content. Supports an include glob to restrict files (e.g. *.ts, src/**/*.py). Automatically skips .git/node_modules/binary files.",
         "parameters": {
@@ -7198,6 +7884,60 @@
           },
           "required": [
             "discussionId"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "display_file",
+        "description": "Show a workspace file to the USER inline in the chat (NOT for you to read it). Images render as a clickable thumbnail the user can click to enlarge/zoom; other file types render as a clickable file card that opens a preview. Use this when you want the user to see a file you created or found (an image, a generated chart, a document, etc.). To read/analyze an image yourself, use view_image instead.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Workspace file path to display (relative to cwd, or absolute on local sessions)."
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "generate_image",
+        "description": "Generate an image from a text prompt and show it to the user inline in the chat (rendered as a clickable thumbnail they can enlarge). Use when the user asks to draw, paint, illustrate, render, or generate a picture. Write a vivid, concrete English `prompt`. After the image lands, give a one-sentence caption — do NOT re-describe it in detail, and do NOT call display_file afterwards (it is already shown).",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "description": "Vivid, concrete description of the image to generate."
+            },
+            "size": {
+              "type": "string",
+              "description": "Aspect/size: \"1:1\" | \"2:3\" | \"3:2\" | \"16:9\" | \"9:16\". Default \"1:1\"."
+            },
+            "n": {
+              "type": "integer",
+              "description": "How many images (1-4). Default 1."
+            },
+            "transparent_background": {
+              "type": "boolean",
+              "description": "Transparent background (PNG). Default false."
+            },
+            "model": {
+              "type": "string",
+              "description": "Optional image model id override; defaults to the configured/first available image model."
+            }
+          },
+          "required": [
+            "prompt"
           ]
         }
       }

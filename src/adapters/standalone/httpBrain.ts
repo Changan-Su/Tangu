@@ -34,6 +34,7 @@ export function createHttpBrain(cfg: HttpBrainConfig): CloudBrainServices {
   // 所有 brain 请求加超时:thin worker 的 fetch 此前无超时,上游(模型/网关/网络)一挂死,整条 run
   // 无限 await;且 worker 按 session 串行 → 该 session 后续 run 全被堵死。默认 60s,env 可调。
   const REQ_TIMEOUT_MS = Number(process.env.TANGU_BRAIN_HTTP_TIMEOUT_MS) || 60_000;
+  const IMG_TIMEOUT_MS = Number(process.env.TANGU_IMAGE_HTTP_TIMEOUT_MS) || 180_000; // 生图比 LLM 慢,单独放宽
   const reqSignal = (s?: AbortSignal): AbortSignal => s ?? AbortSignal.timeout(REQ_TIMEOUT_MS);
   const toB64 = (c: Buffer | string): string =>
     (Buffer.isBuffer(c) ? c : Buffer.from(String(c), 'utf-8')).toString('base64');
@@ -250,6 +251,20 @@ export function createHttpBrain(cfg: HttpBrainConfig): CloudBrainServices {
         } catch {
           return { models: [], defaultModelId: null };
         }
+      },
+    },
+    images: {
+      // 托管生图:复用云端现成 /v1/images/generations(optionalAuth 接受 bearer;配额/计费在云端)。
+      // 尺寸传规范值('1:1' 等),云端自行换算成像素;返回 b64_json。
+      generate: async (req) => {
+        const r = await postJson<{ data?: Array<{ b64_json?: string }> }>(
+          '/v1/images/generations',
+          { model: req.model, prompt: req.prompt, size: req.size || '1:1', n: req.n || 1, transparent_background: !!req.transparentBackground, output_format: 'png' },
+          req.signal ?? AbortSignal.timeout(IMG_TIMEOUT_MS),
+        );
+        const images = (r.data || []).filter((d) => d.b64_json).map((d) => ({ b64: d.b64_json as string, mime: 'image/png' }));
+        if (!images.length) throw new Error('云端未返回图片');
+        return { images };
       },
     },
     storage: {

@@ -19,6 +19,7 @@ import { createLocalMemoryBrain } from '../adapters/standalone/localMemoryBrain.
 import { setSyncSources } from '../services/memorySyncService.js';
 import { createProviderRegistry, type DirectProvider } from '../llm/providerRegistry.js';
 import { STANDALONE_SCHEMA } from '../db/schemaStandalone.js';
+import { getRawSection } from '../core/config.js';
 import type { StandaloneConfig } from './config.js';
 
 /** 读一个 providers JSON(裸数组或 { providers: [...] } 包装);失败/缺失返回 []。 */
@@ -37,16 +38,23 @@ function readProvidersJson(path: string, label: string, warnMissing: boolean): D
   }
 }
 
+/** config.json 的 providers 段优先;缺失回落 legacy ~/.tangu/providers.json(过渡/单测)。 */
+function configProviders(): DirectProvider[] {
+  const sec = getRawSection('providers');
+  if (sec !== undefined) return Array.isArray(sec) ? sec : [];
+  return readProvidersJson(homeProvidersFile(), '~/.tangu/providers.json', false);
+}
+
 /**
  * 合并直连 provider 各来源,优先级(同 providerId 先到先得):
- *   CLI/env inline > --providers-file > ~/.tangu/providers.json(desktop Providers 页写入)> OAuth 登录派生。
+ *   CLI/env inline > --providers-file > config.json providers 段(desktop Providers 页写入)> OAuth 登录派生。
  * 显式配置永远压过订阅登录;文件读失败仅告警,不阻断启动。
  */
 export function loadProviders(cfg: StandaloneConfig): DirectProvider[] {
   const merged: DirectProvider[] = [
     ...cfg.providers,
     ...(cfg.providersFile ? readProvidersJson(cfg.providersFile, 'providers-file', true) : []),
-    ...readProvidersJson(homeProvidersFile(), '~/.tangu/providers.json', false),
+    ...configProviders(),
     ...(cfg.oauthProviders ?? []),
   ];
   const seen = new Set<string>();

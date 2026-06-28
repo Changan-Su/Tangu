@@ -1,8 +1,10 @@
 /// <reference types="vite/client" />
 /**
- * 主题注册表(移植自 Forsion-AI-Studio client/themes/registry.ts):
- * 构建期 import.meta.glob 收集 ./themes/<id>/{theme.json,theme.css},CSS 以 ?url 引用,
- * 只有激活主题的 <link> 生效。桌面默认主题 = 素纸(sozhi)。
+ * 双轴主题注册表:**设计语言(data-theme)× 配色(data-skin)× 明暗(data-mode)**。
+ * - 语言 = 文件夹主题(themes/<id>/{theme.json,theme.css}),构建期 import.meta.glob 收集,只管 UI 结构(圆角/字体/阴影/布局)。
+ *   现两套:lovable(平展)/ soft(柔影浮卡)。
+ * - 配色 = 纯颜色,见 theme/skins.css 的 [data-skin]/ .dark[data-skin] 块(cream/coral/teal/lavender);custom 走内联 seed 变量。
+ * 旧单轴 preset(lovable/echo/qbird/dreamer/custom)首启自动迁移到 (lang, skin)。
  */
 import type { ThemeManifest, ThemeEntry } from './manifest';
 
@@ -32,7 +34,7 @@ function buildRegistry(): Record<string, ThemeEntry> {
     if (!id) continue;
     const cssUrl = cssUrlModules[path.replace(/theme\.json$/, 'theme.css')];
     if (!cssUrl) {
-      console.warn(`[themes] theme "${id}" is missing theme.css — skipping.`);
+      console.warn(`[themes] language "${id}" is missing theme.css — skipping.`);
       continue;
     }
     result[id] = { manifest: { ...manifest, id }, cssUrl };
@@ -40,67 +42,112 @@ function buildRegistry(): Record<string, ThemeEntry> {
   return result;
 }
 
-export const themeRegistry: Readonly<Record<string, ThemeEntry>> = Object.freeze(buildRegistry());
+/** 语言注册表:bundle 项(import.meta.glob,现只剩 lovable 基底)+ 运行时合并进来的磁盘主题。**可变**。 */
+export const themeRegistry: Record<string, ThemeEntry> = buildRegistry();
 
-export const DEFAULT_PRESET = 'lovable';
-export const DEFAULT_SEED = '#8b7fd6';
-
-/** 「自定义」取色皮肤:无 theme.css 文件夹,骑 lovable 基底 CSS,强调色+背景由内联 seed 变量驱动
- *  (见 theme/loader.ts applyTheme 的 custom 分支)。cssUrl 指向 lovable 作兜底。 */
-const CUSTOM_THEME_ENTRY: ThemeEntry = {
-  manifest: {
-    id: 'custom',
-    name: '自定义',
-    description: '取色 · 自适应。强调色由你定,背景氛围微染,明暗自适应。',
-    version: '1.0.0',
-    author: 'Forsion',
-    supportsDarkMode: true,
-    tags: ['lcl', 'custom'],
-    preview: {
-      background: {
-        light: 'linear-gradient(135deg, #f6f6f7 0%, #eeeef0 100%)',
-        dark: 'linear-gradient(135deg, #1b1b1d 0%, #29292b 100%)',
-      },
-      accent: DEFAULT_SEED,
-      title: { text: '自定义' },
-      tagline: '取色 · 自适应',
-      swatches: [DEFAULT_SEED, '#f6f6f7', '#6e6e73', '#e6e6e9'],
-    },
-  },
-  cssUrl: themeRegistry['lovable']?.cssUrl ?? Object.values(themeRegistry)[0]?.cssUrl ?? '',
-};
-
-/** 全部主题:lovable/echo/qbird/dreamer 按推荐序,「自定义」殿后。 */
-export function listThemes(): ThemeEntry[] {
-  const preferred = ['lovable', 'echo', 'qbird', 'dreamer'];
-  const folders = Object.values(themeRegistry).slice().sort((a, b) => {
-    const ia = preferred.indexOf(a.manifest.id);
-    const ib = preferred.indexOf(b.manifest.id);
-    if (ia >= 0 && ib >= 0) return ia - ib;
-    if (ia >= 0) return -1;
-    if (ib >= 0) return 1;
-    return a.manifest.id.localeCompare(b.manifest.id);
-  });
-  return [...folders, CUSTOM_THEME_ENTRY];
+/** 合并磁盘主题(来自 window.tangu.listThemes,manifest 为不可信用户文件);bundle 项(有 cssUrl)不可被覆盖。 */
+export function mergeDiskThemes(list: Array<{ id: string; manifest: Record<string, unknown>; css: string }>): void {
+  for (const t of list) {
+    const id = String((t.manifest?.id as string) || t.id || '').trim();
+    if (!id) continue;
+    const existing = themeRegistry[id];
+    if (existing && existing.cssUrl) continue; // bundle 基底(lovable)不可被磁盘覆盖
+    themeRegistry[id] = { manifest: { ...t.manifest, id } as unknown as ThemeManifest, cssText: t.css };
+  }
 }
 
-export function getTheme(id: string): ThemeEntry | null {
-  if (id === 'custom') return CUSTOM_THEME_ENTRY;
+/** 清掉所有磁盘主题项(cssText),保留 bundle 项。重载前调用(配合 loader.removeInjectedThemeStyles)。 */
+export function clearDiskThemes(): void {
+  for (const id of Object.keys(themeRegistry)) {
+    if (themeRegistry[id].cssText !== undefined) delete themeRegistry[id];
+  }
+}
+
+export const DEFAULT_LANG = 'lovable';
+export const DEFAULT_SKIN = 'cream';
+export const DEFAULT_SEED = '#8b7fd6';
+
+/** 配色条目(纯颜色;CSS 在 theme/skins.css)。swatch 仅供设置面板色卡预览。custom 用 seed 动态取色。 */
+export interface SkinInfo {
+  id: 'cream' | 'coral' | 'teal' | 'lavender' | 'custom';
+  /** 强调色(色卡主点) */
+  accent: string;
+  /** 浅色底(色卡背景) */
+  bg: string;
+}
+
+const SKINS: SkinInfo[] = [
+  { id: 'cream', accent: '#1c1c1c', bg: '#f7f4ed' },
+  { id: 'coral', accent: '#ff8a6b', bg: '#fbf5ef' },
+  { id: 'teal', accent: '#4d8794', bg: '#f5f5f7' },
+  { id: 'lavender', accent: '#8b7fd6', bg: '#f4eef7' },
+  { id: 'custom', accent: DEFAULT_SEED, bg: '#f6f6f7' },
+];
+
+/** 全部语言:lovable(bundle 基底)殿前,其余按 id 字母序(含磁盘主题)。 */
+export function listLanguages(): ThemeEntry[] {
+  return Object.values(themeRegistry).slice().sort((a, b) => {
+    if (a.manifest.id === DEFAULT_LANG) return -1;
+    if (b.manifest.id === DEFAULT_LANG) return 1;
+    return a.manifest.id.localeCompare(b.manifest.id);
+  });
+}
+
+export function getLanguage(id: string): ThemeEntry | null {
   return themeRegistry[id] ?? null;
 }
 
-export function hasTheme(id: string): boolean {
-  return id === 'custom' || id in themeRegistry;
+export function hasLanguage(id: string): boolean {
+  return id in themeRegistry;
 }
 
-/** 启动时解析应使用的 preset(localStorage 键与全家桶一致:forsion_theme_preset)。 */
-export function resolveInitialPreset(): string {
-  let raw: string | null = null;
-  try { raw = localStorage.getItem('forsion_theme_preset'); } catch { /* private mode */ }
-  if (raw && hasTheme(raw)) return raw;
-  if (hasTheme(DEFAULT_PRESET)) return DEFAULT_PRESET;
-  const first = Object.keys(themeRegistry)[0];
-  return first ?? DEFAULT_PRESET;
+/** 全部配色(含 custom 殿后)。 */
+export function listSkins(): SkinInfo[] {
+  return SKINS;
+}
+
+export function hasSkin(id: string): boolean {
+  return SKINS.some((s) => s.id === id);
+}
+
+/** 旧单轴 preset → 新 (lang, skin) 迁移表。 */
+const PRESET_MIGRATION: Record<string, { lang: string; skin: string }> = {
+  lovable: { lang: 'lovable', skin: 'cream' },
+  echo: { lang: 'lovable', skin: 'coral' },
+  qbird: { lang: 'lovable', skin: 'teal' },
+  dreamer: { lang: 'soft', skin: 'lavender' },
+  custom: { lang: 'lovable', skin: 'custom' },
+};
+
+function legacyPreset(): { lang: string; skin: string } | null {
+  try {
+    const raw = localStorage.getItem('forsion_theme_preset');
+    if (raw && PRESET_MIGRATION[raw]) return PRESET_MIGRATION[raw];
+  } catch { /* private mode */ }
+  return null;
+}
+
+/** 启动解析语言:新键 forsion_theme_lang 优先 → 旧 preset 迁移 → 默认。 */
+export function resolveInitialLang(): string {
+  try {
+    const raw = localStorage.getItem('forsion_theme_lang');
+    if (raw && hasLanguage(raw)) return raw;
+  } catch { /* private mode */ }
+  const migrated = legacyPreset();
+  if (migrated && hasLanguage(migrated.lang)) return migrated.lang;
+  if (hasLanguage(DEFAULT_LANG)) return DEFAULT_LANG;
+  return Object.keys(themeRegistry)[0] ?? DEFAULT_LANG;
+}
+
+/** 启动解析配色:新键 forsion_theme_skin 优先 → 旧 preset 迁移 → 默认。 */
+export function resolveInitialSkin(): string {
+  try {
+    const raw = localStorage.getItem('forsion_theme_skin');
+    if (raw && hasSkin(raw)) return raw;
+  } catch { /* private mode */ }
+  const migrated = legacyPreset();
+  if (migrated && hasSkin(migrated.skin)) return migrated.skin;
+  return DEFAULT_SKIN;
 }
 
 export function resolveInitialMode(): 'light' | 'dark' {

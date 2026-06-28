@@ -330,6 +330,14 @@ registerMessages({
     "zh": "侧栏",
     "en": "Sidebar"
   },
+  "header.closeTab": {
+    "zh": "关闭标签",
+    "en": "Close tab"
+  },
+  "header.newTab": {
+    "zh": "新对话",
+    "en": "New chat"
+  },
   "header.currentModel": {
     "zh": "当前模型",
     "en": "Current model"
@@ -357,6 +365,18 @@ registerMessages({
   "panel.tab.workspace": {
     "zh": "工作区",
     "en": "Workspace"
+  },
+  "panel.files.noLocalWs": {
+    "zh": "暂无本地工作区。添加本地工作区后,其文件夹内容会显示在这里。",
+    "en": "No local workspaces yet. Add one and its folder contents appear here."
+  },
+  "panel.files.refresh": {
+    "zh": "刷新",
+    "en": "Refresh"
+  },
+  "panel.files.empty": {
+    "zh": "(空文件夹)",
+    "en": "(empty)"
   },
   "panel.tab.toc": {
     "zh": "目录",
@@ -566,6 +586,14 @@ registerMessages({
     "zh": "设置",
     "en": "Settings"
   },
+  "settings.backToApp": {
+    "zh": "返回应用",
+    "en": "Back to app"
+  },
+  "settings.searchPlaceholder": {
+    "zh": "搜索设置…",
+    "en": "Search settings…"
+  },
   "settings.tab.connection": {
     "zh": "连接",
     "en": "Connection"
@@ -746,6 +774,18 @@ registerMessages({
     "zh": "直连 provider:",
     "en": "Direct providers: "
   },
+  "settings.model.imageModelsLabel": {
+    "zh": "生图模型(generate_image 用)",
+    "en": "Image models (for generate_image)"
+  },
+  "settings.model.imageEmpty": {
+    "zh": "未检测到生图模型。请在 Forsion 后台启用生图模型,或在下方「自定义 provider」填写「生图模型 id」。",
+    "en": "No image models found. Enable image models in the Forsion admin, or fill in \"Image models\" under Custom Provider below."
+  },
+  "settings.model.imageHelp": {
+    "zh": "选中即设为默认生图模型;agent 调 generate_image 时自动使用(也可在调用里指定 model)。",
+    "en": "Selecting one sets it as the default; the agent uses it automatically when calling generate_image (it can also specify a model)."
+  },
   "settings.provider.loginLabel": {
     "zh": "Provider 账号登录(用订阅账号当 LLM,直连不计 Forsion 额度)",
     "en": "Provider account login (use a subscription account as the LLM; direct calls don't count against Forsion quota)"
@@ -829,6 +869,14 @@ registerMessages({
   "settings.customProvider.modelsPlaceholder": {
     "zh": "如 llama3, qwen2.5-coder",
     "en": "e.g. llama3, qwen2.5-coder"
+  },
+  "settings.customProvider.imageModelsLabel": {
+    "zh": "生图模型(逗号分隔,可空)",
+    "en": "Image models (comma-separated, optional)"
+  },
+  "settings.customProvider.imageModelsPlaceholder": {
+    "zh": "如 gpt-image-1, dall-e-3",
+    "en": "e.g. gpt-image-1, dall-e-3"
   },
   "settings.customProvider.savedReloading": {
     "zh": "已保存;托管后端重启加载中…",
@@ -1407,4 +1455,27 @@ registerMessages({
   "group.intensity.medium": { "zh": "中等", "en": "Medium" },
   "group.intensity.intense": { "zh": "激烈", "en": "Intense" },
   "group.intensity.custom": { "zh": "自定义", "en": "Custom" },
+})
+
+// ── 当前 Agent 记忆 + 新建标签页启动器(2026-06-28 UI 优化;见文件头说明)──
+registerMessages({
+  "panel.memory.currentAgent": { "zh": "当前 Agent 记忆", "en": "Current Agent Memory" },
+  "panel.memory.recentLogs": { "zh": "最近日志", "en": "Recent Logs" },
+  "panel.log.none": { "zh": "暂无日志", "en": "No logs yet" },
+  "newtab.title": { "zh": "新建标签页", "en": "New Tab" },
+  "newtab.mainSection": { "zh": "主区视图", "en": "Main Area" },
+  "newtab.sideSection": { "zh": "侧栏视图", "en": "Side Panel" },
+})
+
+// ── 引导欢迎页 + 更新日志抽屉 + Forsion 登录权益(2026-06-28)──
+registerMessages({
+  "onboarding.welcome.title": { "zh": "欢迎使用 Tangu", "en": "Welcome to Tangu" },
+  "onboarding.welcome.version": { "zh": "版本 {v}", "en": "Version {v}" },
+  "onboarding.welcome.continue": { "zh": "继续", "en": "Continue" },
+  "onboarding.welcome.viewChangelog": { "zh": "查看更新内容", "en": "What's New" },
+  "onboarding.welcome.changelogTitle": { "zh": "更新内容", "en": "What's New" },
+  "onboarding.welcome.noChangelog": { "zh": "暂无更新记录", "en": "No release notes yet" },
+  "onboarding.connect.benefitsTitle": { "zh": "登录 Forsion 账号即可", "en": "With a Forsion account" },
+  "onboarding.connect.benefitSync": { "zh": "云端同步:记忆、会话、设置多端一致", "en": "Cloud sync — memory, sessions and settings stay consistent across devices" },
+  "onboarding.connect.benefitModels": { "zh": "各种 AI 模型任意使用,无需自备 API Key", "en": "Use any AI model freely — no API key of your own needed" },
 })

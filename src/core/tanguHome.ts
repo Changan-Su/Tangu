@@ -50,8 +50,16 @@ export const authFile = (): string => join(tanguHome(), 'auth.json');
 export const providerAuthFile = (): string => join(tanguHome(), 'provider-auth.json');
 export const providersFile = (): string => join(tanguHome(), 'providers.json');
 export const mcpConfigFile = (): string => join(tanguHome(), 'mcp.json');
+/** 外部 agent 引擎清单(覆盖/新增内置引擎):{ engines: EngineDef[] }。 */
+export const enginesFile = (): string => join(tanguHome(), 'engines.json');
 /** 外部 agent 引擎偏好(每引擎默认模型等):{ [engineId]: { defaultModel } }。 */
 export const enginePrefsFile = (): string => join(tanguHome(), 'engine-prefs.json');
+/**
+ * 统一实例配置(唯一真源):cloud/database/server/sandbox/workspace/providers/mcp/engines/
+ * enginePrefs/specialAgents/plugins/browser/wechat 全段。存在即权威(见 core/config.ts);
+ * 不存在则各 loader 回落各自 legacy 文件(过渡/测试)。CLI/桌面/standalone 三端共读写。
+ */
+export const configFile = (): string => join(tanguHome(), 'config.json');
 export const skillsDir = (): string => join(tanguHome(), 'skills');
 /** 用户安装的全局插件目录(~/.tangu/plugins;可写、跨升级保留)。首方插件随包发在 <pkg>/plugins。 */
 export const pluginsDir = (): string => join(tanguHome(), 'plugins');

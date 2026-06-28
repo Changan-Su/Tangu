@@ -285,6 +285,10 @@ export const uploadAgentAvatar = (cfg: TanguDesktopConfig, slug: string, data: s
   request<{ ok: boolean; avatar: string }>(cfg, `/agent/agents/${encodeURIComponent(slug)}/avatar`,
     { method: 'POST', body: JSON.stringify({ data, mimeType }) })
 
+/** 删除头像(移除文件并清空 config.avatar)。 */
+export const deleteAgentAvatar = (cfg: TanguDesktopConfig, slug: string) =>
+  request<{ ok: boolean }>(cfg, `/agent/agents/${encodeURIComponent(slug)}/avatar`, { method: 'DELETE' })
+
 /** 拉头像为 object URL(带鉴权;无/失败返回 null)。调用方负责 URL.revokeObjectURL。 */
 export async function fetchAgentAvatar(cfg: TanguDesktopConfig, slug: string): Promise<string | null> {
   try {

@@ -6,34 +6,45 @@
 import React, { useEffect, useRef, useState } from 'react'
 import {
   ArrowRight, ArrowLeft, Check, Cloud, KeyRound, Loader2, LogIn, ExternalLink,
-  MonitorCheck, Play, SkipForward, Sparkles, Palette, FolderOpen, Sun, Moon, X,
+  MonitorCheck, Play, SkipForward, Sparkles, Palette, FolderOpen, Sun, Moon, X, FileText, RefreshCw,
 } from 'lucide-react'
 import { listModels, testProviderConnection } from '../services/backendService'
 import type { EnvProbeResult, ModelsResponse } from '../types'
 import { useI18n } from '../i18n'
-import { listThemes } from '../theme/registry'
+import { listLanguages, listSkins } from '../theme/registry'
 import { applyTheme } from '../theme/loader'
 import { ThemeCard } from './ThemeCard'
+import { BrandLogo } from './BrandLogo'
+import { Markdown } from './Markdown'
+import { CHANGELOG } from '../changelog'
 
 export const ONBOARDING_DISMISS_KEY = 'forsion_tangu_onboarding_done'
+/** 上次完成引导时的应用版本号;与当前版本不同 → 版本更新后再进一次引导(展示 What's New)。 */
+export const ONBOARDING_VERSION_KEY = 'forsion_tangu_onboarding_version'
 
-type Step = 'connect' | 'theme' | 'model' | 'workspace' | 'env' | 'done'
-const STEP_ORDER: Step[] = ['connect', 'theme', 'model', 'workspace', 'env', 'done']
+type Step = 'welcome' | 'connect' | 'theme' | 'model' | 'workspace' | 'env' | 'done'
+const STEP_ORDER: Step[] = ['welcome', 'connect', 'theme', 'model', 'workspace', 'env', 'done']
 
 export const OnboardingWizard: React.FC<{
   /** 当前主题/明暗(与 App 同步;主题步骤即时应用 + 持久化)。 */
-  themePreset: string
+  themeLang: string
+  themeSkin: string
   themeMode: 'light' | 'dark'
   themeSeed: string
-  onThemeChange: (preset: string, mode: 'light' | 'dark') => void
+  onThemeChange: (lang: string, skin: string, mode: 'light' | 'dark') => void
   onSeedChange: (hex: string) => void
   /** 向导内动作改变了主配置(登录成功/保存 provider)→ App 重连。 */
   onReconnect: () => void
   onFinish: () => void
-}> = ({ themePreset, themeMode, themeSeed, onThemeChange, onSeedChange, onReconnect, onFinish }) => {
+}> = ({ themeLang, themeSkin, themeMode, themeSeed, onThemeChange, onSeedChange, onReconnect, onFinish }) => {
   const { t } = useI18n()
-  const [step, setStep] = useState<Step>('connect')
+  const [step, setStep] = useState<Step>('welcome')
   const stepIdx = STEP_ORDER.indexOf(step)
+
+  // ── ⓪ 欢迎(开机式动画 + What's New 抽屉)──
+  const [appVer, setAppVer] = useState('')
+  const [showChangelog, setShowChangelog] = useState(false)
+  useEffect(() => { void window.tangu?.appVersion?.().then((v) => setAppVer(v || '')).catch(() => {}) }, [])
 
   // ── ① 连接 ──
   const [connectMode, setConnectMode] = useState<'forsion' | 'byok'>('forsion')
@@ -169,22 +180,65 @@ export const OnboardingWizard: React.FC<{
   }
 
   const finish = (): void => {
-    try { localStorage.setItem(ONBOARDING_DISMISS_KEY, '1') } catch { /* ignore */ }
+    try {
+      localStorage.setItem(ONBOARDING_DISMISS_KEY, '1')
+      // 记下完成时的版本 → 下次同版本不再弹,版本升级后再进一次。
+      if (appVer) localStorage.setItem(ONBOARDING_VERSION_KEY, appVer)
+      else void window.tangu?.appVersion?.().then((v) => { if (v) try { localStorage.setItem(ONBOARDING_VERSION_KEY, v) } catch { /* ignore */ } })
+    } catch { /* ignore */ }
     onFinish()
   }
 
   const connectReady = loggedIn || byokSaved
 
-  return (
-    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-      <div className="modal modal-md">
-        <div className="modal-head">
-          <Sparkles size={15} style={{ marginRight: 6 }} />
-          {t('onboarding.title')}
-          <span className="grow" />
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{stepIdx + 1} / {STEP_ORDER.length}</span>
+  // ── ⓪ 欢迎页:开机式入场动画(标题/版本/按钮错峰淡入)+ 侧边丝滑展开的更新日志(markdown)。 ──
+  if (step === 'welcome') {
+    return (
+      <div className="ob-hero-wrap">
+        <div className="ob-hero">
+          <div className="ob-hero-mark"><BrandLogo size={56} /></div>
+          <h1 className="ob-hero-title">{t('onboarding.welcome.title')}</h1>
+          <div className="ob-hero-ver">{t('onboarding.welcome.version', { v: appVer || CHANGELOG[0]?.version || '' })}</div>
+          <div className="ob-hero-actions">
+            <button className="btn primary" onClick={() => setStep('connect')}>
+              {t('onboarding.welcome.continue')} <ArrowRight size={15} />
+            </button>
+            <button className={`btn ghost${showChangelog ? ' active' : ''}`} onClick={() => setShowChangelog((v) => !v)}>
+              <FileText size={14} /> {t('onboarding.welcome.viewChangelog')}
+            </button>
+          </div>
+          <button className="ob-hero-skip" onClick={finish}>{t('onboarding.nav.skip')}</button>
         </div>
-        <div className="modal-body">
+
+        <div className={`ob-drawer-scrim${showChangelog ? ' open' : ''}`} onClick={() => setShowChangelog(false)} />
+        <aside className={`ob-drawer${showChangelog ? ' open' : ''}`} aria-hidden={!showChangelog}>
+          <div className="ob-drawer-head">
+            <RefreshCw size={14} /> <span className="grow">{t('onboarding.welcome.changelogTitle')}</span>
+            <button className="icon-btn" title={t('common.close')} onClick={() => setShowChangelog(false)}><X size={16} /></button>
+          </div>
+          <div className="ob-drawer-body changelog">
+            {CHANGELOG.length === 0 && <div className="hint">{t('onboarding.welcome.noChangelog')}</div>}
+            {CHANGELOG.map((c) => (
+              <div key={c.version} className="changelog-entry md-body">
+                <div className="changelog-ver">{c.version} <span className="changelog-date">{c.date}</span></div>
+                <Markdown content={c.lines.map((l) => `- ${l}`).join('\n')} />
+              </div>
+            ))}
+          </div>
+        </aside>
+      </div>
+    )
+  }
+
+  return (
+    <div className="ob-step-wrap">
+      {/* 无边设计:与欢迎页一致,无卡片;key={step} 让每步重新触发入场动画 */}
+      <div className="ob-step" key={step}>
+        <div className="ob-step-head">
+          <Sparkles size={14} /> <span className="grow">{t('onboarding.title')}</span>
+          <span className="ob-step-count">{stepIdx} / {STEP_ORDER.length - 1}</span>
+        </div>
+        <div className="ob-step-body">
           {step === 'connect' && (
             <>
               <div className="field">
@@ -201,6 +255,13 @@ export const OnboardingWizard: React.FC<{
               {connectMode === 'forsion' ? (
                 <>
                   {/* 云端地址只由环境变量 TANGU_CLOUD_URL / 内置默认决定,引导界面不再展示/编辑(与设置一致)。 */}
+                  <div className="ob-benefits">
+                    <div className="ob-benefits-title"><Cloud size={13} /> {t('onboarding.connect.benefitsTitle')}</div>
+                    <ul>
+                      <li>{t('onboarding.connect.benefitSync')}</li>
+                      <li>{t('onboarding.connect.benefitModels')}</li>
+                    </ul>
+                  </div>
                   <div className="hint" style={{ marginBottom: 8 }}>{t('onboarding.connect.forsionHint')}</div>
                   <button className="btn primary sm" disabled={loggingIn} onClick={() => void doLogin()}>
                     {loggingIn ? <Loader2 size={12} className="spin" /> : <LogIn size={12} />} {t('onboarding.connect.loginViaBrowser')}
@@ -269,24 +330,41 @@ export const OnboardingWizard: React.FC<{
                   <Palette size={13} /> {t('onboarding.theme.stepLabel')}
                 </label>
                 <div className="theme-grid">
-                  {listThemes().map((th) => (
+                  {listLanguages().map((th) => (
                     <ThemeCard
                       key={th.manifest.id}
                       entry={th}
                       mode={themeMode}
-                      active={th.manifest.id === themePreset}
-                      onSelect={() => { applyTheme(th.manifest.id, themeMode, { customColor: themeSeed }); onThemeChange(th.manifest.id, themeMode) }}
+                      active={th.manifest.id === themeLang}
+                      onSelect={() => { applyTheme(th.manifest.id, themeSkin, themeMode, { customColor: themeSeed }); onThemeChange(th.manifest.id, themeSkin, themeMode) }}
                     />
                   ))}
                 </div>
               </div>
-              {themePreset === 'custom' && (
+              <div className="field">
+                <label>{t('settings.theme.skinLabel')}</label>
+                <div className="skin-row">
+                  {listSkins().map((sk) => (
+                    <button
+                      key={sk.id}
+                      type="button"
+                      className={`skin-chip${sk.id === themeSkin ? ' active' : ''}`}
+                      title={t(`settings.theme.skin.${sk.id}`)}
+                      onClick={() => { applyTheme(themeLang, sk.id, themeMode, { customColor: themeSeed }); onThemeChange(themeLang, sk.id, themeMode) }}
+                    >
+                      <i className="skin-dot" style={{ background: sk.id === 'custom' ? themeSeed : sk.accent }} />
+                      <span>{t(`settings.theme.skin.${sk.id}`)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {themeSkin === 'custom' && (
                 <div className="field">
                   <label>{t('onboarding.theme.customSeedLabel')}</label>
                   <input
                     type="color"
                     value={themeSeed}
-                    onChange={(e) => { applyTheme('custom', themeMode, { customColor: e.target.value }); onSeedChange(e.target.value) }}
+                    onChange={(e) => { applyTheme(themeLang, 'custom', themeMode, { customColor: e.target.value }); onSeedChange(e.target.value) }}
                     aria-label={t('onboarding.theme.customSeedLabel')}
                     style={{ width: 48, height: 32, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
                   />
@@ -295,10 +373,10 @@ export const OnboardingWizard: React.FC<{
               <div className="field">
                 <label>{t('onboarding.theme.modeLabel')}</label>
                 <div className="seg">
-                  <button className={themeMode === 'light' ? 'active' : ''} onClick={() => { applyTheme(themePreset, 'light', { customColor: themeSeed }); onThemeChange(themePreset, 'light') }}>
+                  <button className={themeMode === 'light' ? 'active' : ''} onClick={() => { applyTheme(themeLang, themeSkin, 'light', { customColor: themeSeed }); onThemeChange(themeLang, themeSkin, 'light') }}>
                     <Sun size={13} style={{ verticalAlign: -2, marginRight: 4 }} />{t('onboarding.theme.light')}
                   </button>
-                  <button className={themeMode === 'dark' ? 'active' : ''} onClick={() => { applyTheme(themePreset, 'dark', { customColor: themeSeed }); onThemeChange(themePreset, 'dark') }}>
+                  <button className={themeMode === 'dark' ? 'active' : ''} onClick={() => { applyTheme(themeLang, themeSkin, 'dark', { customColor: themeSeed }); onThemeChange(themeLang, themeSkin, 'dark') }}>
                     <Moon size={13} style={{ verticalAlign: -2, marginRight: 4 }} />{t('onboarding.theme.dark')}
                   </button>
                 </div>

@@ -155,15 +155,17 @@ export function createSqlStateStore(): StateStore {
       );
     },
     async finalizeAssistantMessage(m: FinalizeMessageInput) {
+      const displayFiles = Array.isArray(m.displayFiles) && m.displayFiles.length ? JSON.stringify(m.displayFiles) : null;
       await query(
-        `INSERT INTO chat_messages (id, session_id, role, content, timestamp, model_id, reasoning, is_error, tool_calls, tool_results, attachments)
-         VALUES (?, ?, 'model', ?, ?, ?, ?, FALSE, ?, ?, NULL)
-         ON CONFLICT (id) DO UPDATE SET content=EXCLUDED.content, reasoning=EXCLUDED.reasoning, tool_calls=EXCLUDED.tool_calls, tool_results=EXCLUDED.tool_results, updated_at=CURRENT_TIMESTAMP`,
+        `INSERT INTO chat_messages (id, session_id, role, content, timestamp, model_id, reasoning, is_error, tool_calls, tool_results, attachments, display_files)
+         VALUES (?, ?, 'model', ?, ?, ?, ?, FALSE, ?, ?, NULL, ?)
+         ON CONFLICT (id) DO UPDATE SET content=EXCLUDED.content, reasoning=EXCLUDED.reasoning, tool_calls=EXCLUDED.tool_calls, tool_results=EXCLUDED.tool_results, display_files=EXCLUDED.display_files, updated_at=CURRENT_TIMESTAMP`,
         [
           m.messageId, m.sessionId, m.content, Date.now(), m.modelId,
           m.reasoning || null,
           m.toolCalls.length ? JSON.stringify(m.toolCalls) : null,
           m.toolResults.length ? JSON.stringify(m.toolResults) : null,
+          displayFiles,
         ],
       );
       await query(`UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [m.sessionId]).catch(() => {});

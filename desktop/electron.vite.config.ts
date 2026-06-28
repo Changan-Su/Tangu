@@ -15,7 +15,8 @@ export default defineConfig({
     root: resolve('frontend'),
     plugins: [react()],
     // 允许 ?raw 读取 desktop 根目录的 CHANGELOG.md(位于 renderer root=frontend 之外)。
-    server: { fs: { allow: [resolve('.')] } },
+    // 端口避开 Amadeus(5173)/老 desktop dev。
+    server: { port: 5273, strictPort: false, fs: { allow: [resolve('.')] } },
     build: {
       rollupOptions: { input: resolve('frontend/index.html') },
     },

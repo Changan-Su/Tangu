@@ -1,7 +1,9 @@
 import { useEffect, useReducer, useRef, useState, type ReactElement } from 'react';
-import { Box, Static, useApp } from 'ink';
+import { Box, Static, useApp, useStdin } from 'ink';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import os from 'node:os';
 import path from 'node:path';
 import { query } from '../core/db.js';
 import { deps } from '../seams/runtime.js';
@@ -11,7 +13,9 @@ import { subscribe } from '../services/eventBus.js';
 import { compactSession } from '../services/compaction.js';
 import { branchSession } from '../services/sessionBranch.js';
 import { modelContextWindow } from '../services/contextBudget.js';
-import { listAgents, getAgent } from '../agents/agentRegistry.js';
+import { listAgents, getAgent, saveAgent, deleteAgent } from '../agents/agentRegistry.js';
+import { agentsDir } from '../core/tanguHome.js';
+import { discoverPlugins } from '../plugins/loader.js';
 import { loadSpecialAgentsConfig, saveSpecialAgentsConfig } from '../services/specialAgentsConfig.js';
 import { resolveApproval, type ApprovalDecision } from '../services/approvals.js';
 import { resolveInquiry } from '../services/inquiries.js';
@@ -20,7 +24,8 @@ import { getToolDefinitions } from '../tools/registry.js';
 import { reducer, initialState } from './events.js';
 import { listSessions, loadSessionItems, type SessionRow } from './sessions.js';
 import { COMMANDS, copyToClipboardOSC52 } from './commands.js';
-import { ItemView, LiveView } from './components/Message.js';
+import { getLastUserMessageContent, deleteLastExchange } from './messageOps.js';
+import { ItemView, LiveView, TodoPanel } from './components/Message.js';
 import { StatusBar } from './components/StatusBar.js';
 import { InputBox } from './components/InputBox.js';
 import { ApprovalPrompt } from './components/ApprovalPrompt.js';
@@ -28,7 +33,12 @@ import { InquiryPrompt } from './components/InquiryPrompt.js';
 import type { TuiConfig } from './config.js';
 import type { ApprovalMode } from './types.js';
 
-const RUN_AFFECTING = new Set(['/new', '/resume', '/retry', '/compact', '/branch']);
+const RUN_AFFECTING = new Set(['/new', '/resume', '/retry', '/compact', '/branch', '/edit', '/delete']);
+
+/** 群聊结束原因 → 中文。 */
+function groupReason(r: string): string {
+  return r === 'vote' ? '投票通过' : r === 'cost_limit' ? '达到花费上限' : r === 'quota' ? '额度不足' : '达到轮数上限';
+}
 
 interface MutableConfig {
   model: string;
@@ -79,9 +89,53 @@ export function App({ boot, storage }: { boot: TuiConfig; storage: string }): Re
   const pendingText = useRef('');
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionListRef = useRef<SessionRow[]>([]);
+  /** 已就绪的群聊参与者 slug(/groupchat 设置;非空时每条消息走多 Agent 群聊;/groupchat off 清空)。 */
+  const groupAgentsRef = useRef<string[] | null>(null);
+
+  const { setRawMode } = useStdin();
 
   const notice = (text: string, tone: 'info' | 'error' | 'success' | 'warn' = 'info'): void =>
     dispatch({ type: 'ADD_NOTICE', text, tone });
+
+  // 多行编辑统一走 $EDITOR(git/crontab 同款)。spawnSync 阻塞整个事件循环 → ink 渲染天然冻结,
+  // 退出后下一次 dispatch 触发重绘。退 raw 模式让编辑器独占终端,finally 必恢复。
+  const pickEditor = (): string =>
+    process.env.VISUAL || process.env.EDITOR || (process.platform === 'win32' ? 'notepad' : 'vi');
+
+  /** 在 $EDITOR 里编辑一段文本(经临时文件),返回保存后的内容;取消/失败返回 null。 */
+  const editText = async (initial: string, ext = '.md'): Promise<string | null> => {
+    const tmp = path.join(os.tmpdir(), `tangu-edit-${randomUUID()}${ext}`);
+    try {
+      await fs.writeFile(tmp, initial ?? '');
+      setRawMode?.(false);
+      const r = spawnSync(pickEditor(), [tmp], { stdio: 'inherit' });
+      setRawMode?.(true);
+      if (r.error) { notice(`无法打开编辑器(${pickEditor()}):${r.error.message}`, 'error'); return null; }
+      return await fs.readFile(tmp, 'utf8');
+    } catch (e: any) {
+      setRawMode?.(true);
+      notice(`编辑失败:${e?.message || e}`, 'error');
+      return null;
+    } finally {
+      await fs.rm(tmp, { force: true }).catch(() => {});
+    }
+  };
+
+  /** 直接在 $EDITOR 里打开磁盘文件(agent 文件即真源,改完即时热加载),返回是否成功。 */
+  const editFile = async (absPath: string): Promise<boolean> => {
+    try {
+      setRawMode?.(false);
+      const r = spawnSync(pickEditor(), [absPath], { stdio: 'inherit' });
+      setRawMode?.(true);
+      if (r.error) { notice(`无法打开编辑器(${pickEditor()}):${r.error.message}`, 'error'); return false; }
+      return true;
+    } catch (e: any) {
+      setRawMode?.(true);
+      notice(`编辑失败:${e?.message || e}`, 'error');
+      return false;
+    }
+  };
+
 
   const ensureSession = async (sid: string, model: string): Promise<void> => {
     await query(
@@ -169,6 +223,36 @@ export function App({ boot, storage }: { boot: TuiConfig; storage: string }): Re
         setCfg((c) => ({ ...c, planMode: false })); // 工具侧已落库,本地配置同步关
         dispatch({ type: 'ADD_NOTICE', text: '✓ 计划已批准,计划模式关闭——下一条消息开始执行', tone: 'success' });
         break;
+      case 'todo':
+        dispatch({ type: 'TODO', todos: Array.isArray(p.todos) ? p.todos : [] });
+        break;
+      case 'subchat':
+        flushNow();
+        dispatch({ type: 'ADD_NOTICE', text: `↳ 子聊天「${p.title || ''}」已开始（${p.kind || 'sub'}）`, tone: 'info' });
+        break;
+      // ── 群聊:发言人轮转 / 投票 / 结束 → 线性转录(切发言人时 GROUP_NOTE 封存上一气泡)。──
+      case 'group_speaker':
+        if (p.phase === 'start') {
+          flushNow();
+          dispatch({ type: 'GROUP_NOTE', text: `🗣 ${p.name || p.slug}${p.round ? `  ·  第 ${p.round} 轮` : ''}`, tone: 'info' });
+        }
+        break;
+      case 'group_voting':
+        flushNow();
+        dispatch({ type: 'GROUP_NOTE', text: `🗳 第 ${p.round} 轮投票中…`, tone: 'info' });
+        break;
+      case 'group_vote': {
+        flushNow();
+        const detail = Array.isArray(p.votes)
+          ? p.votes.map((v: any) => `  ${v.end ? '✓' : '·'} ${v.name}${v.reason ? `：${v.reason}` : ''}`).join('\n')
+          : '';
+        dispatch({ type: 'GROUP_NOTE', text: `🗳 第 ${p.round} 轮投票：${p.endCount}/${p.total} 赞成结束${detail ? '\n' + detail : ''}`, tone: 'info' });
+        break;
+      }
+      case 'group_ended':
+        flushNow();
+        dispatch({ type: 'GROUP_NOTE', text: `🏁 群聊结束（${p.rounds} 轮 · ${groupReason(String(p.reason || ''))}）`, tone: 'success' });
+        break;
       case 'done':
         flushNow();
         teardownRun();
@@ -201,6 +285,11 @@ export function App({ boot, storage }: { boot: TuiConfig; storage: string }): Re
     if (c.maxIterations) agentConfig.maxIterations = c.maxIterations;
     if (c.planMode) agentConfig.planMode = true;
     if (c.enabledSkillIds?.length) agentConfig.enabledSkillIds = c.enabledSkillIds;
+    // 群聊就绪 → 本条消息走多 Agent 群聊(agentLoop 据 groupChat+capabilities.groupChat 分流到 runGroupChat)。
+    if (groupAgentsRef.current && groupAgentsRef.current.length >= 2) {
+      agentConfig.groupChat = true;
+      agentConfig.groupAgents = groupAgentsRef.current;
+    }
     createRun({
       id: runId,
       sessionId: sid,
@@ -343,9 +432,39 @@ export function App({ boot, storage }: { boot: TuiConfig; storage: string }): Re
         return;
       }
       case '/agent': {
-        if (!rest || rest.trim() === 'off') {
+        const parts = rest.split(/\s+/).filter(Boolean);
+        const sub = parts[0] || '';
+        const arg = parts.slice(1).join(' ').trim();
+        // CRUD 子命令:agent 定义即 ~/.tangu/agents/<slug>/config.toml 文件,编辑=直接开文件(mtime 缓存即时热加载)。
+        if (sub === 'new') {
+          if (!arg) { notice('用法：/agent new <slug>（随后用 $EDITOR 编辑 config.toml）', 'warn'); return; }
+          try {
+            const def = await saveAgent({ slug: arg, name: arg, systemPrompt: 'You are a helpful assistant.' });
+            notice(`已创建 agent「${def.slug}」,打开 config.toml 编辑…`);
+            await editFile(path.join(agentsDir(), def.slug, 'config.toml'));
+            notice(`agent「${def.slug}」已保存(改动即时生效);/agent ${def.slug} 启用。`, 'success');
+          } catch (e: any) { notice(`创建失败：${e?.message || e}`, 'error'); }
+          return;
+        }
+        if (sub === 'edit') {
+          if (!arg) { notice('用法：/agent edit <slug>', 'warn'); return; }
+          const def = await getAgent(arg);
+          if (!def) { notice(`未找到 agent：${arg}`, 'error'); return; }
+          await editFile(path.join(agentsDir(), def.slug, 'config.toml'));
+          notice(`agent「${def.slug}」已保存(改动即时生效)。`, 'success');
+          return;
+        }
+        if (sub === 'rm') {
+          if (!arg) { notice('用法：/agent rm <slug>', 'warn'); return; }
+          const ok = await deleteAgent(arg);
+          if (ok && cfgRef.current.activeAgentSlug === arg) setCfg((c) => ({ ...c, seedSystem: undefined, activeAgentSlug: undefined }));
+          notice(ok ? `已删除 agent：${arg}` : `删除失败（默认 agent 不可删,或不存在）：${arg}`, ok ? 'success' : 'error');
+          return;
+        }
+        // 默认:激活 / 取消(原行为)
+        if (!rest || sub === 'off') {
           setCfg((c) => ({ ...c, seedSystem: undefined, activeAgentSlug: undefined }));
-          notice(rest.trim() === 'off' ? '已取消 Normal Agent。' : '用法：/agent <slug>（/agents 列出,/agent off 取消）', rest.trim() === 'off' ? 'success' : 'warn');
+          notice(sub === 'off' ? '已取消 Normal Agent。' : '用法：/agent <slug> 启用 · /agent off 取消 · /agent new|edit|rm <slug>', sub === 'off' ? 'success' : 'warn');
           return;
         }
         const def = await getAgent(rest.trim());
@@ -477,11 +596,81 @@ export function App({ boot, storage }: { boot: TuiConfig; storage: string }): Re
       }
       case '/memory': {
         try {
+          if (rest.trim() === 'edit') {
+            if (!deps().brain.memory.setMemory) { notice('当前后端不支持整体覆盖记忆（可用 remember 工具追加）', 'warn'); return; }
+            const cur = await deps().brain.memory.getMemory(userId);
+            const edited = await editText(cur.content || '', '.md');
+            if (edited == null) { notice('已取消编辑', 'warn'); return; }
+            await deps().brain.memory.setMemory!(userId, edited);
+            notice('长期记忆已更新', 'success');
+            return;
+          }
           const mem = await deps().brain.memory.getMemory(userId);
-          notice('长期记忆：\n' + (mem.content?.trim() || '（空）'));
+          notice('长期记忆（/memory edit 编辑）：\n' + (mem.content?.trim() || '（空）'));
         } catch (e: any) {
-          notice(`读取记忆失败：${e?.message || e}`, 'error');
+          notice(`记忆操作失败：${e?.message || e}`, 'error');
         }
+        return;
+      }
+      case '/log': {
+        try {
+          const date = /^\d{4}-\d{2}-\d{2}$/.test(rest.trim()) ? rest.trim() : undefined;
+          const log = await deps().brain.memory.getLog(userId, date);
+          notice(`📒 ${log.date} 日志：\n${log.content?.trim() || '（空）'}`);
+        } catch (e: any) {
+          notice(`读取日志失败：${e?.message || e}`, 'error');
+        }
+        return;
+      }
+      case '/mcp': {
+        const mgr = deps().mcp;
+        if (!mgr) { notice('未启用 MCP（在 ~/.tangu/mcp.json 配置后重启 tangu）', 'warn'); return; }
+        const st = mgr.listStatus();
+        if (!st.length) { notice('未配置 MCP server（编辑 ~/.tangu/mcp.json 后重启 tangu）'); return; }
+        const dot = (s: string): string => (s === 'connected' ? '●' : s === 'error' ? '✗' : s === 'disabled' ? '○' : '◌');
+        const lines = st.map((s) => `  ${dot(s.status)} ${s.name} (${s.transport}) · ${s.toolCount} 工具${s.error ? ` · ${s.error}` : ''}`).join('\n');
+        notice(`MCP server（改 ~/.tangu/mcp.json 后重启生效）：\n${lines}`);
+        return;
+      }
+      case '/plugins': {
+        try {
+          const plugins = discoverPlugins();
+          if (!plugins.length) { notice('未发现插件（放入 plugins/ 或设 TANGU_PLUGINS_DIR；TANGU_PLUGINS=off 全关）'); return; }
+          const lines = plugins.map((d) => `  · ${d.manifest.id}${d.manifest.name ? ` — ${d.manifest.name}` : ''}`).join('\n');
+          notice(`已发现插件（改动需重启 tangu）：\n${lines}`);
+        } catch (e: any) { notice(`列插件失败：${e?.message || e}`, 'error'); }
+        return;
+      }
+      case '/groupchat': {
+        const arg = rest.trim();
+        if (arg === 'off') { groupAgentsRef.current = null; notice('已退出群聊模式', 'success'); return; }
+        const slugs = arg.split(/\s+/).filter(Boolean);
+        if (slugs.length < 2) { notice('用法：/groupchat <slug1> <slug2> […]（≥2 个 Normal Agent；/agents 查看；/groupchat off 退出）', 'warn'); return; }
+        const defs = await Promise.all(slugs.map((s) => getAgent(s).catch(() => null)));
+        const missing = slugs.filter((_, i) => !defs[i]);
+        if (missing.length) { notice(`未找到 agent：${missing.join(', ')}（/agents 查看）`, 'error'); return; }
+        groupAgentsRef.current = slugs;
+        notice(`群聊已就绪：${slugs.join(' / ')}。直接发消息即开始多 Agent 讨论（/groupchat off 退出）`, 'success');
+        return;
+      }
+      case '/edit': {
+        const last = await getLastUserMessageContent(sessionIdRef.current);
+        if (last == null) { notice('没有可编辑的消息', 'warn'); return; }
+        const edited = await editText(last, '.md');
+        if (edited == null) { notice('已取消编辑', 'warn'); return; }
+        if (!edited.trim()) { notice('内容为空，未改动', 'warn'); return; }
+        await deleteLastExchange(sessionIdRef.current);
+        const { items } = await loadSessionItems(sessionIdRef.current, 1);
+        dispatch({ type: 'RESET_SESSION', items });
+        void submit(edited.trim());
+        return;
+      }
+      case '/delete': {
+        const c = await deleteLastExchange(sessionIdRef.current);
+        if (c == null) { notice('没有可删除的消息', 'warn'); return; }
+        const { items } = await loadSessionItems(sessionIdRef.current, 1);
+        dispatch({ type: 'RESET_SESSION', items });
+        notice('已删除最近一轮对话', 'success');
         return;
       }
       case '/plan': {
@@ -622,6 +811,7 @@ export function App({ boot, storage }: { boot: TuiConfig; storage: string }): Re
     <Box flexDirection="column">
       <Static items={state.items}>{(item) => <ItemView key={item.id} item={item} />}</Static>
       {state.live ? <LiveView blocks={state.live} /> : null}
+      <TodoPanel todos={state.todos} />
       <StatusBar
         model={cfg.model}
         cwd={cfg.cwd}

@@ -160,7 +160,7 @@ export type {
 } from './seams/cloudBrain.js';
 // Phase 2 云端运行水合:forsionSeams 用 parseAgentConfig 把 config.toml+SOUL.md 组装 def;currentAgentSlug/
 // resolveMemorySlug/DEFAULT_AGENT_SLUG 供 memory/log 按 slug 作用域路由。
-export { parseAgentConfig, resolveMemorySlug } from './agents/agentRegistry.js';
+export { parseAgentConfig, serializeAgentConfig, resolveMemorySlug } from './agents/agentRegistry.js';
 export type { NormalAgentDef } from './agents/agentRegistry.js';
 export { currentAgentSlug } from './seams/runContext.js';
 export { DEFAULT_AGENT_SLUG } from './core/tanguHome.js';

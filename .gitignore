@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+#designs
+designs/
+
 # Build output
 dist/
 out/

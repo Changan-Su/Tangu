@@ -1,0 +1,126 @@
+/**
+ * Dockview 工作台的 LCL 皮肤:把 --dv-* 全量别名到 LCL token,叠在 dockview-theme-light|dark 基底之上
+ * (后加载 → 覆盖生效)。token 随换肤/明暗/扁平自动流动,故工作台 chrome 与全家桶一致。
+ */
+.dockview-theme-lcl {
+  --dv-background-color: var(--bg);
+  --dv-group-view-background-color: var(--bg);
+  --dv-tabs-and-actions-container-background-color: var(--sidebar-bg);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--bg-card);
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-activegroup-visiblepanel-tab-color: var(--text);
+  --dv-activegroup-hiddenpanel-tab-color: var(--text-muted);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--text-muted);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--text-faint);
+  --dv-tab-divider-color: transparent;
+  --dv-separator-border: var(--border);
+  --dv-active-sash-color: var(--accent);
+  --dv-paneview-active-outline-color: var(--accent);
+  --dv-icon-hover-background-color: var(--overlay-light);
+  --dv-floating-box-shadow: var(--card-shadow);
+  --dv-tabs-container-scrollbar-color: var(--overlay-medium);
+  --dv-drag-over-background-color: var(--accent-light);
+  --dv-drag-over-border-color: var(--accent);
+  --dv-tab-close-icon-color: var(--text-faint);
+  --dv-border-radius: var(--radius-md);
+}
+
+/* 容器铺满 Dockview 的父槽 */
+.wb-dockview { width: 100%; height: 100%; }
+
+/* 面板内容容器:铺满,内部组件照常 flex/滚动 */
+.wb-center,
+.wb-surface,
+.wb-nav {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.wb-center { background: var(--bg); }
+/* 右栏 surface:沿用原右栏底色;其内 .right-panel-body 接管滚动 */
+.wb-surface { background: var(--sidebar-bg); }
+.wb-surface > .right-panel-body { flex: 1; min-height: 0; }
+
+/* 左导航停靠区:托管现有 Sidebar,撤掉它的固定宽/右边线(Dockview 控宽),
+ * 并撤掉 macOS 交通灯让位(交通灯现在落在顶栏,不在导航上)。收起由 Dockview 增删导航组完成。 */
+.wb-nav { background: var(--sidebar-bg); }
+.wb-nav .sidebar {
+  width: 100%;
+  min-width: 0;
+  flex: 1;
+  border-right: none;
+  margin-left: 0;
+  transition: none;
+}
+.wb-nav .sidebar.collapsed { margin-left: 0; }
+/* navigator surface 的「工作会话」tab 已作其头 → 隐藏 Sidebar 自带品牌行(去冗余,Obsidian 式) */
+.wb-nav .sidebar-header { display: none; }
+
+/* Obsidian 扁平标签:平整段(无圆角/无缝),激活=卡面底 + 顶部 accent 细条,非激活=透明降噪。
+ * 显式 color —— DESIGN.md §5:dv-tab 是 <button>,不设色暗色下落系统 ButtonText(近黑)看不清。 */
+.dockview-theme-lcl .dv-tabs-and-actions-container {
+  border-bottom: var(--border-width) solid var(--border);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  height: 36px;
+}
+.dockview-theme-lcl .dv-tabs-container .dv-tab {
+  padding: 0 11px;
+  min-width: 0;
+  border-radius: 0;
+  position: relative;
+  color: var(--text-muted);
+  transition: color var(--duration-fast), background var(--duration-fast);
+}
+.dockview-theme-lcl .dv-tab:hover { color: var(--text); }
+.dockview-theme-lcl .dv-tab.dv-active-tab {
+  background: var(--bg-card);
+  color: var(--text);
+  box-shadow: none;
+}
+/* 激活标签顶部 2px accent 细条(Obsidian 式,替代重下划线) */
+.dockview-theme-lcl .dv-tab.dv-active-tab::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: var(--accent);
+}
+
+/* Surface tab 内容 = 图标 + 名称(+ 可关闭项的关闭钮);Obsidian 层级 */
+.wb-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 2px;
+  max-width: 100%;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: inherit;
+}
+.wb-tab-ic { flex-shrink: 0; opacity: 0.85; }
+.wb-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-tab-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0; /* 未悬停不占位 → 去掉关闭钮死白 */
+  height: 16px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  overflow: hidden;
+  opacity: 0;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: opacity var(--duration-fast), width var(--duration-fast), background var(--duration-fast), color var(--duration-fast);
+}
+.dv-tab:hover .wb-tab-x,
+.dv-tab.dv-active-tab .wb-tab-x { opacity: 0.7; width: 16px; }
+.wb-tab-x:hover { opacity: 1; background: var(--overlay-light); color: var(--text); }

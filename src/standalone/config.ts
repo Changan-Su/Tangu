@@ -3,6 +3,7 @@
  * apps/Agents-Manager/desktop/cli/web.ts。
  */
 import type { DirectProvider } from '../llm/providerRegistry.js';
+import { getRawSection } from '../core/config.js';
 
 export interface StandaloneConfig {
   cloudUrl: string; // Forsion 云端地址(brain API 所在),如 https://api.forsion.app
@@ -20,6 +21,7 @@ export interface StandaloneConfig {
   /** OAuth 登录派生的 provider(main 启动时注入;合并优先级最低——显式配置覆盖订阅登录)。 */
   oauthProviders?: DirectProvider[];
   showHelp: boolean;
+  printConfig: boolean; // --print-config:打印当前生效配置后退出
 }
 
 const DEFAULTS = {
@@ -30,19 +32,26 @@ const DEFAULTS = {
 };
 
 export function parseConfig(argv: string[]): StandaloneConfig {
+  // config.json 作为 env 之下、默认之上的一层(优先级:CLI args > env > config.json > 默认)。
+  // 直连 providers 不在此 seed —— 由 loadProviders(assemble.ts)统一读 config.providers 段并合并。
+  const cloud = (getRawSection('cloud') as any) || {};
+  const db = (getRawSection('database') as any) || {};
+  const server = (getRawSection('server') as any) || {};
+  const sandboxCfg = getRawSection('sandbox') as StandaloneConfig['sandbox'] | undefined;
   const cfg: StandaloneConfig = {
-    cloudUrl: process.env.TANGU_CLOUD_URL ?? '',
-    token: process.env.TANGU_TOKEN ?? '',
-    databaseUrl: process.env.TANGU_DATABASE_URL ?? process.env.DATABASE_URL ?? '',
-    dataDir: process.env.TANGU_DATA_DIR ?? '',
-    defaultModelId: process.env.TANGU_MODEL ?? '',
-    port: Number(process.env.TANGU_PORT ?? DEFAULTS.port),
-    host: process.env.TANGU_HOST ?? DEFAULTS.host,
-    userId: process.env.TANGU_USER_ID ?? DEFAULTS.userId,
-    sandbox: (process.env.TANGU_SANDBOX as StandaloneConfig['sandbox']) ?? DEFAULTS.sandbox,
+    cloudUrl: process.env.TANGU_CLOUD_URL ?? cloud.url ?? '',
+    token: process.env.TANGU_TOKEN ?? cloud.token ?? '',
+    databaseUrl: process.env.TANGU_DATABASE_URL ?? process.env.DATABASE_URL ?? db.url ?? '',
+    dataDir: process.env.TANGU_DATA_DIR ?? db.dataDir ?? '',
+    defaultModelId: process.env.TANGU_MODEL ?? cloud.defaultModel ?? '',
+    port: Number(process.env.TANGU_PORT ?? server.port ?? DEFAULTS.port),
+    host: process.env.TANGU_HOST ?? server.host ?? DEFAULTS.host,
+    userId: process.env.TANGU_USER_ID ?? server.userId ?? DEFAULTS.userId,
+    sandbox: (process.env.TANGU_SANDBOX as StandaloneConfig['sandbox']) ?? sandboxCfg ?? DEFAULTS.sandbox,
     providers: [],
     providersFile: process.env.TANGU_PROVIDERS_FILE || undefined,
     showHelp: false,
+    printConfig: false,
   };
   // inline 单 provider(env 为起点,CLI 可覆盖;providerId+baseUrl 齐全才算数)
   const inline = {
@@ -50,6 +59,7 @@ export function parseConfig(argv: string[]): StandaloneConfig {
     baseUrl: process.env.TANGU_PROVIDER_BASE_URL ?? '',
     apiKey: process.env.TANGU_PROVIDER_API_KEY ?? '',
     models: process.env.TANGU_PROVIDER_MODELS ?? '',
+    imageModels: process.env.TANGU_PROVIDER_IMAGE_MODELS ?? '',
   };
   const set = (k: string, v: string): void => {
     switch (k) {
@@ -66,12 +76,14 @@ export function parseConfig(argv: string[]): StandaloneConfig {
       case '--provider-base-url': inline.baseUrl = v; break;
       case '--provider-api-key': inline.apiKey = v; break;
       case '--provider-models': inline.models = v; break;
+      case '--provider-image-models': inline.imageModels = v; break;
       case '--providers-file': cfg.providersFile = v; break;
     }
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '-h' || a === '--help') { cfg.showHelp = true; continue; }
+    if (a === '--print-config') { cfg.printConfig = true; continue; }
     if (!a.startsWith('--')) continue;
     if (a.includes('=')) set(a.slice(0, a.indexOf('=')), a.slice(a.indexOf('=') + 1));
     else set(a, argv[++i] ?? '');
@@ -82,6 +94,7 @@ export function parseConfig(argv: string[]): StandaloneConfig {
       baseUrl: inline.baseUrl,
       apiKey: inline.apiKey || undefined,
       modelIds: inline.models ? inline.models.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
+      imageModelIds: inline.imageModels ? inline.imageModels.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
     });
   }
   return cfg;
@@ -100,6 +113,7 @@ export const HELP = `Tangu Agent — standalone(云端大脑客户端，HTTP/SSE
   --host <addr>       绑定地址(默认 127.0.0.1),env TANGU_HOST
   --user-id <id>      本地单用户 id(默认 local),env TANGU_USER_ID
   --sandbox <mode>    docker|none|auto(默认 auto:docker 可用即开),env TANGU_SANDBOX
+  --print-config      打印当前生效配置(含 ~/.tangu/config.json + env 叠加)后退出
   -h, --help          显示帮助
 
 LLM 多 provider(直连用户自有 provider;未配则 LLM 全走 Forsion 托管面):
@@ -107,6 +121,7 @@ LLM 多 provider(直连用户自有 provider;未配则 LLM 全走 Forsion 托管
   --provider-base-url <url>   OpenAI 兼容端点根含 /v1(如 http://localhost:11434/v1),env TANGU_PROVIDER_BASE_URL
   --provider-api-key <key>    直连厂商的用户自有 key(Ollama 可省),env TANGU_PROVIDER_API_KEY
   --provider-models <csv>     该 provider 的模型白名单(逗号分隔,可不带前缀直接用),env TANGU_PROVIDER_MODELS
+  --provider-image-models <csv> 该 provider 的生图模型白名单(逗号分隔;generate_image 用),env TANGU_PROVIDER_IMAGE_MODELS
   --providers-file <path>     JSON 文件含 DirectProvider[](多 provider),env TANGU_PROVIDERS_FILE
   说明:modelId 命中本地 provider → 直连(用户付厂商,不计 Forsion);否则走 Forsion 托管模型。
 

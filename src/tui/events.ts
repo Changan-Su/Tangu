@@ -10,6 +10,7 @@ export const initialState: UiState = {
   usage: { total: 0, cost: 0, cached: 0, lastPrompt: 0 },
   approval: null,
   inquiry: null,
+  todos: [],
 };
 
 /** 取末块若为 text 则在其上追加，否则新开一个 text 块（不可变更新）。 */
@@ -118,6 +119,21 @@ export function reducer(state: UiState, action: UiAction): UiState {
     case 'INQUIRY_CLEAR':
       return { ...state, inquiry: null };
 
+    case 'TODO':
+      return { ...state, todos: action.todos };
+
+    // 群聊:封存当前发言人的 live 气泡为一条 assistant 项,再追加一行分隔提示(发言人头/投票/结束)。
+    // 顺序发言 → 一次只一个 speaker 在流,故无需按 agentId 路由;靠"切发言人时 flush"分隔气泡。
+    case 'GROUP_NOTE': {
+      const { items, nextId } = flushLive(state);
+      return {
+        ...state,
+        items: [...items, { id: nextId, kind: 'notice', text: action.text, tone: action.tone || 'info' }],
+        nextId: nextId + 1,
+        live: [],
+      };
+    }
+
     case 'DONE': {
       const { items, nextId } = flushLive(state);
       return {
@@ -160,6 +176,7 @@ export function reducer(state: UiState, action: UiAction): UiState {
         busy: false,
         approval: null,
         inquiry: null,
+        todos: [],
         status: { state: 'idle', iteration: 0 },
       };
 

@@ -3,10 +3,11 @@
  * 内置默认 claude-code（Anthropic 官方 ACP 适配器，npx 拉起）；~/.tangu/engines.json 可覆盖/新增。
  * ponytail: 启动命令走配置 —— 换 binary/路径只改 json，不改代码。
  */
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { enginePrefsFile, tanguHome } from '../core/tanguHome.js';
+import { enginePrefsFile, enginesFile } from '../core/tanguHome.js';
+import { getRawSection, saveSection } from '../core/config.js';
 
 export interface EngineDef {
   id: string;
@@ -44,15 +45,24 @@ const BUILTIN: EngineDef[] = [
   },
 ];
 
-/** 读引擎清单：内置 + ~/.tangu/engines.json（按 id 覆盖；自定义新 id 追加）。无文件 → 仅内置。 */
+/**
+ * 读引擎清单：内置 + 自定义（按 id 覆盖；自定义新 id 追加）。
+ * 显式传 configFile → 读该文件；否则 config.json 的 engines 段优先,缺失回落 ~/.tangu/engines.json。
+ */
 export function loadEngines(configFile?: string): EngineDef[] {
-  const file = configFile ?? path.join(os.homedir(), '.tangu', 'engines.json');
   let custom: EngineDef[] = [];
-  try {
-    const parsed = JSON.parse(readFileSync(file, 'utf-8'));
-    if (Array.isArray(parsed?.engines)) custom = parsed.engines;
-  } catch {
-    /* 无文件/解析失败 → 仅用内置 */
+  const fromFile = (file: string): void => {
+    try {
+      const parsed = JSON.parse(readFileSync(file, 'utf-8'));
+      if (Array.isArray(parsed?.engines)) custom = parsed.engines;
+    } catch { /* 无文件/解析失败 → 仅用内置 */ }
+  };
+  if (configFile) {
+    fromFile(configFile);
+  } else {
+    const sec = getRawSection('engines');
+    if (sec !== undefined) { if (Array.isArray(sec?.engines)) custom = sec.engines; }
+    else fromFile(enginesFile());
   }
   const byId = new Map<string, EngineDef>();
   for (const e of BUILTIN) byId.set(e.id, e);
@@ -97,8 +107,10 @@ export interface EnginePrefs {
   [id: string]: { defaultModel?: string };
 }
 
-/** 读 ~/.tangu/engine-prefs.json(每引擎默认模型等);无文件/损坏 → {}。 */
+/** 读引擎偏好:config.json 的 enginePrefs 段优先,缺失回落 ~/.tangu/engine-prefs.json;损坏 → {}。 */
 export function loadEnginePrefs(): EnginePrefs {
+  const sec = getRawSection('enginePrefs');
+  if (sec !== undefined) return sec && typeof sec === 'object' ? sec : {};
   try {
     return JSON.parse(readFileSync(enginePrefsFile(), 'utf-8')) || {};
   } catch {
@@ -106,13 +118,12 @@ export function loadEnginePrefs(): EnginePrefs {
   }
 }
 
-/** 写某引擎的默认模型(空串=清除)。 */
+/** 写某引擎的默认模型(空串=清除)→ config.json 的 enginePrefs 段。 */
 export function saveEngineDefaultModel(id: string, modelId: string): void {
   const prefs = loadEnginePrefs();
   prefs[id] = { ...(prefs[id] || {}), defaultModel: modelId || undefined };
   try {
-    mkdirSync(tanguHome(), { recursive: true });
-    writeFileSync(enginePrefsFile(), JSON.stringify(prefs, null, 2));
+    saveSection('enginePrefs', prefs);
   } catch (e: any) {
     console.warn('[engines] 保存 engine-prefs 失败:', e?.message || e);
   }

@@ -159,6 +159,9 @@ export async function runMigration(): Promise<void> {
     // 重复列报错吞掉即幂等)。隔离 Special Agent 工作会话不进会话列表。
     try { await query(`ALTER TABLE chat_sessions ADD COLUMN kind VARCHAR(16) NOT NULL DEFAULT 'user'`); }
     catch { /* 列已存在 */ }
+    // 老 SQLite 库补 display_files 列(agent 在对话区展示的文件;base schema 已含,此 ALTER 兜旧库)。
+    try { await query(`ALTER TABLE chat_messages ADD COLUMN display_files JSONB`); }
+    catch { /* 列已存在 */ }
     console.log('✅ [agent-core] migrations done (sqlite：base schema 已含全部列)');
     return;
   }
@@ -226,8 +229,10 @@ export async function runMigration(): Promise<void> {
   // 老库补列,幂等)。
   try {
     await query(`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS attachments JSONB`);
+    // agent 在对话区展示的文件(display_file / generate_image / 表情包):路径或内联 dataUrl 列表。
+    await query(`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS display_files JSONB`);
   } catch (e: any) {
-    console.warn('[agent-core] chat_messages.attachments 列迁移失败：', e?.message || e);
+    console.warn('[agent-core] chat_messages.attachments/display_files 列迁移失败：', e?.message || e);
   }
 
   console.log('✅ [agent-core] migrations done (agent_runs/agent_steps/agent_run_events)');

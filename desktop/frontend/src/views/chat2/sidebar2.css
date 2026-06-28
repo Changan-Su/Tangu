@@ -1,0 +1,265 @@
+/**
+ * 侧栏(编辑式)样式。全 token 驱动 → 随换肤/明暗/扁平自动流动。t2s- 前缀,自含,不依赖 base.css/chat2.css。
+ * 右键菜单复用 base.css 的 .ctx-menu。
+ */
+.t2s-side {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  background: var(--sidebar-bg);
+  font-family: var(--font-ui);
+  color: var(--text);
+}
+
+/* 品牌 */
+.t2s-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 14px 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.t2s-brand-name { letter-spacing: 0.01em; }
+
+/* 搜索 */
+.t2s-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 12px 10px 8px;
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: var(--overlay-light, rgba(127, 127, 127, 0.08));
+  color: var(--text-muted);
+}
+.t2s-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+.t2s-dim { opacity: 0.7; flex-shrink: 0; }
+
+/* 常驻底部:个人中心卡片 + 设置(与 desktop1.0 一致) */
+.t2s-footer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 6px 8px;
+  border-top: var(--border-width, 1px) solid var(--border);
+}
+.t2s-footer-settings {
+  width: 32px; height: 32px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: transparent; color: var(--text-muted);
+  border-radius: var(--radius-sm, 8px); cursor: pointer;
+  transition: background var(--duration-fast, 0.15s), color var(--duration-fast, 0.15s);
+}
+.t2s-footer-settings:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.1)); color: var(--text); }
+
+/* 文件面板:工作区展开后的磁盘文件树 */
+.t2sf-tree { display: flex; flex-direction: column; padding: 2px 0 6px; }
+.t2sf-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 4px 8px;
+  text-align: left;
+  border-radius: var(--radius-sm, 8px);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background var(--duration-fast, 0.15s);
+}
+.t2sf-row:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.08)); }
+.t2sf-chev { width: 14px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--text-faint, var(--text-muted)); }
+.t2sf-fic { flex-shrink: 0; color: var(--text-muted); }
+.t2sf-file .t2sf-fic { color: var(--text-faint, var(--text-muted)); }
+.t2sf-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t2sf-size { flex-shrink: 0; font-size: 11px; color: var(--text-faint, var(--text-muted)); }
+.t2sf-loading { font-size: 12px; color: var(--text-faint, var(--text-muted)); padding: 3px 8px; }
+.t2sf-empty { font-size: 12px; color: var(--text-faint, var(--text-muted)); padding: 4px 8px 4px 22px; }
+
+/* 滚动区 */
+.t2s-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 8px 12px; }
+.t2s-hint { padding: 10px; font-size: 12.5px; color: var(--text-muted); }
+
+/* 顶部入口行 */
+.t2s-special-group { display: flex; flex-direction: column; gap: 1px; margin-bottom: 8px; }
+.t2s-special {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  text-align: left;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background var(--duration-fast, 0.15s);
+}
+.t2s-special:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.08)); }
+.t2s-special.active { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.t2s-special-ic { display: inline-flex; color: var(--text-muted); flex-shrink: 0; }
+.t2s-special.active .t2s-special-ic { color: var(--accent); }
+.t2s-special-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t2s-special-go { display: inline-flex; color: var(--text-faint, var(--text-muted)); opacity: 0.6; border-radius: 6px; }
+.t2s-special-go:hover { opacity: 1; background: var(--overlay-light, rgba(127, 127, 127, 0.12)); }
+
+/* 工作区组头 */
+.t2s-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 6px;
+  border-radius: 8px;
+  position: relative;
+}
+/* 落点提示:目标上方间隙里一道醒目插入线(拖动的组将落到此处之前) */
+.t2s-group.drag-over::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: -4px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  z-index: 3;
+}
+.t2s-group.dragging { opacity: 0.4; }
+.t2s-group-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 8px;
+}
+.t2s-group-toggle:hover { color: var(--text); }
+.t2s-group-toggle.active { color: var(--accent); }
+.t2s-chev { display: inline-flex; opacity: 0.7; flex-shrink: 0; cursor: pointer; }
+.t2s-group-name { display: inline-flex; align-items: center; gap: 5px; flex: 1; min-width: 0; white-space: nowrap; }
+.t2s-group-name > svg { flex-shrink: 0; }
+.t2s-group-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t2s-count {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-faint, var(--text-muted));
+  background: var(--overlay-light, rgba(127, 127, 127, 0.1));
+  border-radius: 999px;
+  padding: 0 6px;
+  line-height: 16px;
+}
+.t2s-mini-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint, var(--text-muted)); opacity: 0.5; }
+.t2s-mini-dot.ok { background: #3aaf7d; opacity: 1; }
+.t2s-group-add {
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: transparent; color: var(--text-faint, var(--text-muted));
+  border-radius: 6px; cursor: pointer; flex-shrink: 0; opacity: 0;
+  transition: opacity var(--duration-fast, 0.15s), background var(--duration-fast, 0.15s), color var(--duration-fast, 0.15s);
+}
+.t2s-group:hover .t2s-group-add { opacity: 0.7; }
+.t2s-group-add:hover { opacity: 1; background: var(--overlay-light, rgba(127, 127, 127, 0.12)); color: var(--text); }
+
+/* 会话行 */
+.t2s-group-sessions { display: flex; flex-direction: column; gap: 1px; padding-bottom: 2px; }
+.t2s-srow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 8px 6px 18px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  text-align: left;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background var(--duration-fast, 0.15s);
+}
+.t2s-srow:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.08)); }
+.t2s-srow.active { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.t2s-srow.active::before {
+  content: '';
+  position: absolute;
+  left: 6px; top: 7px; bottom: 7px;
+  width: 2px; border-radius: 2px;
+  background: var(--accent);
+}
+.t2s-srow-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t2s-faint { color: var(--text-faint, var(--text-muted)); }
+.t2s-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.t2s-dot.running { background: var(--accent); animation: t2s-pulse 1.4s ease-in-out infinite; }
+.t2s-dot.unread { background: var(--accent); opacity: 0.6; }
+@keyframes t2s-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.7); } }
+.t2s-srow-menu {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 5px; flex-shrink: 0;
+  color: var(--text-faint, var(--text-muted)); opacity: 0;
+  transition: opacity var(--duration-fast, 0.15s), background var(--duration-fast, 0.15s);
+}
+.t2s-srow:hover .t2s-srow-menu { opacity: 0.7; }
+.t2s-srow-menu:hover { opacity: 1; background: var(--overlay-light, rgba(127, 127, 127, 0.12)); }
+
+/* 内联重命名输入 */
+.t2s-rename {
+  flex: 1; min-width: 0;
+  background: var(--bg-card, var(--bg));
+  color: var(--text);
+  font-family: var(--font-ui); font-size: 13px;
+  border: var(--border-width, 1px) solid var(--accent);
+  border-radius: var(--radius-sm, 8px);
+  padding: 2px 6px; outline: none;
+}
+
+.t2s-viewmore {
+  margin: 2px 0 0 18px;
+  padding: 4px 8px;
+  border: none; background: transparent;
+  color: var(--text-muted); font-family: var(--font-ui); font-size: 12px;
+  text-align: left; cursor: pointer; border-radius: 6px;
+}
+.t2s-viewmore:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.08)); color: var(--text); }
+
+.t2s-add-ws {
+  display: flex; align-items: center; gap: 7px;
+  width: 100%; margin-top: 8px; padding: 8px 10px;
+  border: 1px dashed var(--border); background: transparent;
+  color: var(--text-muted); font-family: var(--font-ui); font-size: 12.5px;
+  border-radius: 10px; cursor: pointer;
+  transition: border-color var(--duration-fast, 0.15s), color var(--duration-fast, 0.15s);
+}
+.t2s-add-ws:hover { border-color: var(--accent); color: var(--text); }
+
+.t2s-archived-toggle { margin-top: 6px; padding-left: 8px; }

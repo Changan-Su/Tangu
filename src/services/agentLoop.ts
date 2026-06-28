@@ -12,9 +12,10 @@ import { publish, drain, cleanup } from './eventBus.js';
 import { gateToolCall, requestApproval, type ApprovalDecision } from './approvals.js';
 import { enterRunContext } from '../seams/runContext.js';
 import path from 'node:path';
-import { agentsDir, readUserMd, DEFAULT_AGENT_SLUG } from '../core/tanguHome.js';
+import { agentsDir, readUserMd } from '../core/tanguHome.js';
 import { getRun, updateRunStatus, appendStep, listPendingRunsForRecovery } from './runStore.js';
 import { getToolDefinitions, executeTool, getToolCapabilities, type ToolContext } from '../tools/registry.js';
+import type { DisplayFileItem } from '../tools/toolTypes.js';
 import { loadSkillLoadout } from './skillLoadout.js';
 import { loadCustomTools, type LoadedCustomTool } from '../tools/customTools.js';
 import { snapshotSession } from '../sandbox/sessionSandbox.js';
@@ -23,7 +24,8 @@ import {
   estimateTokensRough, estimateMessagesTokens, compactContext, capToolResult, capHistoryContent, pinMessage,
 } from './contextBudget.js';
 import { getLatestSummary, compactSession, foldWorkingWithSummary } from './compaction.js';
-import { getAgent, resolveActiveSlug, resolveMemorySlug } from '../agents/agentRegistry.js';
+import { getAgent } from '../agents/agentRegistry.js';
+import { applyAgentActivation } from './agentActivation.js';
 import { onUserRunDone } from './localHistorian.js';
 import { normalizeImageAttachments, toImageParts } from './imageAttachments.js';
 import { looksLikeToolCallText } from '../llm/textToolCalls.js';
@@ -329,33 +331,14 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
   const input = typeof run.input === 'string' ? safeParse(run.input) : run.input || {};
   const agentConfig = input.agentConfig || {};
   // Normal Agent 激活:会话 agent_config.agentSlug → 合并 agent 定义里「会话未显式覆盖」的字段。
-  // 仅本地形态有 agents 目录;不存在/读失败不阻断 run。模型覆盖由客户端在激活时写入会话 model_id。
-  let activeAgentSlug = DEFAULT_AGENT_SLUG;
-  let memScopeSlug = DEFAULT_AGENT_SLUG; // 记忆/日志作用域(共用默认 → DEFAULT;否则该 agent)
-  if (agentConfig.agentSlug) {
-    try {
-      let def = await getAgent(String(agentConfig.agentSlug));
-      // 云端运行水合(Phase 2 B):worker 的 ~/.tangu/agents 是空的,本地 getAgent 拿不到 → 从云端
-      // tangu_agent_files 读人格(config.toml+SOUL.md)。软失败 → null,回落今天行为(无 per-agent 人格)。
-      const agentsBrain = deps().brain.agents;
-      if (!def && agentsBrain) {
-        def = await agentsBrain.getAgent(userId, String(agentConfig.agentSlug)).catch(() => null);
-      }
-      if (def) {
-        activeAgentSlug = resolveActiveSlug(agentConfig.agentSlug);
-        memScopeSlug = resolveMemorySlug(def);
-        if (!agentConfig.systemPrompt && def.systemPrompt) agentConfig.systemPrompt = def.systemPrompt;
-        if (!agentConfig.soul && def.soul) agentConfig.soul = def.soul;
-        if (!agentConfig.libraryOrder && def.libraryOrder?.length) agentConfig.libraryOrder = def.libraryOrder;
-        if (agentConfig.maxIterations == null && def.maxIterations != null) agentConfig.maxIterations = def.maxIterations;
-        if (!agentConfig.thinkingLevel && def.thinkingLevel) agentConfig.thinkingLevel = def.thinkingLevel;
-        if (!agentConfig.approvalMode && def.approvalMode) agentConfig.approvalMode = def.approvalMode;
-        if ((!agentConfig.enabledToolIds || !agentConfig.enabledToolIds.length) && def.tools.length) {
-          agentConfig.enabledToolIds = def.tools;
-        }
-      }
-    } catch { /* 加载失败不阻断 */ }
-  }
+  // 本地形态读 ~/.tangu/agents;云端 worker 本地目录为空 → applyAgentActivation 经 brain.agents 兜底水合。
+  // 不存在/读失败不阻断 run。模型覆盖由客户端在激活时写入会话 model_id。
+  const { activeAgentSlug, memScopeSlug } = await applyAgentActivation(
+    agentConfig,
+    userId,
+    getAgent,
+    deps().brain.agents,
+  );
   // 把激活的 agent slug 穿透进 run 上下文:本地记忆层(remember/log_event/Historian)据此落到
   // ~/.tangu/agents/<slug>/;未选/无效 slug → 默认 agent。enterWith 覆盖整个异步子树。
   // memScopeSlug=共用默认时落 DEFAULT,否则该 agent 自己——保证「每个 agent 只写自己的(或显式共用默认的)」。
@@ -404,6 +387,8 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
   let finalReasoning = '';
   const allToolCalls: ToolCall[] = [];
   const allToolResults: any[] = [];
+  // agent 在对话区展示给用户的文件(display_file/generate_image/表情包);函数级声明,使 catch(中止)路径也能持久化。
+  const pendingDisplayFiles: DisplayFileItem[] = [];
   // 当前正在累积的助手消息 id;steer 注入时 finalize 当前段、改用新 id 续接下一段(见迭代循环)。
   let currentAssistantId = run.assistant_message_id || uuidv4();
 
@@ -631,7 +616,7 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
       const finalizedId = currentAssistantId;
       const finalizedContent = finalContent;
       if (finalContent.trim() || allToolCalls.length) {
-        await finalizeAssistantMessage(finalizedId, sessionId, modelId, finalContent, finalReasoning, allToolCalls, allToolResults);
+        await finalizeAssistantMessage(finalizedId, sessionId, modelId, finalContent, finalReasoning, allToolCalls, allToolResults, pendingDisplayFiles.splice(0));
       }
       for (const m of msgs) {
         await deps().state.insertUserMessage({
@@ -685,15 +670,26 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
     // user 图像消息追加到对话尾部(尾部追加 → 不动前缀,缓存安全;复用 toImageParts)。
     const pendingToolImages: { url: string }[] = [];
     const MAX_TOOL_IMAGES_PER_ROUND = 8;
+    // display_file / generate_image / 表情包:工具要展示给**用户**的文件。即时 publish 让桌面内联渲染;
+    // 累积到下一次 finalize 时随 assistant 消息落库(刷新会话仍在)。不回灌模型上下文、不计费。
+    // (pendingDisplayFiles 在函数级声明 → 中止/失败 catch 路径也能持久化。)
+    const MAX_DISPLAY_FILES_PER_RUN = 40;
     const toolCtx: ToolContext = {
       userId, sessionId, appId, runId, signal: ac.signal, customTools, mcpTools,
       enabledSkillIds, execMode, cwd, approvalMode, profile, modelId, planMode,
+      imageModelId: typeof agentConfig.imageModelId === 'string' ? agentConfig.imageModelId : undefined,
       muse: !!agentConfig.muse,
       // 激活的 agent 定义 slug → start_discussion 的「分身」据此取主 agent 人设(memScopeSlug 可能是共用默认,不可混用)。
       agentSlug: activeAgentSlug,
       collectImage: (img) => {
         if (img && typeof img.url === 'string' && img.url && pendingToolImages.length < MAX_TOOL_IMAGES_PER_ROUND) {
           pendingToolImages.push({ url: img.url });
+        }
+      },
+      displayFile: (item) => {
+        if (item && typeof item.name === 'string' && (item.path || item.dataUrl) && pendingDisplayFiles.length < MAX_DISPLAY_FILES_PER_RUN) {
+          pendingDisplayFiles.push(item);
+          void publish(runId, 'display_file', item); // 即时扇出给在线桌面端
         }
       },
     };
@@ -1045,7 +1041,7 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
 
     await finalizeAssistantMessage(
       currentAssistantId,
-      sessionId, modelId, finalContent, finalReasoning, allToolCalls, allToolResults,
+      sessionId, modelId, finalContent, finalReasoning, allToolCalls, allToolResults, pendingDisplayFiles.splice(0),
     );
     await flush(); // 先把会话工作区改动回写 Penzor，再发 done，保证客户端收到 done 时云端文件已就绪
     await drain(runId); // 确保 token 等事件全部落库后再发 done
@@ -1063,7 +1059,7 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
     // 喂给后续 run(否则被中断的这一轮凭空消失,用户与后续 agent 都读不到)。幂等 upsert,失败不二次抛。
     if (finalContent.trim() || allToolCalls.length) {
       await finalizeAssistantMessage(
-        currentAssistantId, sessionId, modelId, finalContent, finalReasoning, allToolCalls, allToolResults,
+        currentAssistantId, sessionId, modelId, finalContent, finalReasoning, allToolCalls, allToolResults, pendingDisplayFiles.splice(0),
       ).catch((e) => console.warn('[agent-core] persist partial on abort failed:', e));
     }
     // content 带上部分正文 → 在线前端把这条流式消息原地收尾为「已停止」,不丢已输出内容。
@@ -1089,9 +1085,10 @@ async function finalizeAssistantMessage(
   reasoning: string,
   toolCalls: ToolCall[],
   toolResults: any[],
+  displayFiles?: DisplayFileItem[],
 ): Promise<void> {
   await deps().state.finalizeAssistantMessage({
-    messageId, sessionId, modelId, content, reasoning, toolCalls, toolResults,
+    messageId, sessionId, modelId, content, reasoning, toolCalls, toolResults, displayFiles,
   });
 }
 

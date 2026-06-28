@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   tool_calls JSONB,
   tool_results JSONB,
   attachments JSONB,
+  display_files JSONB,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

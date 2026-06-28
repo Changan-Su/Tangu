@@ -7,9 +7,9 @@
  *
  * 同步文件 IO（与 tanguHome.loadTanguEnv 一致）；读失败一律降级为默认（缺文件是常态）。
  */
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { specialAgentsConfigFile } from '../core/tanguHome.js';
+import { getRawSection, saveSection } from '../core/config.js';
 
 export interface HistorianConfig {
   enabled: boolean;
@@ -137,6 +137,8 @@ export function normalizeConfig(raw: any): SpecialAgentsConfig {
 }
 
 export function loadSpecialAgentsConfig(): SpecialAgentsConfig {
+  const sec = getRawSection('specialAgents');
+  if (sec !== undefined) return normalizeConfig(sec);
   try {
     return normalizeConfig(JSON.parse(readFileSync(specialAgentsConfigFile(), 'utf8')));
   } catch {
@@ -144,16 +146,14 @@ export function loadSpecialAgentsConfig(): SpecialAgentsConfig {
   }
 }
 
-/** 深合并 patch（historian/muse 各自浅合并）后归一化并落盘；返回归一化后的全量配置。 */
+/** 深合并 patch（historian/muse 各自浅合并）后归一化并落 config.json 的 specialAgents 段；返回归一化全量。 */
 export function saveSpecialAgentsConfig(patch: Partial<SpecialAgentsConfig>): SpecialAgentsConfig {
   const cur = loadSpecialAgentsConfig();
   const merged: SpecialAgentsConfig = normalizeConfig({
     historian: { ...cur.historian, ...(patch.historian || {}) },
     muse: { ...cur.muse, ...(patch.muse || {}) },
   });
-  const file = specialAgentsConfigFile();
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify(merged, null, 2), 'utf8');
+  saveSection('specialAgents', merged);
   return merged;
 }
 

@@ -12,20 +12,58 @@ import { readFileSync } from 'node:fs';
 import { createTanguModule } from '../index.js';
 import { createNoopBilling } from '../adapters/standalone/noopBilling.js';
 import { createTanguProfile } from '../profiles/index.js';
-import { parseConfig, validate, HELP } from './config.js';
+import { parseConfig, validate, HELP, type StandaloneConfig } from './config.js';
 import { loadCreds } from './credStore.js';
 import { loadOAuthDirectProviders } from '../llm/providerOAuth.js';
-import { resolveSandboxMode, setupHost, buildBrain, fixLegacyAppIds } from './assemble.js';
+import { resolveSandboxMode, setupHost, buildBrain, fixLegacyAppIds, loadProviders } from './assemble.js';
 import { createMcpManager } from '../mcp/manager.js';
 import { createEngineManager } from '../engines/index.js';
-import { loadTanguEnv } from '../core/tanguHome.js';
+import { loadMcpConfig } from '../mcp/config.js';
+import { loadEngines, loadEnginePrefs } from '../engines/config.js';
+import { loadSpecialAgentsConfig } from '../services/specialAgentsConfig.js';
+import { loadTanguEnv, configFile } from '../core/tanguHome.js';
+import { migrateLegacyConfig } from '../core/config.js';
 import { activateAllPlugins } from '../plugins/bootstrap.js';
 import { seedBuiltinSkills } from '../skills/localSkills.js';
 
+/** --print-config:打印生效配置(config.json + env 叠加),token/apiKey 脱敏(仅留尾 4 位)。 */
+function maskSecret(s?: string): string {
+  if (!s) return '';
+  return s.length <= 8 ? '***' : `***${s.slice(-4)}`;
+}
+function printEffectiveConfig(cfg: StandaloneConfig): void {
+  const providers = loadProviders(cfg).map((p) => ({
+    providerId: p.providerId, baseUrl: p.baseUrl, apiKey: maskSecret(p.apiKey),
+    modelIds: p.modelIds, imageModelIds: p.imageModelIds, protocol: p.protocol,
+  }));
+  const mcp = Object.entries(loadMcpConfig().mcpServers).map(([name, s]: [string, any]) => ({
+    name, transport: s.transport || (s.command ? 'stdio' : 'http'), enabled: s.enabled !== false,
+  }));
+  const special = loadSpecialAgentsConfig();
+  const out = {
+    configFile: configFile(),
+    cloud: { url: cfg.cloudUrl, token: maskSecret(cfg.token), defaultModel: cfg.defaultModelId || '' },
+    database: { url: cfg.databaseUrl, dataDir: cfg.dataDir },
+    server: { port: cfg.port, host: cfg.host, userId: cfg.userId },
+    sandbox: cfg.sandbox,
+    providers,
+    mcp,
+    engines: loadEngines().map((e) => ({ id: e.id, name: e.name, command: e.command })),
+    enginePrefs: loadEnginePrefs(),
+    specialAgents: {
+      historian: { enabled: special.historian.enabled, modelId: special.historian.modelId },
+      muse: { enabled: special.muse.enabled, modelId: special.muse.modelId },
+    },
+  };
+  process.stdout.write(JSON.stringify(out, null, 2) + '\n');
+}
+
 async function main(): Promise<void> {
   loadTanguEnv(); // ~/.tangu/.env → process.env(不覆盖真实环境);须先于 parseConfig
+  migrateLegacyConfig(); // 首启把散落 legacy 配置收进 ~/.tangu/config.json(旧文件→.bak);幂等,须先于 parseConfig
   const cfg = parseConfig(process.argv.slice(2));
   if (cfg.showHelp) { process.stdout.write(HELP); return; }
+  if (cfg.printConfig) { printEffectiveConfig(cfg); return; }
   // 未显式给 token / cloud-url → 复用 `tangu-chat login` 存的凭证。
   const creds = loadCreds();
   if (!cfg.token) cfg.token = creds.token || '';

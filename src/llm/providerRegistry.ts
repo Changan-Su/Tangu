@@ -19,7 +19,8 @@ export interface DirectProvider {
   providerId: string; // 'openai' / 'ollama' / 'anthropic-compat' …(也用作 modelId 前缀)
   baseUrl: string; // OpenAI 兼容端点根(含 /v1,如 http://localhost:11434/v1);openaiCompat 会拼 /chat/completions
   apiKey?: string; // 直连厂商的用户自有 key;Ollama 等本地端点可省
-  modelIds?: string[]; // 可选:该 provider 的模型白名单(支持不带前缀直接用)
+  modelIds?: string[]; // 可选:该 provider 的 LLM 模型白名单(支持不带前缀直接用)
+  imageModelIds?: string[]; // 可选:该 provider 的生图模型白名单(generate_image 用;OpenAI 兼容 /images/generations)
   protocol?: DirectProviderProtocol; // 缺省 'openai';订阅登录据此切到原生端点
   accountId?: string; // Codex 订阅:chatgpt-account-id 头取值
 }

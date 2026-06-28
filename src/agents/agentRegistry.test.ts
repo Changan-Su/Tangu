@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseAgentFile, serializeAgent, slugify, isValidSlug, type NormalAgentDef } from './agentRegistry.js';
+import { parseAgentFile, serializeAgent, slugify, isValidSlug, parseAgentConfig, serializeAgentConfig, type NormalAgentDef } from './agentRegistry.js';
 
 describe('slugify / isValidSlug', () => {
   it('lowercases + hyphenates + strips', () => {
@@ -77,5 +77,23 @@ describe('serializeAgent ↔ parseAgentFile round-trip', () => {
     };
     const back = parseAgentFile('r', serializeAgent(def));
     expect(back).toEqual(def);
+  });
+});
+
+describe('config.toml apps tag (per-app 标签)', () => {
+  it('parses + normalizes apps array (小写/去空格)', () => {
+    expect(parseAgentConfig('x', 'name = "X"\napps = ["Echo", " tangu "]\n', '').apps).toEqual(['echo', 'tangu']);
+  });
+  it('missing apps → []', () => {
+    expect(parseAgentConfig('x', 'name = "X"\n', '').apps).toEqual([]);
+  });
+  it('survives serialize → parse round-trip', () => {
+    const def: NormalAgentDef = {
+      slug: 'r', name: 'R', description: '', model: '', tools: [],
+      thinkingLevel: '', maxIterations: null, approvalMode: '',
+      createdBy: 'user', createdAt: '2026-06-18T00:00:00.000Z', systemPrompt: 'p',
+      apps: ['echo'],
+    };
+    expect(parseAgentConfig('r', serializeAgentConfig(def), '').apps).toEqual(['echo']);
   });
 });

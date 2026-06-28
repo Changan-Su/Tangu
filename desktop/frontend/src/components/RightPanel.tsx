@@ -7,7 +7,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   FolderOpen, Folder, List, BookOpen, Download, Trash2, Upload, RefreshCw, FileText, Image as ImageIcon, Loader2, CornerLeftUp,
-  FolderPlus, Pencil, ExternalLink, Check, X, Eye, MessageCircle,
+  FolderPlus, Pencil, ExternalLink, Check, X, Eye, MessageCircle, ChevronDown, ChevronRight,
 } from 'lucide-react'
 import type { AgentConfig, SubChat, TanguDesktopConfig, UiMessage, WorkspaceFileMeta } from '../types'
 import { DEFAULT_AGENT_SLUG } from '../types'
@@ -36,9 +36,25 @@ export const RightPanel: React.FC<{
   onOpenPreview: (target: PreviewTarget) => void
   /** 当前会话的子聊天(discussion/subagent)实时内容,渲染在「子聊天」tab。 */
   subChats?: SubChat[]
+  /** 工作台(Dockview)模式:只渲染单一 surface(无内置 tab 条 / aside 外壳,由 Dockview tab 头代替)。 */
+  view?: Tab
 }> = (p) => {
   const { t } = useI18n()
   const [tab, setTab] = useState<Tab>('workspace')
+  const active: Tab = p.view ?? tab
+
+  const body = (
+    <>
+      {active === 'workspace' && <WorkspaceTab {...p} />}
+      {active === 'toc' && <ChatToc containerRef={p.chatScrollRef} scanTrigger={p.messages.length} />}
+      {active === 'memory' && <MemoryTab {...p} />}
+      {active === 'subchats' && <SubChatsTab cfg={p.cfg} subChats={p.subChats} />}
+    </>
+  )
+
+  // 工作台模式:单一 surface,Dockview 的 tab 头充当导航,这里只出 body。
+  if (p.view) return <div className="right-panel-body">{body}</div>
+
   return (
     <aside className="right-panel">
       <div className="right-panel-tabs">
@@ -54,16 +70,11 @@ export const RightPanel: React.FC<{
         <button className={tab === 'subchats' ? 'active' : ''} onClick={() => setTab('subchats')}>
           <MessageCircle size={13} /> {t('panel.tab.subchats')}
           {p.subChats && p.subChats.length > 0 && (
-            <span style={{ marginLeft: 3, fontSize: 9, fontWeight: 700, background: 'var(--accent)', color: '#fff', borderRadius: 8, padding: '0 4px', lineHeight: '14px' }}>{p.subChats.length}</span>
+            <span style={{ marginLeft: 3, fontSize: 9, fontWeight: 700, background: 'var(--accent)', color: 'var(--on-accent)', borderRadius: 8, padding: '0 4px', lineHeight: '14px' }}>{p.subChats.length}</span>
           )}
         </button>
       </div>
-      <div className="right-panel-body">
-        {tab === 'workspace' && <WorkspaceTab {...p} />}
-        {tab === 'toc' && <ChatToc containerRef={p.chatScrollRef} scanTrigger={p.messages.length} />}
-        {tab === 'memory' && <MemoryTab {...p} />}
-        {tab === 'subchats' && <SubChatsTab cfg={p.cfg} subChats={p.subChats} />}
-      </div>
+      <div className="right-panel-body">{body}</div>
     </aside>
   )
 }
@@ -499,44 +510,65 @@ const SandboxFilesTab: React.FC<{
   )
 }
 
-// ── 记忆·日志 ────────────────────────────────────────────────────────────────
+// ── 当前 Agent 记忆·日志 ──────────────────────────────────────────────────────
 
+/** 「当前 Agent 记忆」面板:随会话 agent 实时切换;群聊时列出所有参与 agent。
+ *  每个 agent 显示其记忆 + 最近 3 条日志(可折叠);单 agent 时可追加记忆。 */
 const MemoryTab: React.FC<{
   cfg: TanguDesktopConfig
   sessionConfig?: AgentConfig
   onToast: (t: string, e?: boolean) => void
 }> = ({ cfg, sessionConfig, onToast }) => {
+  // 群聊:所有参与 agent;否则只当前会话 agent(无则默认)。
+  const slugs = sessionConfig?.groupChat && sessionConfig.groupAgents?.length
+    ? Array.from(new Set(sessionConfig.groupAgents))
+    : [sessionConfig?.agentSlug || DEFAULT_AGENT_SLUG]
+  return (
+    <div>
+      {slugs.map((slug) => (
+        <AgentMemoryBlock key={slug} cfg={cfg} slug={slug} onToast={onToast} showName={slugs.length > 1} canAppend={slugs.length === 1} />
+      ))}
+    </div>
+  )
+}
+
+/** 单个 agent 的记忆 + 最近 3 条日志(每条折叠)。日志按「天」为一条,取最近 3 天。 */
+const AgentMemoryBlock: React.FC<{
+  cfg: TanguDesktopConfig
+  slug: string
+  onToast: (t: string, e?: boolean) => void
+  showName: boolean
+  canAppend: boolean
+}> = ({ cfg, slug, onToast, showName, canAppend }) => {
   const { t } = useI18n()
   const [memory, setMemory] = useState<string | null>(null)
-  const [log, setLog] = useState<{ date: string; content: string } | null>(null)
-  const [logDate, setLogDate] = useState('')
+  const [logs, setLogs] = useState<Array<{ date: string; content: string }>>([])
+  const [openDate, setOpenDate] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
-  // 当前会话 agent(无则默认);后端按 resolveMemorySlug 解析「共用默认」,这里只管传 slug。
-  const agentSlug = sessionConfig?.agentSlug || DEFAULT_AGENT_SLUG
 
   const refresh = useCallback(async () => {
     try {
-      setMemory(await api.getAgentMemory(cfg, agentSlug) || '')
+      setMemory(await api.getAgentMemory(cfg, slug))
     } catch (e: any) {
       setMemory(null)
       onToast(t('panel.toast.memoryLoadFail', { err: e?.message || e }), true)
     }
     try {
-      const d = new Date()
-      const date = logDate || `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-      setLog({ date, content: await api.getAgentLog(cfg, agentSlug, date) || '' })
-    } catch { /* log 可选 */ }
-  }, [cfg, agentSlug, logDate, onToast])
+      const dates = (await api.listAgentLogDates(cfg, slug)).slice().sort((a, b) => b.localeCompare(a)).slice(0, 3)
+      const entries = await Promise.all(dates.map(async (d) => ({ date: d, content: await api.getAgentLog(cfg, slug, d) })))
+      const nonEmpty = entries.filter((e) => e.content.trim())
+      setLogs(nonEmpty)
+      setOpenDate((cur) => cur ?? nonEmpty[0]?.date ?? null) // 默认展开最近一条
+    } catch { setLogs([]) }
+  }, [cfg, slug, onToast, t])
 
-  useEffect(() => {
-    void refresh()
-  }, [refresh])
+  useEffect(() => { void refresh() }, [refresh])
 
   const append = async () => {
     const text = draft.trim()
     if (!text) return
     try {
-      const r = await api.appendMemory(cfg, text, agentSlug)
+      const r = await api.appendMemory(cfg, text, slug)
       onToast(r.appended ? t('panel.toast.memorySaved') : t('panel.toast.memoryNotWritten'))
       setDraft('')
       void refresh()
@@ -546,11 +578,12 @@ const MemoryTab: React.FC<{
   }
 
   return (
-    <div>
-      <div className="panel-section-title">{t('panel.memory.title')}</div>
+    <div className="agentmem">
+      {showName && <div className="agentmem-agent">{slug}</div>}
+      <div className="panel-section-title">{t('panel.memory.currentAgent')}</div>
       {memory === null && <div className="panel-note">{t('panel.memory.notConnected')}</div>}
       {memory !== null && (
-        memory ? (
+        memory.trim() ? (
           <div style={{ fontSize: 12.5, padding: '0 8px' }} className="msg-content">
             <Markdown content={memory} />
           </div>
@@ -558,42 +591,41 @@ const MemoryTab: React.FC<{
           <div className="panel-note">{t('panel.memory.empty')}</div>
         )
       )}
-      <div style={{ display: 'flex', gap: 6, padding: '8px 8px 0' }}>
-        <input
-          type="text"
-          value={draft}
-          placeholder={t('panel.memory.appendPlaceholder')}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && void append()}
-          style={{
-            flex: 1, fontSize: 12.5, padding: '5px 8px', background: 'var(--bg-card)',
-            border: 'var(--border-width) solid var(--border)', borderRadius: 'var(--radius-sm)', outline: 'none',
-          }}
-        />
-        <button className="btn ghost sm" onClick={() => void append()}>{t('panel.memory.append')}</button>
-      </div>
-
-      <div className="panel-section-title" style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-        {t('panel.activityLog')}
-        <input
-          type="date"
-          value={logDate}
-          onChange={(e) => setLogDate(e.target.value)}
-          style={{
-            fontSize: 11, background: 'var(--bg-card)', color: 'var(--text-muted)',
-            border: 'var(--border-width) solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '1px 4px',
-          }}
-        />
-      </div>
-      {log && (
-        log.content ? (
-          <div style={{ fontSize: 12.5, padding: '0 8px' }} className="msg-content">
-            <Markdown content={log.content} />
-          </div>
-        ) : (
-          <div className="panel-note">{t('panel.log.empty', { date: log.date })}</div>
-        )
+      {canAppend && (
+        <div style={{ display: 'flex', gap: 6, padding: '8px 8px 0' }}>
+          <input
+            type="text"
+            value={draft}
+            placeholder={t('panel.memory.appendPlaceholder')}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && void append()}
+            style={{
+              flex: 1, fontSize: 12.5, padding: '5px 8px', background: 'var(--bg-card)',
+              border: 'var(--border-width) solid var(--border)', borderRadius: 'var(--radius-sm)', outline: 'none',
+            }}
+          />
+          <button className="btn ghost sm" onClick={() => void append()}>{t('panel.memory.append')}</button>
+        </div>
       )}
+
+      <div className="panel-section-title" style={{ marginTop: 14 }}>{t('panel.memory.recentLogs')}</div>
+      {logs.length === 0 && <div className="panel-note">{t('panel.log.none')}</div>}
+      {logs.map((lg) => {
+        const open = openDate === lg.date
+        return (
+          <div key={lg.date} className="agentmem-log">
+            <button className="agentmem-log-head" onClick={() => setOpenDate(open ? null : lg.date)}>
+              {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              <span>{lg.date}</span>
+            </button>
+            {open && (
+              <div className="agentmem-log-body msg-content">
+                <Markdown content={lg.content} />
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }

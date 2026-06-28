@@ -11,7 +11,7 @@
 import { Router } from 'express';
 import { authMiddleware, AuthRequest } from '../core/http.js';
 import { deps } from '../seams/runtime.js';
-import { listAgents, getAgent, saveAgent, deleteAgent, saveAgentAvatar, readAgentAvatar, readAgentsMeta, writeAgentsMeta, resolveMemorySlug, listLibraryFiles, readLibraryFile, writeLibraryFile, deleteLibraryFile } from '../agents/agentRegistry.js';
+import { listAgents, getAgent, saveAgent, deleteAgent, saveAgentAvatar, readAgentAvatar, deleteAgentAvatar, readAgentsMeta, writeAgentsMeta, resolveMemorySlug, listLibraryFiles, readLibraryFile, writeLibraryFile, deleteLibraryFile } from '../agents/agentRegistry.js';
 import path from 'node:path';
 import { agentsDir, readUserMd, writeUserMd } from '../core/tanguHome.js';
 import { createLocalMemoryStore } from '../adapters/standalone/localMemoryBrain.js';
@@ -122,6 +122,16 @@ router.get('/agent/agents/:slug/avatar', authMiddleware, async (req: AuthRequest
     res.send(av.data);
   } catch (e: any) {
     res.status(500).json({ detail: e?.message || 'read avatar failed' });
+  }
+});
+
+router.delete('/agent/agents/:slug/avatar', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    await deleteAgentAvatar(req.params.slug);
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(400).json({ detail: e?.message || 'delete avatar failed' });
   }
 });
 

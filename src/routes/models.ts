@@ -24,7 +24,8 @@ router.get('/agent/models', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const profile = deps().profile;
     // contextWindow 供客户端「上下文占比」进度条用(per-model 覆盖 ?? 全局默认)。
-    const models: Array<{ id: string; name: string; provider: string; source: 'forsion' | 'direct'; contextWindow: number }> = [];
+    // modelType 区分大语言模型 / 生图模型(后端已分类;桌面模型设置据此分区,generate_image 据此选模型)。
+    const models: Array<{ id: string; name: string; provider: string; source: 'forsion' | 'direct'; modelType: 'llm' | 'image_gen'; contextWindow: number }> = [];
 
     let forsion: { status: 'ok' | 'empty' | 'error'; detail: string | null } = { status: 'ok', detail: null };
     let cloud: any[] = [];
@@ -45,7 +46,7 @@ router.get('/agent/models', authMiddleware, async (req: AuthRequest, res) => {
     }
     for (const m of cloud) {
       if (!m?.id) continue;
-      models.push({ id: m.id, name: m.name || m.id, provider: m.provider || 'forsion', source: 'forsion', contextWindow: modelContextWindow(m.id, m) });
+      models.push({ id: m.id, name: m.name || m.id, provider: m.provider || 'forsion', source: 'forsion', modelType: m.modelType === 'image_gen' ? 'image_gen' : 'llm', contextWindow: modelContextWindow(m.id, m) });
     }
     if (forsion.status === 'ok' && cloud.length === 0) {
       // 列表为空:探针确认大脑是否可达(httpBrain 把网络/404 都吞成 [],此处补真相)。
@@ -62,7 +63,10 @@ router.get('/agent/models', authMiddleware, async (req: AuthRequest, res) => {
     const directProviders = deps().brain.models.listDirectProviders?.() ?? [];
     for (const p of directProviders) {
       for (const mid of p.modelIds ?? []) {
-        models.push({ id: mid, name: mid, provider: p.providerId, source: 'direct', contextWindow: modelContextWindow(mid) });
+        models.push({ id: mid, name: mid, provider: p.providerId, source: 'direct', modelType: 'llm', contextWindow: modelContextWindow(mid) });
+      }
+      for (const mid of p.imageModelIds ?? []) {
+        models.push({ id: mid, name: mid, provider: p.providerId, source: 'direct', modelType: 'image_gen', contextWindow: 0 });
       }
     }
 

@@ -39,6 +39,12 @@ export interface NoticeItem {
 }
 export type TranscriptItem = UserItem | AssistantItem | NoticeItem;
 
+/** 会话 todo 清单项（todo_write 工具发的 `todo` 事件载荷;形状与 builtin/todo.ts 一致,这里复刻避免 tui→tools 耦合）。 */
+export interface TodoItem {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+}
+
 export type ApprovalMode = 'readonly' | 'auto-edit' | 'full-auto';
 
 export interface PendingApproval {
@@ -70,6 +76,8 @@ export interface UiState {
   usage: { total: number; cost: number; cached: number; lastPrompt: number };
   approval: PendingApproval | null;
   inquiry: PendingInquiry | null;
+  /** 当前会话 todo 清单（todo 事件实时刷新;常驻面板渲染）。 */
+  todos: TodoItem[];
 }
 
 export type UiAction =
@@ -86,6 +94,8 @@ export type UiAction =
   | { type: 'APPROVAL_CLEAR' }
   | { type: 'INQUIRY'; inquiry: PendingInquiry }
   | { type: 'INQUIRY_CLEAR' }
+  | { type: 'TODO'; todos: TodoItem[] }
+  | { type: 'GROUP_NOTE'; text: string; tone?: NoticeItem['tone'] }
   | { type: 'DONE' }
   | { type: 'ERROR'; msg: string; aborted?: boolean }
   | { type: 'CLEAR_ITEMS' }

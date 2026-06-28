@@ -9,6 +9,7 @@ import { promises as fsp } from 'node:fs';
 import { v4 as uuidv4, v5 as uuidv5 } from 'uuid';
 import { query } from '../core/db.js';
 import { tanguHome } from '../core/tanguHome.js';
+import { getRawSection } from '../core/config.js';
 import { deps } from '../seams/runtime.js';
 import { createRun } from './runStore.js';
 import { abortRun, enqueueRun } from './agentLoop.js';
@@ -49,17 +50,21 @@ const LOGIN_TTL_MS = 8 * 60_000;
 const RUN_REPLY_TIMEOUT_MS = 180_000;
 const activeRunsByPeer = new Map<string, string>();
 
+// 微信设置:config.json 的 wechat 段为底,env(TANGU_WECHAT_*)覆盖(桌面注入 / 运维)。
+function wechatCfg(): any { return getRawSection('wechat') || {}; }
+
 function enabled(): boolean {
-  return process.env.TANGU_WECHAT_ENABLED !== '0';
+  if (process.env.TANGU_WECHAT_ENABLED !== undefined) return process.env.TANGU_WECHAT_ENABLED !== '0';
+  return wechatCfg().enabled !== false; // 默认开(与旧 env 行为一致;桌面总是显式注入)
 }
 
 function defaultApprovalMode(): ApprovalMode {
-  const v = String(process.env.TANGU_WECHAT_REMOTE_APPROVAL_MODE || 'readonly');
+  const v = String(process.env.TANGU_WECHAT_REMOTE_APPROVAL_MODE || wechatCfg().remoteApprovalMode || 'readonly');
   return v === 'auto-edit' || v === 'full-auto' ? v : 'readonly';
 }
 
 function stateDir(): string {
-  return process.env.TANGU_WECHAT_STATE_DIR || path.join(tanguHome(), 'wechat');
+  return process.env.TANGU_WECHAT_STATE_DIR || wechatCfg().stateDir || path.join(tanguHome(), 'wechat');
 }
 
 /**
@@ -68,7 +73,7 @@ function stateDir(): string {
  * 导致微信触发的 run 在错误目录乱跑 / 无有效回复。
  */
 function defaultWorkspaceDir(): string {
-  const v = (process.env.TANGU_DEFAULT_WORKSPACE || '').trim();
+  const v = (process.env.TANGU_DEFAULT_WORKSPACE || (getRawSection('workspace') as string) || '').trim();
   return v || path.join(homedir(), 'Tangu');
 }
 

@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { assertPublicHttpUrl } from '../../core/util/urlSafety.js';
 import { tanguHome } from '../../core/tanguHome.js';
+import { getRawSection } from '../../core/config.js';
 import type { ToolProvider } from '../toolRegistry.js';
 import type { ToolContext } from '../toolTypes.js';
 
@@ -28,27 +29,35 @@ interface BrowserCommandResult {
   stderr?: string;
 }
 
+// 浏览器设置:config.json 的 browser 段为底,env(TANGU_BROWSER_*)覆盖(运维逃生口 / 桌面注入)。
+function browserCfg(): any { return getRawSection('browser') || {}; }
+
 function browserEnabled(): boolean {
-  return process.env.TANGU_BROWSER_ENABLED !== '0';
+  if (process.env.TANGU_BROWSER_ENABLED !== undefined) return process.env.TANGU_BROWSER_ENABLED !== '0';
+  return browserCfg().enabled !== false; // 默认开
 }
 
 function allowPrivateUrls(): boolean {
-  return ['1', 'true', 'yes', 'on'].includes(String(process.env.TANGU_BROWSER_ALLOW_PRIVATE_URLS || '').toLowerCase());
+  if (process.env.TANGU_BROWSER_ALLOW_PRIVATE_URLS !== undefined)
+    return ['1', 'true', 'yes', 'on'].includes(String(process.env.TANGU_BROWSER_ALLOW_PRIVATE_URLS).toLowerCase());
+  return browserCfg().allowPrivateUrls === true; // 默认禁私网
 }
 
 function browserEngine(): BrowserEngine {
-  const v = String(process.env.TANGU_BROWSER_ENGINE || 'auto').toLowerCase();
+  const v = String(process.env.TANGU_BROWSER_ENGINE || browserCfg().engine || 'auto').toLowerCase();
   return v === 'chrome' || v === 'lightpanda' ? v : 'auto';
 }
 
 function searchEngine(): SearchEngine {
-  const v = String(process.env.TANGU_BROWSER_SEARCH_ENGINE || 'duckduckgo').toLowerCase();
+  const v = String(process.env.TANGU_BROWSER_SEARCH_ENGINE || browserCfg().searchEngine || 'duckduckgo').toLowerCase();
   return v === 'bing' || v === 'google' || v === 'baidu' ? v : 'duckduckgo';
 }
 
 function commandTimeout(): number {
-  const v = Number(process.env.TANGU_BROWSER_COMMAND_TIMEOUT_MS);
-  return Number.isFinite(v) && v >= 5_000 ? v : DEFAULT_TIMEOUT_MS;
+  const envV = Number(process.env.TANGU_BROWSER_COMMAND_TIMEOUT_MS);
+  if (Number.isFinite(envV) && envV >= 5_000) return envV;
+  const cfgV = Number(browserCfg().commandTimeoutMs);
+  return Number.isFinite(cfgV) && cfgV >= 5_000 ? cfgV : DEFAULT_TIMEOUT_MS;
 }
 
 function sessionName(ctx: ToolContext): string {

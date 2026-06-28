@@ -1,0 +1,341 @@
+/**
+ * 引擎 chrome 样式 + Dockview 的 LCL 皮肤桥接。全部走 LCL token 契约,故随换肤/明暗/扁平自动流动。
+ * 默认「扁平纸张 Lovable」;soft 语言(data-theme=soft)由 theme.css 给浮卡观感 + Dockview gap。
+ */
+
+/* ===== 外壳骨架 ===== */
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+}
+/* macOS 标题条:默认不占位;mac 下显条 30px 可拖拽,交通灯落其中,标签栏整体下移避让。 */
+.shell-titlebar { display: none; }
+[data-platform='mac'] .shell-titlebar {
+  display: block;
+  height: 30px;
+  flex-shrink: 0;
+  -webkit-app-region: drag;
+  background: var(--sidebar-bg);
+  border-bottom: var(--border-width, 1px) solid var(--border);
+}
+.shell-top {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+.shell-work {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+/* 引导结束 → 主界面一次性入场(淡入 + 轻微放大),与引导退场叠化衔接。 */
+.main-enter { animation: main-rise .55s cubic-bezier(.2, .8, .2, 1) both; transform-origin: center; }
+@keyframes main-rise { from { opacity: 0; transform: scale(.985); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .main-enter { animation: none; } }
+
+/* ===== Ribbon(左固定竖条) ===== */
+.rb {
+  width: 44px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  background: var(--sidebar-bg);
+  border-right: var(--border-width, 1px) solid var(--border);
+  /* 顶部交通灯避让:mac 下只在 ribbon 顶部留空(交通灯落此),中间 tab 栏 / 右栏直接顶到最上,免中/右留白。 */
+  -webkit-app-region: drag;
+}
+[data-platform='mac'] .rb { padding-top: 30px; }
+/* mac:交通灯落在 ribbon 左上角,会越过 44px ribbon 约 20px → 仅把紧邻 ribbon 的「左」侧栏图标 tab 右移避让
+ * (右栏远离交通灯,不动 → 用 .wb-tab--left 精确只命中左栏组)。 */
+[data-platform='mac'] .dockview-theme-lcl .dv-groupview:has(.wb-tab--left) .dv-tabs-and-actions-container { padding-left: 26px; }
+.rb-group { display: flex; flex-direction: column; gap: 4px; align-items: center; }
+.rb-btn {
+  -webkit-app-region: no-drag;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm, 8px);
+  cursor: pointer;
+  transition: background var(--duration-fast, 0.15s), color var(--duration-fast, 0.15s);
+}
+.rb-btn:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.1)); color: var(--text); }
+
+/* ===== 状态栏(底固定条) ===== */
+.sb {
+  height: 24px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  gap: 12px;
+  background: var(--sidebar-bg);
+  border-top: var(--border-width, 1px) solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.sb-group { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.sb-right { justify-content: flex-end; }
+.sb-item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+
+/* ===== 视图容器 ===== */
+.wb-view { width: 100%; height: 100%; display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: auto; }
+/* 切换主 view 的丝滑淡入(激活时由 ViewHost 重放)。 */
+@keyframes wb-view-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.wb-view.wb-view-enter { animation: wb-view-enter 0.22s cubic-bezier(0.2, 0.8, 0.3, 1); }
+@media (prefers-reduced-motion: reduce) { .wb-view.wb-view-enter { animation: none; } }
+
+/* ===== 命令面板浮层 ===== */
+.cmd-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 14vh;
+  background: var(--overlay-medium, rgba(0, 0, 0, 0.28));
+  backdrop-filter: blur(2px);
+}
+.cmd-panel {
+  width: min(560px, 92vw);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card, var(--bg));
+  border: var(--border-width, 1px) solid var(--border);
+  border-radius: var(--radius-md, 12px);
+  box-shadow: var(--card-shadow, 0 12px 40px rgba(0, 0, 0, 0.25));
+  overflow: hidden;
+}
+.cmd-input {
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  padding: 14px 16px;
+  border-bottom: var(--border-width, 1px) solid var(--border);
+}
+.cmd-list { overflow-y: auto; padding: 6px; }
+.cmd-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  text-align: left;
+  border-radius: var(--radius-sm, 8px);
+  cursor: pointer;
+}
+.cmd-item[data-active] { background: var(--accent-light, var(--overlay-light, rgba(127, 127, 127, 0.12))); }
+.cmd-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmd-hotkey, .cmd-foot kbd {
+  font-size: 11px;
+  color: var(--text-faint, var(--text-muted));
+  background: var(--overlay-light, rgba(127, 127, 127, 0.12));
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.cmd-empty { padding: 16px; text-align: center; color: var(--text-muted); font-size: 13px; }
+.cmd-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 12px;
+  border-top: var(--border-width, 1px) solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.cmd-foot kbd { margin: 0 1px; }
+
+/* ===== Dockview 的 LCL 皮肤:把 --dv-* 别名到 LCL token(叠在 dockview-theme-light|dark 之上) ===== */
+.dockview-theme-lcl {
+  --dv-tabs-and-actions-container-height: 36px;
+  --dv-background-color: var(--bg);
+  --dv-group-view-background-color: var(--bg);
+  --dv-tabs-and-actions-container-background-color: var(--sidebar-bg);
+  /* 透明:激活组的激活 tab 底由内层 .wb-tab 圆角胶囊提供;若给本变量上色,Dockview 通用高优先级规则
+     会把方形底铺到外层 .dv-tab(radius:0)上 → 焦点在主区时 tab 变方。见 .wb-tab 激活规则。 */
+  --dv-activegroup-visiblepanel-tab-background-color: transparent;
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-activegroup-visiblepanel-tab-color: var(--text);
+  --dv-activegroup-hiddenpanel-tab-color: var(--text-muted);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--text-muted);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--text-faint, var(--text-muted));
+  --dv-tab-divider-color: transparent;
+  --dv-separator-border: transparent; /* 组间分割线去掉 → 改为间隙 + 圆角浮卡(见 .dv-groupview) */
+  --dv-active-sash-color: var(--accent);
+  --dv-paneview-active-outline-color: var(--accent);
+  --dv-icon-hover-background-color: var(--overlay-light, rgba(127, 127, 127, 0.1));
+  --dv-floating-box-shadow: var(--card-shadow, 0 8px 24px rgba(0, 0, 0, 0.2));
+  --dv-tabs-container-scrollbar-color: var(--overlay-medium, rgba(127, 127, 127, 0.3));
+  --dv-drag-over-background-color: var(--accent-light, rgba(127, 127, 127, 0.12));
+  --dv-drag-over-border-color: var(--accent);
+  --dv-tab-close-icon-color: var(--text-faint, var(--text-muted));
+  --dv-border-radius: var(--radius-md, 12px);
+}
+.wb-dockview { width: 100%; height: 100%; }
+
+/* 组间分割线已去(--dv-separator-border 透明)。侧栏 / tab 栏一律保持扁平,无圆角无卡片 —— 周边即统一背景。
+ * 仅「中心主区」的内容(不含 tab 栏)做成浮在背景上的圆角面板:
+ *   content-container = 背景(同 --sidebar-bg,与侧栏连成一片) + 内边距 → 露出四周;
+ *   react-part = 纸面(--bg)+ 圆角 + 裁切。tab 栏在其上方,保持扁平满铺。 */
+.dockview-theme-lcl .dv-groupview:not(:has(.wb-tab--icon)) .dv-content-container {
+  background: var(--sidebar-bg);
+  padding: 8px;
+}
+.dockview-theme-lcl .dv-groupview:not(:has(.wb-tab--icon)) .dv-content-container > .dv-react-part {
+  border-radius: var(--radius-lg, 14px);
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* 标签栏:内容垂直居中(修「偏上」);命名标签 = 圆角胶囊(激活浅底+圆角,无顶部细线)。 */
+.dockview-theme-lcl .dv-tabs-and-actions-container {
+  border-bottom: var(--border-width, 1px) solid var(--border);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  height: 36px;
+  min-height: 36px;
+  align-items: center;
+  padding: 0 4px;
+}
+.dockview-theme-lcl .dv-tabs-container .dv-tab {
+  padding: 0 3px;
+  min-width: 0;
+  border-radius: 0;
+  background: transparent;
+  position: relative;
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+  transition: color var(--duration-fast, 0.15s), background var(--duration-fast, 0.15s);
+}
+.dockview-theme-lcl .dv-tab:hover { color: var(--text); }
+/* 命名标签(非图标 tab)圆角胶囊本体在 .wb-tab 上 */
+.dockview-theme-lcl .dv-tab:not(:has(.wb-tab--icon)) .wb-tab {
+  padding: 5px 12px;
+  border-radius: var(--radius-md, 10px);
+  transition: background var(--duration-fast, 0.15s), color var(--duration-fast, 0.15s);
+}
+.dockview-theme-lcl .dv-tab:not(:has(.wb-tab--icon)):hover .wb-tab { background: var(--overlay-light, rgba(127, 127, 127, 0.1)); }
+.dockview-theme-lcl .dv-tab.dv-active-tab:not(:has(.wb-tab--icon)) .wb-tab {
+  background: var(--bg-card, var(--bg));
+  color: var(--text);
+  box-shadow: var(--icon-shadow, 0 1px 2px rgba(0, 0, 0, 0.06));
+}
+/* 去掉旧的方形激活底 + 顶部 accent 细线 */
+.dockview-theme-lcl .dv-tab.dv-active-tab { background: transparent; box-shadow: none; }
+.dockview-theme-lcl .dv-tab.dv-active-tab::before { display: none; }
+
+/* Surface tab 内容 = 图标 + 名称(关闭走右键菜单,无内联 ×) */
+.wb-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 2px;
+  max-width: 100%;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: inherit;
+}
+.wb-tab-ic { flex-shrink: 0; opacity: 0.85; }
+.wb-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ＋新建标签:放在所有 tab 之后(reorder 让 right-actions 紧跟 tabs,void 仍在其后填充 →
+ * 既「在所有 tab 后面」又不靠最右(避免与右栏折叠钮重叠),且保留空白拖拽区。 */
+.dockview-theme-lcl .dv-tabs-and-actions-container > .dv-tabs-container { order: 1; }
+.dockview-theme-lcl .dv-tabs-and-actions-container > .dv-right-actions-container { order: 2; }
+.dockview-theme-lcl .dv-tabs-and-actions-container > .dv-void-container { order: 3; }
+
+/* 主区标签栏左前缀:左栏折叠钮 */
+.dv-prefix { display: inline-flex; align-items: center; gap: 2px; padding-left: 4px; }
+.dv-new-tab,
+.dv-edge-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px;
+  border-radius: var(--radius-sm, 8px);
+  color: var(--text-muted); cursor: pointer; flex-shrink: 0;
+  transition: background var(--duration-fast, 0.15s), color var(--duration-fast, 0.15s);
+}
+.dv-new-tab { margin: 0 4px; }
+.dv-new-tab:hover,
+.dv-edge-toggle:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.1)); color: var(--text); }
+/* 右栏折叠钮:浮在工作区右上角(=右panel最右缘),收起后仍在原处。 */
+.dv-edge-right {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  z-index: 6;
+  -webkit-app-region: no-drag;
+  background: var(--sidebar-bg);
+}
+
+/* 侧栏图标-only tab:仅图标(名入 tooltip),贴合 Obsidian 侧栏,免文字 tab 溢出 */
+.wb-tab--icon { gap: 0; padding: 0 5px; }
+.wb-tab--icon .wb-tab-ic { opacity: 1; }
+
+/* 侧栏(图标 tab)组:把 Dockview 的「激活组激活 tab」白底变量清零 —— 否则点击侧栏图标 tab 使其组成为
+ * 激活组时,Dockview 会给激活 tab 刷 --bg-card(白)方块,且按变量机制盖过逐元素 background 覆写。
+ * 直接在含 .wb-tab--icon 的组上把这些 tab 底变量设透明,从根上消除白方块(激活态仅用 accent 着色表达)。 */
+.dockview-theme-lcl .dv-groupview:has(.wb-tab--icon) {
+  --dv-activegroup-visiblepanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+}
+
+/* 侧栏 tab 是紧凑图标胶囊：激活背景只包图标，不使用 Dockview 整高矩形。 */
+.dockview-theme-lcl .dv-tab:has(.wb-tab--icon) {
+  padding: 3px 2px;
+  background: transparent;
+  overflow: visible;
+}
+.dockview-theme-lcl .dv-tab:has(.wb-tab--icon).dv-active-tab {
+  background: transparent;
+}
+.dockview-theme-lcl .dv-tab:has(.wb-tab--icon).dv-active-tab::before {
+  display: none;
+}
+.wb-tab--icon {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 8px;
+  transition: background var(--duration-fast, 0.15s), color var(--duration-fast, 0.15s);
+}
+.dockview-theme-lcl .dv-tab:hover .wb-tab--icon {
+  background: var(--overlay-light, rgba(127, 127, 127, 0.1));
+}
+/* 激活态只用 accent 着色,不填方块底 —— 融入背景,不突兀(去掉之前的胶囊底)。 */
+.dockview-theme-lcl .dv-tab.dv-active-tab .wb-tab--icon {
+  color: var(--accent);
+  background: transparent;
+}

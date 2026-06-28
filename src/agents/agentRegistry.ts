@@ -18,6 +18,7 @@ import { mkdirSync, existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { agentsDir, memoryDir, userMdFile, DEFAULT_AGENT_SLUG } from '../core/tanguHome.js';
+import { DEFAULT_AGENT_AVATAR_B64, DEFAULT_AGENT_AVATAR_MIME } from './defaultAvatar.js';
 
 export type ThinkLevel = 'off' | 'low' | 'medium' | 'high' | '';
 export type ApprovalMode = 'readonly' | 'auto-edit' | 'full-auto' | '';
@@ -48,6 +49,8 @@ export interface NormalAgentDef {
   shareDefaultMemory?: boolean;
   /** 开启云同步:该 agent 的全部文件(定义/记忆/日志/Library)跨设备完全镜像(newest-wins);默认/false=纯本地。 */
   cloudSync?: boolean;
+  /** 该 agent 支持/出现于哪些 app(小写,如 ["echo"]);空=不限制(由调用方默认)。来自 config.toml apps。 */
+  apps?: string[];
 }
 
 /** 记忆/日志作用域 slug:共用默认 → DEFAULT_AGENT_SLUG;否则该 agent 自己。 */
@@ -144,6 +147,9 @@ export function parseAgentConfig(slug: string, tomlRaw: string, soul: string): N
   const libraryOrder = Array.isArray(meta.library_order)
     ? meta.library_order.filter((t: any) => typeof t === 'string' && t.trim())
     : [];
+  const apps = Array.isArray(meta.apps)
+    ? meta.apps.filter((t: any) => typeof t === 'string' && t.trim()).map((t: string) => t.trim().toLowerCase())
+    : [];
   const effort = str(meta.model_reasoning_effort);
   const think = (THINK.includes(effort as ThinkLevel) ? effort : '') as ThinkLevel;
   const appr = str(meta.approval_mode);
@@ -166,6 +172,7 @@ export function parseAgentConfig(slug: string, tomlRaw: string, soul: string): N
     avatar: str(meta.avatar) || undefined,
     shareDefaultMemory: !!meta.share_default_memory,
     cloudSync: !!meta.cloud_sync,
+    apps,
   };
 }
 
@@ -186,6 +193,7 @@ export function serializeAgentConfig(def: NormalAgentDef): string {
   if (def.maxIterations != null) obj.max_iterations = def.maxIterations;
   if (def.tools.length) obj.tools = def.tools;
   if (def.libraryOrder && def.libraryOrder.length) obj.library_order = def.libraryOrder;
+  if (def.apps && def.apps.length) obj.apps = def.apps;
   if (def.avatar) obj.avatar = def.avatar;
   if (def.shareDefaultMemory) obj.share_default_memory = true;
   if (def.cloudSync) obj.cloud_sync = true;
@@ -244,15 +252,15 @@ async function dirStamp(dir: string): Promise<string> {
 export const DEFAULT_AGENTS: Array<Pick<NormalAgentDef, 'slug' | 'name' | 'description' | 'systemPrompt'> & Partial<NormalAgentDef>> = [
   {
     slug: DEFAULT_AGENT_SLUG,
-    name: 'Tangu Xyra',
+    name: 'Tangu Arioso',
     description: 'Tangu 默认助手,承载你的长期记忆与日志',
     thinkingLevel: 'low',
     systemPrompt:
-      "You are Tangu Xyra — the user's default AI assistant. Reliable, restrained, and pragmatic: answer accurately and clearly, think through multi-step tasks before acting, " +
+      "You are Tangu Arioso — the user's default AI assistant. Reliable, restrained, and pragmatic: answer accurately and clearly, think through multi-step tasks before acting, " +
       'and state uncertainty honestly rather than making things up. You have your own long-term memory and logs: use remember to record user facts/preferences worth keeping long-term, ' +
       "and use log_event to record completed work/conclusions in the current day's log.",
     soul:
-      '# Tangu Xyra\n\nCalm, focused, and warm. Like a long-term companion assistant: remembers the user\'s preferences and history, and thinks things through before acting.\n' +
+      '# Tangu Arioso\n\nCalm, focused, and warm. Like a long-term companion assistant: remembers the user\'s preferences and history, and thinks things through before acting.\n' +
       "Speaks concisely without rambling; when uncertain, says so honestly without fabricating; respects the user's time and replies in the user's language by default.",
   },
   {
@@ -304,6 +312,38 @@ async function writeAgentScaffold(a: (typeof DEFAULT_AGENTS)[number]): Promise<v
   }
 }
 
+/** 默认 agent 显式删头像的标记:存在则 ensureXyraDefaults 不再自动补种(由 deleteAgentAvatar 写入)。 */
+const avatarRemovedMarker = (): string => path.join(agentsDir(), DEFAULT_AGENT_SLUG, '.avatar-removed');
+
+/** 让已存在的默认 agent 平滑跟随内置默认(每次启动幂等运行):
+ *  ① 品牌改名:把 name/systemPrompt/SOUL 里的字面 "Tangu Xyra" → "Tangu Arioso"(只动这串,不碰用户其余文字;
+ *     已是新名则 no-op,用户改过名则不含该串、不受影响)。
+ *  ② 默认头像自愈:只要「没有可用头像文件」(config.avatar 未设,或指向的文件已丢失=旧 marker 误判/被外部删)
+ *     就补种内置默认头像;唯一例外是用户经设置显式删过(.avatar-removed)。这样 config 指向却丢文件的 404 会自动修复。 */
+async function ensureXyraDefaults(): Promise<void> {
+  const cur = await getAgent(DEFAULT_AGENT_SLUG);
+  if (!cur) return;
+  const rebrand = (s: string | undefined): string => (s || '').split('Tangu Xyra').join('Tangu Arioso');
+  const name = rebrand(cur.name), systemPrompt = rebrand(cur.systemPrompt), soul = rebrand(cur.soul);
+  if (name !== cur.name || systemPrompt !== cur.systemPrompt || soul !== cur.soul) {
+    await saveAgent({
+      slug: DEFAULT_AGENT_SLUG, name, description: cur.description, model: cur.model, tools: cur.tools,
+      thinkingLevel: cur.thinkingLevel, maxIterations: cur.maxIterations, approvalMode: cur.approvalMode,
+      systemPrompt, soul, avatar: cur.avatar, createdBy: cur.createdBy,
+      shareDefaultMemory: cur.shareDefaultMemory, cloudSync: cur.cloudSync,
+    });
+  }
+  if (existsSync(avatarRemovedMarker())) return; // 用户显式删过 → 尊重,不补种
+  const a = await getAgent(DEFAULT_AGENT_SLUG);
+  const avatarFile = a?.avatar
+    ? path.join(agentsDir(), DEFAULT_AGENT_SLUG, a.avatar.includes('/') ? a.avatar : path.join('Library', a.avatar))
+    : null;
+  const avatarOk = !!avatarFile && existsSync(avatarFile);
+  if (!avatarOk) {
+    await saveAgentAvatar(DEFAULT_AGENT_SLUG, DEFAULT_AGENT_AVATAR_B64, DEFAULT_AGENT_AVATAR_MIME).catch(() => { /* ignore */ });
+  }
+}
+
 /** 首启播种默认 agent 为文件夹。**默认 agent(xyra)无视 .seeded marker 总是补齐**——老用户(旧扁平时代
  *  已写过 .seeded)升级后也保证有完整的 xyra(config.toml + SOUL.md + Library);其余默认 agent 受 marker
  *  守护(删了不复活)。 */
@@ -311,6 +351,7 @@ async function seedDefaultAgentsOnce(): Promise<void> {
   mkdirSync(agentsDir(), { recursive: true });
   const xyra = DEFAULT_AGENTS.find((a) => a.slug === DEFAULT_AGENT_SLUG);
   if (xyra) await writeAgentScaffold(xyra);
+  await ensureXyraDefaults().catch(() => { /* ignore */ });
   const marker = path.join(agentsDir(), '.seeded');
   if (existsSync(marker)) return;
   for (const a of DEFAULT_AGENTS) {
@@ -600,6 +641,29 @@ export async function readAgentAvatar(slug: string): Promise<{ data: Buffer; mim
   } catch {
     return null;
   }
+}
+
+/** 删除头像:移除 Library/avatar.* 并清空 config.avatar(保留其余字段)。无头像时也按成功返回。 */
+export async function deleteAgentAvatar(slug: string): Promise<boolean> {
+  if (!isValidSlug(slug)) throw new Error('invalid slug');
+  const cur = await getAgent(slug);
+  if (!cur) throw new Error('agent not found');
+  const libDir = path.join(agentsDir(), slug, 'Library');
+  try {
+    for (const f of await fs.readdir(libDir)) {
+      if (/^avatar\.(png|jpe?g|gif|webp)$/i.test(f)) await fs.rm(path.join(libDir, f), { force: true }).catch(() => { /* ignore */ });
+    }
+  } catch { /* 目录不存在 → 无文件可删 */ }
+  await saveAgent({
+    slug, name: cur.name, description: cur.description, model: cur.model, tools: cur.tools,
+    thinkingLevel: cur.thinkingLevel, maxIterations: cur.maxIterations, approvalMode: cur.approvalMode,
+    systemPrompt: cur.systemPrompt, soul: cur.soul, avatar: '', createdBy: cur.createdBy,
+  });
+  // 默认 agent:记下「用户显式删过」,否则下次启动 ensureXyraDefaults 会把内置默认头像补回来。
+  if (slug === DEFAULT_AGENT_SLUG) {
+    await fs.writeFile(avatarRemovedMarker(), new Date().toISOString(), 'utf-8').catch(() => { /* ignore */ });
+  }
+  return true;
 }
 
 // ── Library 文件管理(通用参考资料 + avatar)。设置面板增删改查;Agent 经文件工具读写同一目录。──

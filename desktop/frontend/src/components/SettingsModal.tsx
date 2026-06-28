@@ -2,35 +2,41 @@
  * 设置页:连接 / 模型 / MCP / Browser / WeChat / 主题 / 高级。
  * 在 Desktop 主界面内替换 Chat/Inspector 区域，而不是覆盖式弹窗。
  */
-import React, { useEffect, useState } from 'react'
-import { X, Loader2, RefreshCw, Sun, Moon, RotateCcw, LogIn, LogOut, ExternalLink, KeyRound, Plus, Trash2, Plug, Search, Download, Sparkles, Wrench, Check, Globe2, QrCode, Smartphone } from 'lucide-react'
+import React, { useCallback, useEffect, useState } from 'react'
+import { X, ArrowLeft, Loader2, RefreshCw, Sun, Moon, RotateCcw, LogIn, LogOut, ExternalLink, KeyRound, Plus, Trash2, Plug, Search, Download, Sparkles, Wrench, Check, Globe2, QrCode, Smartphone, FolderOpen } from 'lucide-react'
 import { ThemeCard } from './ThemeCard'
-import { listThemes } from '../theme/registry'
+import { listLanguages, listSkins } from '../theme/registry'
 import { applyTheme } from '../theme/loader'
+import { useWorkspace } from '../engine' // 工作区引擎:恢复默认布局
 import { testConnection } from '../services/agentRunService'
 import {
   deleteUserCloudSkill, disconnectWechat as disconnectWechatAccount, fetchProviderModels,
   getWechatStatus, listModels, listSkills, listTools, pollWechatLogin, startWechatLogin,
   testProviderConnection, uploadSkillToCloud, syncNow as backendSyncNow, getSyncStatus as backendGetSyncStatus,
-  type SyncStatusResult,
+  listPlugins, listAgents, type PluginInfo, type SyncStatusResult,
 } from '../services/backendService'
 import type { WechatStatusResponse } from '../services/backendService'
 import { buildSessionLogPayload, sessionLogFilename } from '../services/sessionLog'
 import type {
   AuthStatusInfo, BackendStatusInfo, DirectProviderConfig, DiscoveryResult, McpServerConfigEntry, ModelsResponse,
-  SessionRecord, SkillInfo, StoredDesktopConfig, TanguDesktopConfig, ToolsResponse, UpdaterStatusInfo,
+  NormalAgentDef, SessionRecord, SkillInfo, StoredDesktopConfig, TanguDesktopConfig, ToolsResponse, UpdaterStatusInfo,
 } from '../types'
 import { SHOW_SYSTEM_PROMPT_KEY } from '../types'
 import { useI18n } from '../i18n'
 import { LocaleToggle } from './LocaleToggle'
 import { CHANGELOG } from '../changelog'
+import { Markdown } from './Markdown'
 import { ModelGroupList } from './ModelGroupList'
 import { AgentsSettings } from './AgentsSettings'
+import { ShortcutsTab } from './ShortcutsTab'
 import { PluginsTab } from './PluginsTab'
+import { PluginSettingsPage } from './PluginSettingsPage'
 import { AgentClisTab } from './AgentClisTab'
 import { QrImage } from './QrImage'
 
-export type Tab = 'connection' | 'forsion' | 'model' | 'mcp' | 'skills' | 'agents' | 'plugins' | 'agent-clis' | 'browser' | 'wechat' | 'theme' | 'advanced' | 'developer' | 'about'
+type StaticTab = 'general' | 'connection' | 'forsion' | 'model' | 'mcp' | 'skills' | 'agents' | 'plugins' | 'agent-clis' | 'browser' | 'wechat' | 'theme' | 'shortcuts' | 'advanced' | 'developer' | 'about'
+// 动态插件设置页用 `plugin:<id>`(Obsidian 式一级入口)。
+export type Tab = StaticTab | `plugin:${string}`
 
 const DEV_MODE_KEY = 'forsion_tangu_dev_mode'
 
@@ -61,17 +67,20 @@ const BACKEND_STATE_LABEL: Record<string, string> = {
 export const SettingsModal: React.FC<{
   open: boolean
   cfg: TanguDesktopConfig
-  themePreset: string
+  themeLang: string
+  themeSkin: string
   themeMode: 'light' | 'dark'
   glassOn: boolean
   flatOn: boolean
   themeSeed: string
   onClose: () => void
   onConfigChange: (patch: Partial<TanguDesktopConfig>) => void
-  onThemeChange: (preset: string, mode: 'light' | 'dark') => void
+  onThemeChange: (lang: string, skin: string, mode: 'light' | 'dark') => void
   onGlassChange: (on: boolean) => void
   onFlatChange: (on: boolean) => void
   onSeedChange: (hex: string) => void
+  /** 重扫 ~/.tangu/themes 并重应用(拖入/编辑主题后);完成后父层 themesVersion 自增触发重渲染。 */
+  onReloadThemes?: () => void | Promise<void>
   /** patch 随调用传入:避免「setState 未刷新就重连」的旧值竞态。 */
   onReconnect: (patch?: Partial<TanguDesktopConfig>) => void
   /** 开发者选项里「重新进入引导」回调(由 App 控制 onboarding 显隐)。 */
@@ -81,8 +90,12 @@ export const SettingsModal: React.FC<{
   /** 打开时直接定位到的 tab(如微信卡片→'wechat'、/skills→'skills');缺省落 connection。 */
   initialTab?: Tab
 }> = (p) => {
-  const { t } = useI18n()
-  const [tab, setTab] = useState<Tab>(p.initialTab ?? 'connection')
+  const { t, locale } = useI18n()
+  // 合并后:连接/Forsion → 常规设置(general);Agent CLI → 智能体(agents)。旧入口 tab 归一。
+  const normalizeTab = (x: Tab | undefined): Tab =>
+    x === 'connection' || x === 'forsion' ? 'general' : x === 'agent-clis' ? 'agents' : (x ?? 'general')
+  const [tab, setTab] = useState<Tab>(normalizeTab(p.initialTab))
+  const [navQuery, setNavQuery] = useState('')
   const [appVersion, setAppVersion] = useState<string>('')
   // 应用内自动更新状态(经 window.tangu.onUpdaterStatus 广播驱动;mac 仅检测引导手动下载)。
   const [upd, setUpd] = useState<UpdaterStatusInfo>({ phase: 'idle' })
@@ -91,12 +104,12 @@ export const SettingsModal: React.FC<{
     try { return localStorage.getItem(DEV_MODE_KEY) === '1' } catch { return false }
   })
   const [devClicks, setDevClicks] = useState(0)
-  const [devMsg, setDevMsg] = useState('')
   // 开发者「回复前显示 system prompt」(localStorage;App.send 读同一 key 决定是否请求后端回传)。
   const [showSysPrompt, setShowSysPrompt] = useState<boolean>(() => {
     try { return localStorage.getItem(SHOW_SYSTEM_PROMPT_KEY) === '1' } catch { return false }
   })
   const [draft, setDraft] = useState(p.cfg)
+  const [themesReloading, setThemesReloading] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState('')
   const [models, setModels] = useState<ModelsResponse | null>(null)
@@ -114,7 +127,7 @@ export const SettingsModal: React.FC<{
   const [providerBusy, setProviderBusy] = useState<string | null>(null)
   // 直连 provider 配置(~/.tangu/providers.json)
   const [customProviders, setCustomProviders] = useState<DirectProviderConfig[]>([])
-  const [editProvider, setEditProvider] = useState<(DirectProviderConfig & { modelsCsv: string }) | null>(null)
+  const [editProvider, setEditProvider] = useState<(DirectProviderConfig & { modelsCsv: string; imageModelsCsv: string }) | null>(null)
   const [providerTestMsg, setProviderTestMsg] = useState('')
   const [providerTesting, setProviderTesting] = useState(false)
   const [providerSaveMsg, setProviderSaveMsg] = useState('')
@@ -168,6 +181,23 @@ export const SettingsModal: React.FC<{
   const [mcpStatus, setMcpStatus] = useState<ToolsResponse['mcp']>(undefined)
   const [editMcp, setEditMcp] = useState<{ name: string; isNew: boolean; command: string; argsText: string; url: string; transport: 'auto' | 'stdio' | 'http' | 'sse'; envText: string } | null>(null)
   const [mcpMsg, setMcpMsg] = useState('')
+
+  // Obsidian 式插件:清单 + 每插件设置页(已启用且有 settings 的插件在「扩展」组下成一级 nav 项)。
+  const [plugins, setPlugins] = useState<PluginInfo[] | null>(null)
+  const [pluginAgents, setPluginAgents] = useState<NormalAgentDef[]>([])
+  const reloadPlugins = useCallback(() => {
+    if (!isDesktop) return
+    void listPlugins(p.cfg).then(setPlugins).catch(() => setPlugins([]))
+  }, [isDesktop, p.cfg])
+  useEffect(() => {
+    if (!p.open || !isDesktop) return
+    reloadPlugins()
+    void listAgents(p.cfg).then(setPluginAgents).catch(() => { /* ignore */ })
+  }, [p.open, isDesktop, reloadPlugins, p.cfg])
+  const pluginNm = (pl: PluginInfo): string => (locale === 'en' && pl.nameEn ? pl.nameEn : pl.name)
+  const pluginNavItems = (plugins || [])
+    .filter((pl) => pl.enabled && pl.settings)
+    .map((pl) => [`plugin:${pl.id}`, pluginNm(pl)] as [Tab, string])
 
   const refreshMcp = (): void => {
     void window.tangu?.readMcpConfig?.().then((c) => setMcpServers(c.mcpServers)).catch(() => setMcpServers({}))
@@ -545,25 +575,25 @@ export const SettingsModal: React.FC<{
   }
 
   const tabItems = [
-    ['connection', t('settings.tab.connection')],
-    ...(isDesktop ? ([['forsion', t('settings.tab.forsion')]] as Array<[Tab, string]>) : []),
+    ['general', t('settings.tab.general')], // = 连接 + Forsion 合并
     ['model', t('settings.tab.model')],
-    ...(isDesktop ? ([['mcp', 'MCP'], ['skills', t('settings.tab.skills')], ['agents', t('settings.tab.agents')], ['plugins', t('settings.tab.plugins')], ['agent-clis', t('settings.tab.agentClis')], ['browser', t('settings.tab.browser')], ['wechat', t('settings.tab.wechat')]] as Array<[Tab, string]>) : []),
+    ...(isDesktop ? ([['agents', t('settings.tab.agents')], ['skills', t('settings.tab.skills')], ['mcp', 'MCP'], ['wechat', t('settings.tab.wechat')], ['browser', t('settings.tab.browser')], ['plugins', t('settings.tab.plugins')]] as Array<[Tab, string]>) : []),
     ['theme', t('settings.tab.theme')],
+    ['shortcuts', t('settings.tab.shortcuts')],
     ['advanced', t('settings.tab.advanced')],
     ...(isDesktop && devMode ? ([['developer', t('settings.tab.developer')]] as Array<[Tab, string]>) : []),
     ['about', t('settings.tab.about')],
   ] as Array<[Tab, string]>
-  const activeTabLabel = tabItems.find(([id]) => id === tab)?.[1] || t('settings.title')
+  const activeTabLabel = tab.startsWith('plugin:')
+    ? (pluginNavItems.find(([id]) => id === tab)?.[1] || t('settings.tab.plugins'))
+    : (tabItems.find(([id]) => id === tab)?.[1] || t('settings.title'))
 
-  // Obsidian 式分类导航:把扁平 tab 归到分组下;每组只渲染 tabItems 里实际存在的项(沿用其 desktop/devMode 过滤)。
+  // 分类导航(4 大类):选项 / AI / 核心插件 / 社区插件。每类只渲染 tabItems 里实际存在的项(沿用 desktop/devMode 过滤)。
   const navGroups: Array<{ key: string; label: string; tabs: Tab[] }> = [
-    { key: 'appearance', label: t('settings.group.appearance'), tabs: ['theme'] },
-    { key: 'account', label: t('settings.group.account'), tabs: ['connection', 'forsion'] },
-    { key: 'model', label: t('settings.group.model'), tabs: ['model'] },
-    { key: 'plugins', label: t('settings.group.plugins'), tabs: ['mcp', 'skills', 'agents', 'plugins', 'agent-clis'] },
-    { key: 'advanced', label: t('settings.group.advanced'), tabs: ['browser', 'wechat', 'advanced', 'developer'] },
-    { key: 'about', label: t('settings.group.about'), tabs: ['about'] },
+    { key: 'options', label: t('settings.group.options'), tabs: ['general', 'theme', 'shortcuts', 'advanced', 'developer', 'about'] },
+    { key: 'ai', label: t('settings.group.ai'), tabs: ['model', 'agents', 'skills', 'mcp'] },
+    { key: 'core', label: t('settings.group.corePlugins'), tabs: ['wechat', 'browser'] },
+    { key: 'community', label: t('settings.group.communityPlugins'), tabs: ['plugins'] },
   ]
 
   if (!p.open) return null
@@ -571,13 +601,33 @@ export const SettingsModal: React.FC<{
   return (
     <div className="settings-page">
       <aside className="settings-nav" aria-label="Settings navigation">
-        <div className="settings-nav-kicker">Tangu Agent</div>
-        <div className="settings-nav-title">{t('settings.title')}</div>
+        {/* 左上角返回 + 设置搜索(codex 风):常驻顶部,不随分类列表滚动。 */}
+        <div className="settings-nav-top">
+          <button className="settings-back" onClick={p.onClose}>
+            <ArrowLeft size={15} /> {t('settings.backToApp')}
+          </button>
+          <div className="settings-nav-search">
+            <Search size={14} className="settings-nav-search-ic" />
+            <input
+              value={navQuery}
+              placeholder={t('settings.searchPlaceholder')}
+              onChange={(e) => setNavQuery(e.target.value)}
+            />
+            {navQuery && <button className="settings-nav-search-x" onClick={() => setNavQuery('')} title={t('common.cancel')}><X size={13} /></button>}
+          </div>
+        </div>
         <div className="settings-nav-list">
           {navGroups.map((grp) => {
-            const items = grp.tabs
+            const base = grp.tabs
               .map((id) => tabItems.find(([tid]) => tid === id))
               .filter((x): x is [Tab, string] => !!x)
+            // 「社区插件」组末尾追加已启用且有设置的外置插件,各成一级项。
+            const all = grp.key === 'community' ? [...base, ...pluginNavItems] : base
+            // 搜索:按项名 / 分组名过滤(命中分组名则保留整组)。
+            const ql = navQuery.trim().toLowerCase()
+            const items = !ql || grp.label.toLowerCase().includes(ql)
+              ? all
+              : all.filter(([, label]) => label.toLowerCase().includes(ql))
             if (items.length === 0) return null
             return (
               <div key={grp.key} className="settings-nav-group">
@@ -594,17 +644,12 @@ export const SettingsModal: React.FC<{
       </aside>
       <section className="settings-main">
         <div className="settings-main-head">
-          <div>
-            <div className="settings-main-kicker">{t('settings.title')}</div>
-            <div className="settings-main-title">{activeTabLabel}</div>
-          </div>
-          <button className="icon-btn" onClick={p.onClose} title={t('settings.btn.cancel')}>
-            <X size={16} />
-          </button>
+          <div className="settings-main-title">{activeTabLabel}</div>
         </div>
         <div className="settings-body">
-                {tab === 'connection' && (
+                {tab === 'general' && (
                   <>
+                    <div className="settings-sec">{t('settings.tab.connection')}</div>
                     {isDesktop && (
                       <div className="field">
                         <label>{t('settings.backend.modeLabel')}</label>
@@ -622,7 +667,7 @@ export const SettingsModal: React.FC<{
                     {isDesktop && stored && (
                       <div className="field">
                         <label>{t('settings.workspace.label')}</label>
-                        <div style={{ display: 'flex', gap: 8 }}>
+                        <div className="settings-inline-row">
                           <input
                             type="text"
                             value={stored.defaultWorkspaceDir || ''}
@@ -752,8 +797,9 @@ export const SettingsModal: React.FC<{
                   </>
                 )}
 
-                {tab === 'forsion' && (
+                {tab === 'general' && isDesktop && (
                   <>
+                    <div className="settings-sec settings-sec--gap">{t('settings.tab.forsion')}</div>
                     {/* 账号 */}
                     <div className="field">
                       <label>{t('settings.forsion.accountLabel')}</label>
@@ -786,7 +832,7 @@ export const SettingsModal: React.FC<{
                     {stored && (
                       <div className="field">
                         <label><Globe2 size={11} style={{ verticalAlign: -1 }} /> {t('settings.forsion.cloudUrlLabel')}</label>
-                        <div style={{ display: 'flex', gap: 8 }}>
+                        <div className="settings-inline-row">
                           <input
                             type="text"
                             value={stored.cloudUrl}
@@ -870,7 +916,7 @@ export const SettingsModal: React.FC<{
                       </label>
                       {models?.models.length ? (
                         <ModelGroupList
-                          models={models.models}
+                          models={models.models.filter((m) => (m.modelType || 'llm') === 'llm')}
                           selectedId={draft.modelId}
                           onSelect={(id) => {
                             setDraft({ ...draft, modelId: id })
@@ -891,6 +937,31 @@ export const SettingsModal: React.FC<{
                           {t('settings.model.directProviders')}{models.directProviders.map((d) => d.providerId).join('、')}
                         </div>
                       ) : null}
+                    </div>
+
+                    {/* 生图模型(generate_image 用):始终可见,选中即设为默认;无则给配置指引。 */}
+                    <div className="field">
+                      <label>{t('settings.model.imageModelsLabel')}</label>
+                      {(() => {
+                        const imgs = (models?.models || []).filter((m) => m.modelType === 'image_gen')
+                        if (!imgs.length) return <div className="hint">{modelsLoading ? t('common.loading') : t('settings.model.imageEmpty')}</div>
+                        return (
+                          <div className="model-group-body">
+                            {imgs.map((m) => (
+                              <button
+                                key={`${m.source}-${m.id}`}
+                                className={`file-row${(draft.imageModelId || '') === m.id ? ' active' : ''}`}
+                                onClick={() => { setDraft({ ...draft, imageModelId: m.id }); p.onConfigChange({ imageModelId: m.id }) }}
+                              >
+                                <span className="file-name" style={{ color: (draft.imageModelId || '') === m.id ? 'var(--accent)' : undefined }}>{m.name}</span>
+                                {m.source === 'direct' && <span className="model-group-tag">{t('model.group.direct')}</span>}
+                                {(draft.imageModelId || '') === m.id && <Check size={12} style={{ color: 'var(--accent)' }} />}
+                              </button>
+                            ))}
+                          </div>
+                        )
+                      })()}
+                      <div className="hint" style={{ marginTop: 4 }}>{t('settings.model.imageHelp')}</div>
                     </div>
 
                     {isDesktop && providers && providers.length > 0 && (
@@ -944,7 +1015,7 @@ export const SettingsModal: React.FC<{
                                 className="icon-btn"
                                 title={t('settings.btn.edit')}
                                 onClick={() => {
-                                  setEditProvider({ ...cp, modelsCsv: (cp.modelIds || []).join(', ') })
+                                  setEditProvider({ ...cp, modelsCsv: (cp.modelIds || []).join(', '), imageModelsCsv: (cp.imageModelIds || []).join(', ') })
                                   setProviderTestMsg('')
                                   setProviderSaveMsg('')
                                   setFetchedModels(null); setModelSearch(''); setFetchModelsMsg('')
@@ -973,7 +1044,7 @@ export const SettingsModal: React.FC<{
                         <button
                           className="btn ghost sm"
                           onClick={() => {
-                            setEditProvider({ providerId: '', baseUrl: '', apiKey: '', modelIds: [], modelsCsv: '' })
+                            setEditProvider({ providerId: '', baseUrl: '', apiKey: '', modelIds: [], modelsCsv: '', imageModelsCsv: '' })
                             setProviderTestMsg('')
                             setProviderSaveMsg('')
                             setFetchedModels(null); setModelSearch(''); setFetchModelsMsg('')
@@ -1028,6 +1099,15 @@ export const SettingsModal: React.FC<{
                               placeholder={t('settings.customProvider.modelsPlaceholder')}
                             />
                           </div>
+                          <div className="field">
+                            <label>{t('settings.customProvider.imageModelsLabel')}</label>
+                            <input
+                              type="text"
+                              value={editProvider.imageModelsCsv}
+                              onChange={(e) => setEditProvider({ ...editProvider, imageModelsCsv: e.target.value })}
+                              placeholder={t('settings.customProvider.imageModelsPlaceholder')}
+                            />
+                          </div>
                         </div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                           <button
@@ -1075,11 +1155,13 @@ export const SettingsModal: React.FC<{
                             disabled={!editProvider.providerId || !editProvider.baseUrl}
                             onClick={() => {
                               const modelIds = editProvider.modelsCsv.split(',').map((s) => s.trim()).filter(Boolean)
+                              const imageModelIds = editProvider.imageModelsCsv.split(',').map((s) => s.trim()).filter(Boolean)
                               void window.tangu!.saveProvider!({
                                 providerId: editProvider.providerId,
                                 baseUrl: editProvider.baseUrl.replace(/\/+$/, ''),
                                 apiKey: editProvider.apiKey || undefined,
                                 modelIds: modelIds.length ? modelIds : undefined,
+                                imageModelIds: imageModelIds.length ? imageModelIds : undefined,
                               }).then((list) => {
                                 setCustomProviders(list)
                                 setEditProvider(null)
@@ -1316,9 +1398,23 @@ export const SettingsModal: React.FC<{
                   </>
                 )}
 
-                {tab === 'agents' && <AgentsSettings cfg={p.cfg} />}
-                {tab === 'plugins' && <PluginsTab cfg={p.cfg} />}
-                {tab === 'agent-clis' && <AgentClisTab cfg={p.cfg} />}
+                {tab === 'agents' && <><div className="settings-sec">{t('settings.tab.agents')}</div><AgentsSettings cfg={p.cfg} /></>}
+                {tab === 'plugins' && (
+                  <PluginsTab
+                    cfg={p.cfg}
+                    plugins={plugins}
+                    onReload={reloadPlugins}
+                    onOpenSettings={(id) => setTab(`plugin:${id}` as Tab)}
+                  />
+                )}
+                {tab.startsWith('plugin:') && (() => {
+                  const pid = tab.slice('plugin:'.length)
+                  const pl = (plugins || []).find((x) => x.id === pid)
+                  return pl
+                    ? <PluginSettingsPage cfg={p.cfg} plugin={pl} agents={pluginAgents} />
+                    : <div className="hint">{t('settings.plugins.empty')}</div>
+                })()}
+                {tab === 'agents' && <><div className="settings-sec settings-sec--gap">{t('settings.tab.agentClis')}</div><AgentClisTab cfg={p.cfg} /></>}
 
                 {tab === 'browser' && stored && (
                   <>
@@ -1507,23 +1603,62 @@ export const SettingsModal: React.FC<{
                 {tab === 'theme' && (
                   <>
                     <div className="field">
-                      <label>{t('settings.theme.themeLabel')}</label>
+                      <label>{t('settings.theme.langLabel')}</label>
                       <div className="theme-grid">
-                        {listThemes().map((th) => (
+                        {listLanguages().map((th) => (
                           <ThemeCard
                             key={th.manifest.id}
                             entry={th}
                             mode={p.themeMode}
-                            active={th.manifest.id === p.themePreset}
+                            active={th.manifest.id === p.themeLang}
                             onSelect={() => {
-                              applyTheme(th.manifest.id, p.themeMode, { customColor: p.themeSeed })
-                              p.onThemeChange(th.manifest.id, p.themeMode)
+                              applyTheme(th.manifest.id, p.themeSkin, p.themeMode, { customColor: p.themeSeed })
+                              p.onThemeChange(th.manifest.id, p.themeSkin, p.themeMode)
                             }}
                           />
                         ))}
                       </div>
+                      <div className="field-row" style={{ gap: 8, marginTop: 8 }}>
+                        <button type="button" className="btn sm" onClick={() => { void window.tangu?.openThemesDir?.() }}>
+                          <FolderOpen size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
+                          {t('settings.theme.openFolder')}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn sm"
+                          disabled={themesReloading}
+                          onClick={async () => {
+                            setThemesReloading(true)
+                            try { await p.onReloadThemes?.() } finally { setThemesReloading(false) }
+                          }}
+                        >
+                          <RefreshCw size={13} className={themesReloading ? 'spin' : ''} style={{ verticalAlign: -2, marginRight: 4 }} />
+                          {t('settings.theme.reload')}
+                        </button>
+                      </div>
+                      <div className="hint" style={{ marginTop: 6 }}>{t('settings.theme.dropHint')}</div>
                     </div>
-                    {p.themePreset === 'custom' && (
+                    <div className="field">
+                      <label>{t('settings.theme.skinLabel')}</label>
+                      <div className="skin-row">
+                        {listSkins().map((sk) => (
+                          <button
+                            key={sk.id}
+                            type="button"
+                            className={`skin-chip${sk.id === p.themeSkin ? ' active' : ''}`}
+                            title={t(`settings.theme.skin.${sk.id}`)}
+                            onClick={() => {
+                              applyTheme(p.themeLang, sk.id, p.themeMode, { customColor: p.themeSeed })
+                              p.onThemeChange(p.themeLang, sk.id, p.themeMode)
+                            }}
+                          >
+                            <i className="skin-dot" style={{ background: sk.id === 'custom' ? p.themeSeed : sk.accent }} />
+                            <span>{t(`settings.theme.skin.${sk.id}`)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {p.themeSkin === 'custom' && (
                       <div className="field">
                         <label>{t('settings.theme.customSeedLabel')}</label>
                         <div className="field-row" style={{ alignItems: 'center', gap: 10 }}>
@@ -1531,7 +1666,7 @@ export const SettingsModal: React.FC<{
                             type="color"
                             value={p.themeSeed}
                             onChange={(e) => {
-                              applyTheme('custom', p.themeMode, { customColor: e.target.value })
+                              applyTheme(p.themeLang, 'custom', p.themeMode, { customColor: e.target.value })
                               p.onSeedChange(e.target.value)
                             }}
                             aria-label={t('settings.theme.customSeedLabel')}
@@ -1547,8 +1682,8 @@ export const SettingsModal: React.FC<{
                         <button
                           className={p.themeMode === 'light' ? 'active' : ''}
                           onClick={() => {
-                            applyTheme(p.themePreset, 'light', { customColor: p.themeSeed })
-                            p.onThemeChange(p.themePreset, 'light')
+                            applyTheme(p.themeLang, p.themeSkin, 'light', { customColor: p.themeSeed })
+                            p.onThemeChange(p.themeLang, p.themeSkin, 'light')
                           }}
                         >
                           <Sun size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
@@ -1557,8 +1692,8 @@ export const SettingsModal: React.FC<{
                         <button
                           className={p.themeMode === 'dark' ? 'active' : ''}
                           onClick={() => {
-                            applyTheme(p.themePreset, 'dark', { customColor: p.themeSeed })
-                            p.onThemeChange(p.themePreset, 'dark')
+                            applyTheme(p.themeLang, p.themeSkin, 'dark', { customColor: p.themeSeed })
+                            p.onThemeChange(p.themeLang, p.themeSkin, 'dark')
                           }}
                         >
                           <Moon size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
@@ -1582,6 +1717,8 @@ export const SettingsModal: React.FC<{
                     </div>
                   </>
                 )}
+
+                {tab === 'shortcuts' && <ShortcutsTab />}
 
                 {tab === 'skills' && (
                   <>
@@ -1746,6 +1883,18 @@ export const SettingsModal: React.FC<{
                     </div>
 
                     <div className="field" style={{ marginTop: 14 }}>
+                      <label>恢复默认布局</label>
+                      <div className="hint" style={{ marginBottom: 8 }}>把工作区面板还原为默认黄金分割布局(中间 0.618 / 左右各 0.191),并清除已保存的自定义布局。</div>
+                      <button
+                        className="btn ghost sm"
+                        onClick={() => { useWorkspace.getState().resetLayout(); p.onClose() }}
+                      >
+                        <RotateCcw size={13} />
+                        恢复默认布局
+                      </button>
+                    </div>
+
+                    <div className="field" style={{ marginTop: 14 }}>
                       <label>{t('settings.advanced.sessionLimit')}</label>
                       <input
                         type="number"
@@ -1781,34 +1930,7 @@ export const SettingsModal: React.FC<{
                 {tab === 'developer' && (
                   <>
                     <div className="panel-note">{t('settings.developer.note')}</div>
-                    {isDesktop && stored && (
-                      <div className="field">
-                        <label>{t('settings.developer.cloudUrlLabel')}</label>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <input
-                            type="text"
-                            value={stored.cloudUrl}
-                            onChange={(e) => setStored({ ...stored, cloudUrl: e.target.value.trim() })}
-                            placeholder={t('settings.developer.cloudUrlPlaceholder')}
-                          />
-                          <button
-                            className="btn primary sm"
-                            onClick={() => {
-                              setDevMsg('')
-                              // setConfig({cloudUrl}) 在 managed 模式下会自动重启托管后端使其生效(main.ts config:set)。
-                              void window.tangu!.setConfig({ cloudUrl: (stored.cloudUrl || '').trim() }).then((s) => {
-                                setStored(s)
-                                setDevMsg(s.mode === 'managed' ? t('settings.developer.savedRestarting') : t('settings.developer.saved'))
-                              })
-                            }}
-                          >
-                            {t('settings.developer.saveCloudUrl')}
-                          </button>
-                        </div>
-                        <div className="hint">{t('settings.developer.cloudUrlHint')}</div>
-                        {devMsg && <div className="hint" style={{ marginTop: 6 }}>{devMsg}</div>}
-                      </div>
-                    )}
+                    {/* cloudURL 去重:统一在「账户」组(Forsion 页)管理,开发者页不再重复 */}
                     <div className="field">
                       <label>{t('settings.developer.relaunchLabel')}</label>
                       <div>
@@ -1923,21 +2045,17 @@ export const SettingsModal: React.FC<{
                       </div>
                     )}
                     {upd.phase === 'error' && upd.error ? (
-                      <div className="field"><div className="hint" style={{ color: 'var(--danger, #c0392b)' }}>{t('about.update.error', { error: upd.error })}</div></div>
+                      <div className="field"><div className="hint" style={{ color: 'var(--danger)' }}>{t('about.update.error', { error: upd.error })}</div></div>
                     ) : null}
                     <div className="field">
                       <label>{t('about.changelogTitle')}</label>
                       <div className="changelog">
                         {CHANGELOG.map((c) => (
-                          <div key={c.version} className="changelog-entry">
+                          <div key={c.version} className="changelog-entry md-body">
                             <div className="changelog-ver">
-                              v{c.version} <span className="changelog-date">{c.date}</span>
+                              {c.version} <span className="changelog-date">{c.date}</span>
                             </div>
-                            <ul>
-                              {c.lines.map((line, i) => (
-                                <li key={i}>{line}</li>
-                              ))}
-                            </ul>
+                            <Markdown content={c.lines.map((l) => `- ${l}`).join('\n')} />
                           </div>
                         ))}
                       </div>

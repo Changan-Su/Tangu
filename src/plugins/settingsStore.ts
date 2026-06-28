@@ -10,6 +10,7 @@ import { promises as fsp } from 'node:fs';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { tanguHome, agentsDir } from '../core/tanguHome.js';
+import { getRawSection, saveSection } from '../core/config.js';
 import { getPluginMeta } from './registry.js';
 
 export type Scope = 'global' | { agentSlug: string };
@@ -55,16 +56,30 @@ function cacheKey(id: string, scope: Scope): string {
 
 const cache = new Map<string, Record<string, any>>();
 
+// 全局插件设置(含 __enabled)→ config.json 的 plugins.global[id](唯一真源);per-agent 留 agent 文件夹。
+// 惰性迁移:某 id 未入 config → 回落 legacy ~/.tangu/plugins-config/<id>/settings.json,写时落 config。
 function readRaw(id: string, scope: Scope): Record<string, any> {
   const k = cacheKey(id, scope);
   const c = cache.get(k);
   if (c) return c;
   let obj: Record<string, any> = {};
-  try { obj = JSON.parse(readFileSync(settingsFileOf(id, scope), 'utf8')) || {}; } catch { obj = {}; }
+  if (scope === 'global') {
+    const fromCfg = getRawSection('plugins')?.global?.[id];
+    if (fromCfg && typeof fromCfg === 'object') obj = fromCfg;
+    else { try { obj = JSON.parse(readFileSync(settingsFileOf(id, 'global'), 'utf8')) || {}; } catch { obj = {}; } }
+  } else {
+    try { obj = JSON.parse(readFileSync(settingsFileOf(id, scope), 'utf8')) || {}; } catch { obj = {}; }
+  }
   cache.set(k, obj);
   return obj;
 }
 async function writeRaw(id: string, scope: Scope, obj: Record<string, any>): Promise<void> {
+  if (scope === 'global') {
+    const sec = (getRawSection('plugins') as any) || {};
+    saveSection('plugins', { ...sec, global: { ...(sec.global || {}), [id]: obj } });
+    cache.set(cacheKey(id, scope), obj);
+    return;
+  }
   const f = settingsFileOf(id, scope);
   await fsp.mkdir(path.dirname(f), { recursive: true });
   await fsp.writeFile(f, JSON.stringify(obj, null, 2), 'utf8');

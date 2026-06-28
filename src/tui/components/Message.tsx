@@ -3,7 +3,7 @@ import { Box, Text } from 'ink';
 import { theme } from '../theme.js';
 import { Markdown } from './Markdown.js';
 import { ToolCard } from './ToolCard.js';
-import type { Block, TranscriptItem } from '../types.js';
+import type { Block, TranscriptItem, TodoItem } from '../types.js';
 
 function BlockView({ block, markdown }: { block: Block; markdown: boolean }): ReactElement | null {
   if (block.type === 'tool') return <ToolCard block={block} />;
@@ -70,6 +70,24 @@ export function ItemView({ item }: { item: TranscriptItem }): ReactElement {
   return (
     <Box marginTop={1} flexDirection="column">
       <Blocks blocks={item.blocks} markdown />
+    </Box>
+  );
+}
+
+const TODO_MARK = { pending: '[ ]', in_progress: '[~]', completed: '[x]' } as const;
+
+/** 常驻 todo 面板：todo_write 工具发的清单实时渲染（空列表不显示）。 */
+export function TodoPanel({ todos }: { todos: TodoItem[] }): ReactElement | null {
+  if (!todos.length) return null;
+  const done = todos.filter((t) => t.status === 'completed').length;
+  return (
+    <Box marginTop={1} flexDirection="column" borderStyle="round" borderColor={theme.dim} paddingX={1}>
+      <Text color={theme.dim}>{`📋 待办 ${done}/${todos.length}`}</Text>
+      {todos.map((t, i) => (
+        <Text key={i} color={t.status === 'completed' ? theme.dim : theme.assistant}>
+          {`${TODO_MARK[t.status]} ${t.content}`}
+        </Text>
+      ))}
     </Box>
   );
 }

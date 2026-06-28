@@ -39,12 +39,31 @@ export interface ToolContext {
   muse?: boolean;
   /** 本次 run 的模型 id(delegate 子代理沿用父模型)。 */
   modelId?: string;
+  /** 默认生图模型 id(generate_image 缺省据此选模型;来自 agentConfig.imageModelId)。 */
+  imageModelId?: string;
   /**
    * 工具产出图片的回流闸(view_image 用):工具把图片 data URL 交回 loop,
    * loop 在本轮工具执行完后把它物化成一条 user 图像消息追加到对话尾部,让模型"看见"图片。
    * 缺省(未装配此闸的运行环境)时工具应优雅降级,不要假定一定可用。
    */
   collectImage?: (img: { url: string; name?: string }) => void;
+  /**
+   * 「在对话区展示文件」闸(display_file / generate_image / 表情包用):工具把要展示给**用户**的
+   * 文件交给 loop,loop 即时 publish 'display_file' 事件(桌面端内联渲染、图片可点击放大),并在
+   * finalize 时持久化到 assistant 消息。与 collectImage 不同:不回灌进模型上下文、不计费。
+   * 缺省(未装配此闸,如 TUI/纯云)时工具应优雅降级,不要假定一定可用。
+   */
+  displayFile?: (item: DisplayFileItem) => void;
+}
+
+/** 展示给用户的文件:path=工作区文件(前端懒加载字节);dataUrl=内联字节(无工作区路径,如表情包 blob)。二选一。 */
+export interface DisplayFileItem {
+  name: string;
+  mime?: string;
+  /** 工作区相对路径(host=cwd 相对;sandbox=工作区相对)。前端按会话形态读字节。 */
+  path?: string;
+  /** 内联数据 URL(data:<mime>;base64,...);用于无工作区路径的小文件。 */
+  dataUrl?: string;
 }
 
 export interface ToolResult {

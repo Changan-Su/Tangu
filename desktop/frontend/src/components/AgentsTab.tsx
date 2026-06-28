@@ -4,7 +4,7 @@
  */
 import React, { useEffect, useMemo, useState } from 'react'
 import { Loader2, Plus, Trash2, Pencil, Bot, Star, GripVertical, BookOpen, User, Cloud } from 'lucide-react'
-import { listAgents, saveAgentDef, deleteAgentDef, listModels, uploadAgentAvatar, fetchAgentAvatar, getAgentsMeta, putAgentsMeta, getUserProfile, putUserProfile } from '../services/backendService'
+import { listAgents, saveAgentDef, deleteAgentDef, listModels, uploadAgentAvatar, fetchAgentAvatar, deleteAgentAvatar, getAgentsMeta, putAgentsMeta, getUserProfile, putUserProfile } from '../services/backendService'
 import { AgentMemoryModal } from './AgentMemoryModal'
 import type { ModelInfo, NormalAgentDef, TanguDesktopConfig } from '../types'
 import { useI18n } from '../i18n'
@@ -127,6 +127,20 @@ export const AgentsTab: React.FC<{ cfg: TanguDesktopConfig; onEditingChange?: (e
     }
   }
 
+  const onRemoveAvatar = async (): Promise<void> => {
+    if (!editing?.slug || !avatarUrl) return
+    setAvatarBusy(true); setMsg('')
+    try {
+      await deleteAgentAvatar(cfg, editing.slug)
+      setAvatarUrl(null)
+      load()
+    } catch (err: any) {
+      setMsg(t('settings.agents.saveFail', { e: err?.message || err }))
+    } finally {
+      setAvatarBusy(false)
+    }
+  }
+
   const setDefault = (slug: string): void => {
     void putAgentsMeta(cfg, { defaultSlug: slug }).then((m) => setDefaultSlug(m.defaultSlug)).catch(() => { /* ignore */ })
   }
@@ -165,6 +179,11 @@ export const AgentsTab: React.FC<{ cfg: TanguDesktopConfig; onEditingChange?: (e
                 {avatarBusy ? <Loader2 size={13} className="spin" /> : null}{t('settings.agents.avatarPick')}
                 <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" style={{ display: 'none' }} onChange={(e) => void onPickAvatar(e)} />
               </label>
+              {avatarUrl && (
+                <button type="button" className="btn ghost sm" disabled={avatarBusy} onClick={() => void onRemoveAvatar()}>
+                  {t('settings.agents.avatarRemove')}
+                </button>
+              )}
             </div>
             <div className="hint">{t('settings.agents.avatarHint')}</div>
           </div>

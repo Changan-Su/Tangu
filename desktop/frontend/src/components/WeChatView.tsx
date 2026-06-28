@@ -21,6 +21,7 @@ import {
   type WechatProjectSession,
 } from '../services/backendService'
 import type { MessageRecord, NormalAgentDef, SessionRecord, TanguDesktopConfig } from '../types'
+import { useApp } from '../stores/appStore'
 import { useI18n } from '../i18n'
 import { QrImage } from './QrImage'
 
@@ -37,6 +38,7 @@ export const WeChatView: React.FC<{
   onSessionsChanged?: () => void
 }> = (p) => {
   const { t } = useI18n()
+  const connState = useApp((s) => s.connState)
   const [status, setStatus] = useState<WechatStatusResponse | null>(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
@@ -59,12 +61,13 @@ export const WeChatView: React.FC<{
   }
 
   useEffect(() => {
+    if (connState !== 'ok') return // 未连上后端前不发请求(避免启动期 ERR_CONNECTION_REFUSED;连上后本 effect 重跑)
     refresh()
     void listAgents(p.cfg).then(setAgentDefs).catch(() => {})
     const timer = window.setInterval(refresh, 5000) // 微信 /new 等后端动作靠轮询同步,缩短到 5s 更即时
     return () => window.clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.cfg.backendUrl, p.cfg.token])
+  }, [p.cfg.backendUrl, p.cfg.token, connState])
 
   const onPickAgent = async (slug: string): Promise<void> => {
     if (!boundSessionId || !slug) return

@@ -30,7 +30,7 @@ const api = {
   forsionLogout: (): Promise<any> => ipcRenderer.invoke('auth:logout'),
   authProviders: (): Promise<Array<{ id: string; loggedIn: boolean }>> => ipcRenderer.invoke('auth:providers'),
   providerLogin: (id: string): Promise<any> => ipcRenderer.invoke('auth:providerLogin', id),
-  openAccountCenter: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('auth:openAccountCenter'),
+  openAccountCenter: (section?: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('auth:openAccountCenter', section),
   /** 提交反馈到 Forsion 反馈中心(会话日志 JSON 随附为附件;token 留主进程)。 */
   submitFeedback: (input: { description: string; sessionLogJson?: string; sessionLogName?: string }): Promise<{ ok: boolean; id?: string | null; error?: string; attachmentSkipped?: boolean }> =>
     ipcRenderer.invoke('feedback:submit', input),
@@ -90,6 +90,16 @@ const api = {
     ipcRenderer.invoke('discovery:importSkills', ids),
   discoveryImportMcp: (names: string[]): Promise<{ imported: string[] }> =>
     ipcRenderer.invoke('discovery:importMcp', names),
+  // ── 拖入式主题(~/.tangu/themes/;主进程读盘成字符串,渲染端 <style> 注入)──
+  listThemes: (): Promise<Array<{ id: string; manifest: Record<string, any>; css: string }>> =>
+    ipcRenderer.invoke('themes:list'),
+  openThemesDir: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('themes:openDir'),
+  // ── Forsion Market(浏览/详情/安装全走主进程:公开浏览 + 本地解压安装)──
+  marketList: (type?: string): Promise<{ items: any[] }> => ipcRenderer.invoke('market:list', type),
+  marketDetail: (id: string): Promise<any> => ipcRenderer.invoke('market:detail', id),
+  marketInstall: (id: string): Promise<{ ok: boolean; path: string; files: number; type: string; slug: string }> =>
+    ipcRenderer.invoke('market:install', id),
+  marketInstalled: (): Promise<Record<string, string[]>> => ipcRenderer.invoke('market:installed'),
   // ── 环境检测 + 引导安装(首启向导;run 仅认 check 登记的 opaque id)──
   envCheck: (): Promise<any[]> => ipcRenderer.invoke('env:check'),
   envRun: (installId: string): Promise<{ exitCode: number }> => ipcRenderer.invoke('env:run', installId),

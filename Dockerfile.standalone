@@ -1,0 +1,51 @@
+# =====================================================
+# Tangu standalone worker 镜像 —— headless host-mode（自带 iLink 微信循环 + stickers），
+# 供 Tangu Manager（apps/Tangu-Manager）在 worker 宿主机上 per-user 编排。
+# -----------------------------------------------------
+# 构建上下文 = apps/Tangu-Agent/（自包含）。入口 = bin `tangu-server` = node dist/standalone/main.js。
+# 连接契约（Tangu Manager 经 -e 注入，见 src/standalone/config.ts）：
+#   TANGU_CLOUD_URL（必填，Forsion brain）/ TANGU_TOKEN（user-scoped）/ TANGU_USER_ID /
+#   TANGU_HOST=0.0.0.0 / TANGU_PORT=8787 / TANGU_HOME=/tangu-home（挂 per-user 卷）/
+#   TANGU_SANDBOX=none（容器即沙箱）/ TANGU_WECHAT_ENABLED=true
+# 原生模块 better-sqlite3（内嵌 SQLite，state.db 落 TANGU_HOME 卷）→ build 阶段需工具链。
+# =====================================================
+
+# ---------- Stage 1: 构建 ----------
+FROM node:20-alpine AS builder
+RUN apk add --no-cache python3 make g++   # better-sqlite3 等原生模块编译
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build   # tsc + postbuild(build:plugins → stickers / wechat-segment)
+
+# ---------- Stage 2: 仅生产依赖 ----------
+FROM node:20-alpine AS prod-deps
+RUN apk add --no-cache python3 make g++
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+# ---------- Stage 3: 运行时 ----------
+FROM node:20-alpine AS production
+WORKDIR /app
+ENV NODE_ENV=production
+# headless standalone 默认值（spec 由 Tangu Manager 经 -e 覆盖）
+ENV TANGU_HOST=0.0.0.0 \
+    TANGU_PORT=8787 \
+    TANGU_HOME=/tangu-home \
+    TANGU_SANDBOX=none \
+    TANGU_WECHAT_ENABLED=true
+
+COPY --from=prod-deps /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/plugins ./plugins
+COPY --from=builder /app/skills ./skills
+COPY package*.json ./
+
+EXPOSE 8787 8790
+# 容器即沙箱（TANGU_SANDBOX=none），默认 root 运行以免挂载卷的 perms 摩擦。
+# ponytail: root-in-container；要更严可加非 root user + chown /tangu-home。
+# 不内置 HEALTHCHECK：健康由 Tangu Manager 探活（standalone 8787 / thin 8790 端口不同，避免烘焙错端口）。
+# 默认 CMD = standalone；thin 由 Manager 用 `docker run ... <image> node dist/tui/main.js worker` 覆盖。
+CMD ["node", "dist/standalone/main.js"]

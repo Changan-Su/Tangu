@@ -14,9 +14,13 @@ import {
 } from './forsionAuth'
 import { importMcp, importSkills, scanAll } from './discovery'
 import { checkForUpdates, downloadUpdate, installUpdate } from './updater'
+import { readThemesDir, seedDefaultThemes } from './themes'
+import { extractZipToDir, MARKET_SUBDIR, isSafeSlug } from './marketInstall'
 
 /** ~/.tangu(与包内 core/tanguHome.ts 同约定;TANGU_HOME 可整体重定向)。 */
 const tanguHomeDir = (): string => process.env.TANGU_HOME || join(app.getPath('home'), '.tangu')
+/** ~/.tangu/themes:拖入式主题目录(每主题一子目录:theme.json + theme.css)。 */
+const themesDir = (): string => join(tanguHomeDir(), 'themes')
 
 /**
  * 加载 ~/.tangu/.env 进 process.env(不覆盖真实环境;与包内 tanguHome.loadTanguEnv 同语义)。
@@ -41,15 +45,38 @@ async function loadTanguEnvFile(): Promise<void> {
   }
 }
 
-/** 直连 provider 配置(~/.tangu/providers.json;托管后端启动时自动加载,见包内 assemble.loadProviders)。 */
+// ── ~/.tangu/config.json:与包内 core/config.ts 同格式的「唯一真源」。桌面读写各段(providers/mcp/
+//    cloud/browser/wechat/sandbox/workspace)落此文件;后端(standalone)同读。段存在即权威,缺失回落 legacy。
+const homeConfigPath = (): string => join(tanguHomeDir(), 'config.json')
+async function readHomeConfig(): Promise<Record<string, any>> {
+  try {
+    const p = JSON.parse(await readFile(homeConfigPath(), 'utf8'))
+    return p && typeof p === 'object' ? p : {}
+  } catch { return {} }
+}
+async function writeHomeConfig(c: Record<string, any>): Promise<void> {
+  await mkdir(tanguHomeDir(), { recursive: true })
+  await writeFile(homeConfigPath(), JSON.stringify(c, null, 2), 'utf8')
+  await chmod(homeConfigPath(), 0o600).catch(() => {}) // 含 token/apiKey
+}
+async function saveHomeSection(name: string, value: any): Promise<void> {
+  const c = await readHomeConfig()
+  c[name] = value
+  await writeHomeConfig(c)
+}
+
+/** 直连 provider 配置。读 config.json 的 providers 段优先,缺失回落 legacy ~/.tangu/providers.json。 */
 interface DirectProviderConfig {
   providerId: string
   baseUrl: string
   apiKey?: string
   modelIds?: string[]
+  imageModelIds?: string[]
 }
 
 async function readProvidersFile(): Promise<DirectProviderConfig[]> {
+  const sec = (await readHomeConfig()).providers
+  if (sec !== undefined) return Array.isArray(sec) ? sec : []
   try {
     const parsed = JSON.parse(await readFile(join(tanguHomeDir(), 'providers.json'), 'utf8'))
     return Array.isArray(parsed) ? parsed : Array.isArray(parsed?.providers) ? parsed.providers : []
@@ -59,10 +86,7 @@ async function readProvidersFile(): Promise<DirectProviderConfig[]> {
 }
 
 async function writeProvidersFile(list: DirectProviderConfig[]): Promise<void> {
-  const file = join(tanguHomeDir(), 'providers.json')
-  await mkdir(tanguHomeDir(), { recursive: true })
-  await writeFile(file, JSON.stringify(list, null, 2), 'utf8')
-  await chmod(file, 0o600).catch(() => {}) // best-effort:文件含 apiKey
+  await saveHomeSection('providers', list) // 唯一真源:落 config.json providers 段(chmod 600)
 }
 
 // ── 环境检测 + 引导安装(首启向导;检测+用户确认后执行,绝不静默自动装)──────────────
@@ -203,18 +227,58 @@ async function ensureDefaultWorkspaceDir(stored: TanguStoredConfig): Promise<str
   return dir
 }
 
+// desktop-shell 专属键(留 userData/tangu-desktop-config.json):连哪个后端 + 同步开关。CLI 无此概念。
+// 其余键(cloud/sandbox/workspace/browser/wechat)以 ~/.tangu/config.json 各段为权威,落盘亦写那里。
+const SHELL_KEYS: Array<keyof TanguStoredConfig> = [
+  'mode', 'backendUrl', 'token', 'wechatAllowedPeers', 'forsionSyncEnabled', 'forsionLastSyncedAt',
+]
 const configPath = (): string => join(app.getPath('userData'), 'tangu-desktop-config.json')
 
-async function loadConfig(): Promise<TanguStoredConfig> {
-  let merged: TanguStoredConfig
-  try {
-    merged = { ...DEFAULT_CONFIG, ...JSON.parse(await readFile(configPath(), 'utf8')) }
-  } catch {
-    merged = { ...DEFAULT_CONFIG }
+async function readShellConfig(): Promise<Partial<TanguStoredConfig>> {
+  let cur: Partial<TanguStoredConfig> = {}
+  try { cur = JSON.parse(await readFile(configPath(), 'utf8')) } catch { /* 无文件 → 空 */ }
+  // 首启从旧 desktop 迁移:本端 shell 配置无 mode(从未初始化)→ 继承 desktop1.0 的连接设置
+  // (mode=managed + 云 token + 同步/工作区等),与「兼容旧本地记录」一致;无旧 desktop 则回落默认(external + 引导)。
+  if (!cur.mode) {
+    try {
+      const v1Path = join(app.getPath('userData'), '..', 'tangu-agent-desktop', 'tangu-desktop-config.json')
+      const v1 = JSON.parse(await readFile(v1Path, 'utf8')) as Partial<TanguStoredConfig>
+      if (v1.mode) {
+        const seeded = { ...v1, ...cur } // 本端已显式设的键优先
+        await mkdir(app.getPath('userData'), { recursive: true }).catch(() => {})
+        await writeFile(configPath(), JSON.stringify(seeded, null, 2), 'utf8') // 落盘一次,此后与 1.0 解耦
+        return seeded
+      }
+    } catch { /* 无旧 desktop 配置 → 默认 */ }
   }
-  // 环境变量兜底(与包内 standalone/worker 同名约定):配置里没填时生效。
-  //   TANGU_CLOUD_URL    Forsion 云端地址(managed 模式 / 登录默认地址)
-  //   TANGU_BACKEND_URL  external 模式的外部 tangu-server 地址
+  return cur
+}
+
+/**
+ * 渲染端契约的完整 StoredDesktopConfig:`...shell` 提供所有旧键的回落(老用户零回退),
+ * config.json 各段(存在即权威)覆盖其上 → 唯一真源在 config.json,desktop 文件仅兜底 + 存 shell 键。
+ */
+async function loadConfig(): Promise<TanguStoredConfig> {
+  const shell = await readShellConfig()
+  const home = await readHomeConfig()
+  const cloud = home.cloud || {}, browser = home.browser || {}, wechat = home.wechat || {}
+  const merged: TanguStoredConfig = {
+    ...DEFAULT_CONFIG,
+    ...shell, // 旧 desktop 文件:既给 shell 键,也作未迁移段的回落
+    ...(home.cloud !== undefined ? { cloudUrl: cloud.url || '', cloudToken: cloud.token || '', modelId: cloud.defaultModel || '' } : {}),
+    ...(home.sandbox !== undefined ? { sandbox: home.sandbox } : {}),
+    ...(home.workspace !== undefined ? { defaultWorkspaceDir: home.workspace } : {}),
+    ...(home.browser !== undefined ? {
+      browserEnabled: browser.enabled !== false, browserEngine: browser.engine || 'auto',
+      browserSearchEngine: browser.searchEngine || 'duckduckgo', browserAllowPrivateUrls: !!browser.allowPrivateUrls,
+      browserCommandTimeoutMs: browser.commandTimeoutMs || 30000,
+    } : {}),
+    ...(home.wechat !== undefined ? {
+      wechatEnabled: wechat.enabled !== false, wechatDefaultSessionId: wechat.defaultSessionId || '',
+      wechatRemoteApprovalMode: wechat.remoteApprovalMode || 'readonly',
+    } : {}),
+  }
+  // 环境变量兜底:TANGU_CLOUD_URL(managed/登录默认)、TANGU_BACKEND_URL(external 外部地址)。
   if (!merged.cloudUrl) {
     merged.cloudUrl = process.env.TANGU_CLOUD_URL || loadTanguCreds().cloudUrl || DEFAULT_CLOUD_URL
   }
@@ -223,11 +287,39 @@ async function loadConfig(): Promise<TanguStoredConfig> {
   }
   return merged
 }
+
+/** patch 按键分流:shell 键 → desktop 文件;config-backed 键 → config.json 对应段(唯一真源)。 */
 async function saveConfig(patch: Partial<TanguStoredConfig>): Promise<TanguStoredConfig> {
-  const merged = { ...(await loadConfig()), ...patch }
-  await mkdir(app.getPath('userData'), { recursive: true }).catch(() => {})
-  await writeFile(configPath(), JSON.stringify(merged, null, 2), 'utf8')
-  return merged
+  // shell 键
+  const shell = await readShellConfig()
+  let shellTouched = false
+  for (const k of SHELL_KEYS) if (k in patch) { (shell as any)[k] = (patch as any)[k]; shellTouched = true }
+  if (shellTouched) {
+    await mkdir(app.getPath('userData'), { recursive: true }).catch(() => {})
+    await writeFile(configPath(), JSON.stringify(shell, null, 2), 'utf8')
+  }
+  // config-backed 键 → config.json 段
+  const home = await readHomeConfig()
+  const cloud = { ...(home.cloud || {}) }, browser = { ...(home.browser || {}) }, wechat = { ...(home.wechat || {}) }
+  let cT = false, bT = false, wT = false, oT = false
+  if ('cloudUrl' in patch) { cloud.url = patch.cloudUrl; cT = true }
+  if ('cloudToken' in patch) { cloud.token = patch.cloudToken; cT = true }
+  if ('modelId' in patch) { cloud.defaultModel = patch.modelId; cT = true }
+  if ('sandbox' in patch) { home.sandbox = patch.sandbox; oT = true }
+  if ('defaultWorkspaceDir' in patch) { home.workspace = patch.defaultWorkspaceDir; oT = true }
+  if ('browserEnabled' in patch) { browser.enabled = patch.browserEnabled; bT = true }
+  if ('browserEngine' in patch) { browser.engine = patch.browserEngine; bT = true }
+  if ('browserSearchEngine' in patch) { browser.searchEngine = patch.browserSearchEngine; bT = true }
+  if ('browserAllowPrivateUrls' in patch) { browser.allowPrivateUrls = patch.browserAllowPrivateUrls; bT = true }
+  if ('browserCommandTimeoutMs' in patch) { browser.commandTimeoutMs = patch.browserCommandTimeoutMs; bT = true }
+  if ('wechatEnabled' in patch) { wechat.enabled = patch.wechatEnabled; wT = true }
+  if ('wechatDefaultSessionId' in patch) { wechat.defaultSessionId = patch.wechatDefaultSessionId; wT = true }
+  if ('wechatRemoteApprovalMode' in patch) { wechat.remoteApprovalMode = patch.wechatRemoteApprovalMode; wT = true }
+  if (cT) home.cloud = cloud
+  if (bT) home.browser = browser
+  if (wT) home.wechat = wechat
+  if (cT || bT || wT || oT) await writeHomeConfig(home)
+  return loadConfig()
 }
 
 const backend = new BackendManager()
@@ -290,7 +382,7 @@ function createWindow(): void {
     // 最小化/最大化/关闭按钮,否则该值被忽略可能导致无窗口控件。菜单条另由 setApplicationMenu(null) 去除。
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     autoHideMenuBar: true, // 即便保留了菜单也不在窗口内显示(Alt 不唤出);与置空菜单双保险
-    backgroundColor: '#F5F5F7', // qbird 浅色底(默认主题),避免白屏闪烁
+    backgroundColor: '#fbf8f5', // 启动闪屏底色(动画 stage 底色),避免首帧白屏闪烁
     webPreferences: {
       preload: join(__dirname, '../preload/preload.mjs'),
       contextIsolation: true,
@@ -317,11 +409,12 @@ function createWindow(): void {
 
 app.whenReady().then(async () => {
   await loadTanguEnvFile() // 先于一切 loadConfig(其 env 兜底读 TANGU_CLOUD_URL/TANGU_BACKEND_URL)
+  await seedDefaultThemes(themesDir()) // 首次运行种入 soft 示例主题(themes/ 已存在则跳过;内部吞错不阻塞启动)
 
   ipcMain.handle('config:get', () => effectiveConfig())
   ipcMain.handle('config:set', async (_e, patch: Partial<TanguStoredConfig>) => {
     const before = await loadConfig()
-    const merged = await saveConfig(patch)
+    await saveConfig(patch)
     // 模式/托管参数变化 → 重启托管后端(切到 external 则停掉)。
     const managedKeys: Array<keyof TanguStoredConfig> = [
       'mode', 'cloudUrl', 'cloudToken', 'sandbox',
@@ -507,10 +600,12 @@ app.whenReady().then(async () => {
     })
   })
 
-  // ── MCP server 管理(写 ~/.tangu/mcp.json;managed 模式保存后重启后端重连)──
+  // ── MCP server 管理(写 config.json 的 mcp 段;managed 模式保存后重启后端重连)──
   const mcpFile = (): string => join(tanguHomeDir(), 'mcp.json')
   ipcMain.handle('mcp:read', async () => {
-    try {
+    const sec = (await readHomeConfig()).mcp
+    if (sec !== undefined) return { mcpServers: sec?.mcpServers && typeof sec.mcpServers === 'object' ? sec.mcpServers : {} }
+    try { // 回落 legacy mcp.json(后端 migrate 前的过渡)
       const parsed = JSON.parse(await readFile(mcpFile(), 'utf8'))
       return { mcpServers: parsed?.mcpServers && typeof parsed.mcpServers === 'object' ? parsed.mcpServers : {} }
     } catch {
@@ -519,12 +614,18 @@ app.whenReady().then(async () => {
   })
   ipcMain.handle('mcp:write', async (_e, cfg: { mcpServers: Record<string, any> }) => {
     if (!cfg || typeof cfg.mcpServers !== 'object') throw new Error('非法 MCP 配置')
-    await mkdir(tanguHomeDir(), { recursive: true })
-    await writeFile(mcpFile(), JSON.stringify({ mcpServers: cfg.mcpServers }, null, 2), 'utf8')
-    await chmod(mcpFile(), 0o600).catch(() => {}) // env/headers 可能含密钥
+    await saveHomeSection('mcp', { mcpServers: cfg.mcpServers }) // 唯一真源:config.json mcp 段(chmod 600)
     const stored = await loadConfig()
     if (stored.mode === 'managed') void ensureBackend() // 重启后端重连 MCP(进程级冻结语义)
     return { mcpServers: cfg.mcpServers }
+  })
+
+  // ── 拖入式主题(~/.tangu/themes/<id>/{theme.json,theme.css}):主进程读盘 → 渲染端 <style> 注入 ──
+  ipcMain.handle('themes:list', () => readThemesDir(themesDir()))
+  ipcMain.handle('themes:openDir', async () => {
+    await mkdir(themesDir(), { recursive: true })
+    await shell.openPath(themesDir())
+    return { ok: true }
   })
 
   // ── 跨生态 agent 资产发现/导入(~/.claude、~/.codex、~/.hermes → ~/.tangu)──
@@ -533,8 +634,18 @@ app.whenReady().then(async () => {
   ipcMain.handle('discovery:scan', () => scanAll())
   ipcMain.handle('discovery:importSkills', (_e, ids: string[]) =>
     importSkills(Array.isArray(ids) ? ids.filter((x) => typeof x === 'string') : [], tanguHomeDir()))
-  ipcMain.handle('discovery:importMcp', (_e, names: string[]) =>
-    importMcp(Array.isArray(names) ? names.filter((x) => typeof x === 'string') : [], tanguHomeDir()))
+  ipcMain.handle('discovery:importMcp', async (_e, names: string[]) => {
+    // importMcp 在 legacy mcp.json 上做合并:先把 config.json 的 mcp 段播种进去(免丢已有),导入后再写回 config.json。
+    const home = await readHomeConfig()
+    await mkdir(tanguHomeDir(), { recursive: true })
+    await writeFile(mcpFile(), JSON.stringify({ mcpServers: home.mcp?.mcpServers || {} }, null, 2), 'utf8')
+    const r = await importMcp(Array.isArray(names) ? names.filter((x) => typeof x === 'string') : [], tanguHomeDir())
+    try {
+      const merged = JSON.parse(await readFile(mcpFile(), 'utf8'))
+      await saveHomeSection('mcp', { mcpServers: merged?.mcpServers || {} })
+    } catch { /* importMcp 未写文件(无导入项)→ config.json 不变 */ }
+    return r
+  })
 
   // ── 直连 provider 管理(写 ~/.tangu/providers.json;managed 模式保存后重启后端加载)──
   ipcMain.handle('providers:list', () => readProvidersFile())
@@ -593,15 +704,71 @@ app.whenReady().then(async () => {
   })
 
   // 打开 Forsion 个人中心(对齐 AI Studio:{cloudUrl}/account?token=…)。token 留在主进程,不下发渲染层。
-  ipcMain.handle('auth:openAccountCenter', async () => {
+  // 可选 section → 追加 #<section>(如投稿页 #submission)。
+  ipcMain.handle('auth:openAccountCenter', async (_e, section?: string) => {
     const stored = await loadConfig()
     const creds = loadTanguCreds()
     const cloudUrl = (stored.cloudUrl || creds.cloudUrl || '').replace(/\/+$/, '')
     const token = stored.cloudToken || creds.token || ''
     if (!cloudUrl) return { ok: false }
-    const url = `${cloudUrl}/account${token ? `?token=${encodeURIComponent(token)}` : ''}`
+    const hash = section && /^[a-z0-9-]+$/i.test(section) ? `#${section}` : ''
+    const url = `${cloudUrl}/account${token ? `?token=${encodeURIComponent(token)}` : ''}${hash}`
     await shell.openExternal(url)
     return { ok: true }
+  })
+
+  // ── Forsion Market ──
+  // 浏览/详情/安装全在主进程:有 cloudUrl + 文件系统 + 免 CORS。浏览端点公开(无需 token)。
+  const marketBase = async (): Promise<string> => {
+    const stored = await loadConfig()
+    const creds = loadTanguCreds()
+    const base = (stored.cloudUrl || creds.cloudUrl || '').replace(/\/+$/, '')
+    if (!base) throw new Error('未配置 Forsion 云端地址')
+    return base
+  }
+  const MARKET_UA = 'Forsion-Tangu'
+
+  ipcMain.handle('market:list', async (_e, type?: string) => {
+    const base = await marketBase()
+    const q = type ? `?type=${encodeURIComponent(type)}` : ''
+    const r = await fetch(`${base}/api/market/items${q}`, { headers: { 'User-Agent': MARKET_UA } })
+    if (!r.ok) throw new Error(`加载失败 HTTP ${r.status}`)
+    return await r.json() // { items }
+  })
+
+  ipcMain.handle('market:detail', async (_e, id: string) => {
+    const base = await marketBase()
+    const r = await fetch(`${base}/api/market/items/${encodeURIComponent(id)}`, { headers: { 'User-Agent': MARKET_UA } })
+    if (!r.ok) throw new Error(`加载失败 HTTP ${r.status}`)
+    return await r.json()
+  })
+
+  ipcMain.handle('market:install', async (_e, id: string) => {
+    const base = await marketBase()
+    const infoRes = await fetch(`${base}/api/market/items/${encodeURIComponent(id)}/install`, { headers: { 'User-Agent': MARKET_UA } })
+    if (!infoRes.ok) throw new Error(`解析下载地址失败 HTTP ${infoRes.status}`)
+    const info = (await infoRes.json()) as { type: string; installSlug: string; downloadUrl: string; source: string }
+    const sub = MARKET_SUBDIR[info.type]
+    if (!sub || !isSafeSlug(info.installSlug)) throw new Error('非法的安装目标')
+    const zipRes = await fetch(info.downloadUrl, { headers: { 'User-Agent': MARKET_UA } })
+    if (!zipRes.ok) throw new Error(`下载失败 HTTP ${zipRes.status}`)
+    const buf = Buffer.from(await zipRes.arrayBuffer())
+    const dest = join(tanguHomeDir(), sub, info.installSlug)
+    const files = await extractZipToDir(buf, dest)
+    return { ok: true, path: dest, files, type: info.type, slug: info.installSlug }
+  })
+
+  ipcMain.handle('market:installed', async () => {
+    const out: Record<string, string[]> = { skill: [], agent: [], plugin: [] }
+    for (const [type, sub] of Object.entries(MARKET_SUBDIR)) {
+      try {
+        const ents = await readdir(join(tanguHomeDir(), sub), { withFileTypes: true })
+        out[type] = ents.filter((e) => e.isDirectory()).map((e) => e.name)
+      } catch {
+        /* 目录不存在 = 空 */
+      }
+    }
+    return out
   })
 
   // 提交反馈到 Forsion 反馈中心(token 留主进程,不下发渲染层)。会话日志 JSON 作附件随附,
@@ -653,16 +820,20 @@ app.whenReady().then(async () => {
     const stored = await loadConfig()
     const url = (cloudUrl || stored.cloudUrl || '').trim()
     const r = await forsionDeviceLogin(url, (info) => broadcast('auth:device', info))
-    // 登录成功:cloudUrl 记进配置(token 留在 auth.json,managed 后端/getToken 自动回退读取);
-    // managed 模式重启后端让子进程吃到新凭证。
-    await saveConfig({ cloudUrl: r.cloudUrl })
+    // 登录成功:cloudUrl 记进配置;token 由 forsionDeviceLogin 写进 auth.json(managed 后端/getToken 回退读取)。
+    // ⚠️ config.cloud.token 优先级高于 auth.json(getToken/auth:status 均 `cloudToken || creds.token`)——
+    // 残留的旧 cloudToken 会遮蔽本次登录的新 token,故一并清掉,否则「登录了但 Tangu 仍用旧 token」。
+    await saveConfig({ cloudUrl: r.cloudUrl, ...(stored.cloudToken ? { cloudToken: '' } : {}) })
     if (stored.mode === 'managed') void ensureBackend()
     return { ok: true, cloudUrl: r.cloudUrl }
   })
 
   ipcMain.handle('auth:logout', async () => {
-    forsionLogout()
+    forsionLogout()                 // 清 auth.json 的 token
     const stored = await loadConfig()
+    // 也清 config.json 的 cloudToken:auth:status 等一律 `stored.cloudToken || creds.token` 优先读它,
+    // 不清则登出后仍判定已登录(本 bug 根因)。
+    if (stored.cloudToken) await saveConfig({ cloudToken: '' })
     if (stored.mode === 'managed') void ensureBackend()
     return { ok: true }
   })

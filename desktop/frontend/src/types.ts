@@ -4,6 +4,8 @@ export interface TanguDesktopConfig {
   backendUrl: string
   token: string
   modelId: string
+  /** 默认生图模型 id(generate_image 用;缺省=自动取第一个可用生图模型)。 */
+  imageModelId?: string
 }
 
 export interface StartRunResult {
@@ -135,6 +137,8 @@ export interface NormalAgentDef {
 
 export interface AgentConfig {
   systemPrompt?: string
+  /** 默认生图模型 id(generate_image 缺省据此;来自全局设置 cfg.imageModelId,随 run 透传)。 */
+  imageModelId?: string
   /** 激活的 Normal Agent slug(后端 agentLoop 解析注入人格/模型/工具)。 */
   agentSlug?: string
   /** 外部 agent 引擎 id(如 'claude-code'):设了就把整个 turn 委托给该 ACP 引擎而非 Tangu 自有 loop。host-only。 */
@@ -205,13 +209,15 @@ export interface ModelInfo {
   name: string
   provider: string
   source: 'forsion' | 'direct'
+  /** 大语言模型 / 生图模型(后端已分类;模型设置据此分区,生图选 image_gen)。缺省视作 llm。 */
+  modelType?: 'llm' | 'image_gen'
   /** 模型上下文窗口(tokens);输入框「上下文占比」进度条用。后端缺省回退全局默认。 */
   contextWindow?: number
 }
 
 export interface ModelsResponse {
   models: ModelInfo[]
-  directProviders: Array<{ providerId: string; baseUrl?: string; modelIds?: string[] }>
+  directProviders: Array<{ providerId: string; baseUrl?: string; modelIds?: string[]; imageModelIds?: string[] }>
   defaultModelId: string | null
   /** 云端托管面诊断:empty=可达但 admin 没配模型;error=不可达/未授权/未部署 brain-api。 */
   forsion?: { status: 'ok' | 'empty' | 'error'; detail: string | null }
@@ -223,6 +229,8 @@ export interface DirectProviderConfig {
   baseUrl: string
   apiKey?: string
   modelIds?: string[]
+  /** 该 provider 的生图模型 id(OpenAI 兼容 /images/generations;generate_image 用)。 */
+  imageModelIds?: string[]
 }
 
 export interface SkillInfo {
@@ -307,6 +315,16 @@ export interface Attachment {
   size: number
 }
 
+/** agent 主动展示给用户的文件(display_file / generate_image / 表情包);path 或 dataUrl 二选一。 */
+export interface DisplayFile {
+  name: string
+  mime?: string
+  /** 工作区文件路径(host 会话=绝对路径;沙箱=工作区相对路径)。 */
+  path?: string
+  /** 内联数据 URL(data:<mime>;base64,...);无工作区路径的小文件用(表情包 / 沙箱生图)。 */
+  dataUrl?: string
+}
+
 // ── 聊天流 UI 模型(由历史 + SSE 事件归约) ─────────────────────────────────────
 
 export interface ToolEvent {
@@ -364,6 +382,8 @@ export interface UiMessage {
   /** 本会话任务清单(todo 事件;渲染为 todolist,整单替换)。 */
   todos?: TodoItem[]
   attachments?: Attachment[]
+  /** agent 在对话区展示的文件(display_file 事件 / 历史 display_files);图片渲染为可点击放大的缩略图。 */
+  displayFiles?: DisplayFile[]
   status?: 'streaming' | 'done' | 'error' | 'stopped'
   error?: string
   timestamp: number
@@ -451,7 +471,7 @@ declare global {
       forsionLogout?(): Promise<{ ok: boolean }>
       authProviders?(): Promise<Array<{ id: string; loggedIn: boolean }>>
       providerLogin?(id: string): Promise<{ ok: boolean; id: string }>
-      openAccountCenter?(): Promise<{ ok: boolean }>
+      openAccountCenter?(section?: string): Promise<{ ok: boolean }>
       /** 提交反馈到 Forsion 反馈中心(会话日志 JSON 随附为附件;token 留主进程)。 */
       submitFeedback?(input: { description: string; sessionLogJson?: string; sessionLogName?: string }): Promise<{ ok: boolean; id?: string | null; error?: string; attachmentSkipped?: boolean }>
       appVersion?(): Promise<string>
@@ -490,6 +510,33 @@ declare global {
       envCheck?(): Promise<EnvProbeResult[]>
       envRun?(installId: string): Promise<{ exitCode: number }>
       onEnvOutput?(cb: (ev: { installId: string; line: string }) => void): () => void
+      /** 拖入式主题:列 ~/.tangu/themes/(每项 {id,manifest,css})/ 打开该文件夹。 */
+      listThemes?(): Promise<Array<{ id: string; manifest: Record<string, unknown>; css: string }>>
+      openThemesDir?(): Promise<{ ok: boolean }>
+      /** Forsion Market:浏览(公开)/ 详情含 README / 安装(下载+按类型解压到 ~/.tangu)/ 已装列表。 */
+      marketList?(type?: string): Promise<{ items: MarketCard[] }>
+      marketDetail?(id: string): Promise<MarketDetail>
+      marketInstall?(id: string): Promise<{ ok: boolean; path: string; files: number; type: string; slug: string }>
+      marketInstalled?(): Promise<Record<string, string[]>>
     }
   }
+}
+
+/** 市场卡片(浏览列表)。 */
+export interface MarketCard {
+  id: string
+  type: 'skill' | 'agent' | 'plugin'
+  source: 'github' | 'zip'
+  name: string
+  summary: string
+  author: string
+  installSlug: string
+  downloads: number
+  latestTag?: string | null
+}
+
+/** 市场详情(含 README 正文)。 */
+export interface MarketDetail extends MarketCard {
+  readme: string
+  githubRepoUrl?: string | null
 }

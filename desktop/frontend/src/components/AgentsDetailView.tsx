@@ -6,6 +6,7 @@ import React, { useEffect, useState } from 'react'
 import { History, Sparkles, RefreshCw, Settings } from 'lucide-react'
 import { getHistorianActivity, getMuseStatus, getMuseTodos } from '../services/backendService'
 import type { HistorianActivityItem, MuseStatusInfo, MuseTodo, TanguDesktopConfig } from '../types'
+import { useApp } from '../stores/appStore'
 import { useI18n } from '../i18n'
 
 const ACTION_KEY: Record<string, string> = {
@@ -17,6 +18,7 @@ const ACTION_KEY: Record<string, string> = {
 
 export const AgentsDetailView: React.FC<{ cfg: TanguDesktopConfig; onOpenSettings: () => void }> = ({ cfg, onOpenSettings }) => {
   const { t } = useI18n()
+  const connState = useApp((s) => s.connState)
   const [activity, setActivity] = useState<HistorianActivityItem[] | null>(null)
   const [muse, setMuse] = useState<MuseStatusInfo | null>(null)
   const [todos, setTodos] = useState<MuseTodo[]>([])
@@ -27,11 +29,12 @@ export const AgentsDetailView: React.FC<{ cfg: TanguDesktopConfig; onOpenSetting
     void getMuseTodos(cfg, 'pending').then(setTodos).catch(() => setTodos([]))
   }
   useEffect(() => {
+    if (connState !== 'ok') return // 未连上后端前不发请求(避免启动期 ERR_CONNECTION_REFUSED;连上后重跑)
     load()
     const id = setInterval(load, 8000)
     return () => clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [connState])
 
   return (
     <div className="agentsd">
