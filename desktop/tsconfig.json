@@ -12,8 +12,10 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["frontend/src/*"]
+      "@/*": ["frontend/src/*"],
+      "@amadeus/*": ["frontend/src/amadeus/*"],
+      "@amadeus-shared/*": ["shared/amadeus/*"]
     }
   },
-  "include": ["electron/**/*", "frontend/src/**/*"]
+  "include": ["electron/**/*", "frontend/src/**/*", "shared/**/*"]
 }

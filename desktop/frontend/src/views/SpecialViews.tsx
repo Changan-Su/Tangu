@@ -6,7 +6,7 @@ import { WeChatView } from '../components/WeChatView'
 import { AgentsDetailView } from '../components/AgentsDetailView'
 import { WorkspaceDetailView } from '../components/WorkspaceDetailView'
 import { useApp, type SpecialKind } from '../stores/appStore'
-import { useWorkspace } from '../engine'
+import { useWorkspace, recordNav } from '../engine'
 import { CLOUD_WORKSPACE_KEY } from '../types'
 import { useShallow } from 'zustand/react/shallow'
 
@@ -23,6 +23,8 @@ export function openSpecial(kind: SpecialKind, wsKey?: string): void {
   if (kind === 'workspace' && wsKey != null) a.setDetailWsKey(wsKey)
   a.setActiveSpecial(kind)
   useWorkspace.getState().openView(VIEW_TYPE[kind], {}, 'main')
+  // 喂主面板导航历史(前进/后退)。back/forward 复原期间 recordNav 有闸,不重记。
+  recordNav(`special:${kind}${wsKey ? `:${wsKey}` : ''}`, () => openSpecial(kind, wsKey))
 }
 
 /** 从特殊视图里打开某会话 → 设为活动 + 焦点回对话 leaf。 */

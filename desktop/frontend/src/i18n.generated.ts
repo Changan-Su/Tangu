@@ -1010,6 +1010,11 @@ registerMessages({
     "zh": "技能库",
     "en": "Skill library"
   },
+  "settings.skills.openFolder": { "zh": "打开技能文件夹", "en": "Open skills folder" },
+  "settings.agents.openFolder": { "zh": "打开文件夹", "en": "Open folder" },
+  "sidebar.account.expired": { "zh": "登录已过期 · 点击重新登录", "en": "Session expired · click to re-login" },
+  "settings.forsion.expired": { "zh": "登录已过期,请重新登录(否则后端无法连接)。", "en": "Session expired — please re-login (the backend can't connect otherwise)." },
+  "settings.forsion.relogin": { "zh": "重新登录", "en": "Re-login" },
   "settings.skills.libraryHintPrefix": {
     "zh": "按来源渠道(agent 文件夹)分组。本地技能放 ",
     "en": "Grouped by source channel (agent folder). Put local skills in "
@@ -1478,4 +1483,10 @@ registerMessages({
   "onboarding.connect.benefitsTitle": { "zh": "登录 Forsion 账号即可", "en": "With a Forsion account" },
   "onboarding.connect.benefitSync": { "zh": "云端同步:记忆、会话、设置多端一致", "en": "Cloud sync — memory, sessions and settings stay consistent across devices" },
   "onboarding.connect.benefitModels": { "zh": "各种 AI 模型任意使用,无需自备 API Key", "en": "Use any AI model freely — no API key of your own needed" },
+  "onboarding.connect.benefitFreeQuota": { "zh": "每日免费 AI 额度 —— 注册即送,无需付费即可开始", "en": "Free daily AI quota — included on sign-up, start without paying" },
+  "onboarding.connect.modeSub": { "zh": "订阅登录", "en": "Subscription" },
+  "onboarding.connect.subDesc": { "zh": "用你的 Claude / ChatGPT / xAI 订阅账号直连,跑各自的订阅额度(不计 Forsion 额度)。", "en": "Connect with your Claude / ChatGPT / xAI subscription account and run on its own quota (doesn't count against Forsion quota)." },
+  "onboarding.connect.subHint": { "zh": "OAuth 浏览器登录,凭证只存本机 ~/.tangu/provider-auth.json;登录后用 provider/model(如 claude/claude-opus-4-8)选模型。", "en": "OAuth browser login; credentials stay on your machine in ~/.tangu/provider-auth.json. After login, pick a model with provider/model (e.g. claude/claude-opus-4-8)." },
+  "onboarding.connect.subUnavailable": { "zh": "当前环境不支持订阅登录(仅桌面端)。", "en": "Subscription login isn't available here (desktop only)." },
+  "onboarding.connect.subLoginOk": { "zh": "订阅账号已连接", "en": "Subscription account connected" },
 })

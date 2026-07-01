@@ -1,6 +1,39 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRunEvent, UiMessage } from '../types'
-import { useApp } from './appStore'
+import { useApp, recordToUi } from './appStore'
+
+// 助手消息身份还原:历史/重载的助手消息按「每条存的 agent_slug」显示真实作者,
+// 否则只能回退到「会话默认 agent」(就是 Christina 被显示成默认 Tangu Arioso 的 bug)。
+describe('recordToUi agent 身份', () => {
+  const resolveGroup = (name: string) => (name === 'Host' ? { slug: '__host__', color: '#000' } : { color: '#111' })
+  const resolveSlug = (slug: string) => ({ christina: 'Christina', xyra: 'Tangu Arioso' }[slug])
+
+  it('用 agent_slug 还原 agentId + agentName(单聊,不染色)', () => {
+    const m = recordToUi({ id: 'm1', role: 'model', content: '早上好', agent_slug: 'christina' }, resolveGroup, resolveSlug)
+    expect(m.agentId).toBe('christina')
+    expect(m.agentName).toBe('Christina')
+    expect(m.agentColor).toBeUndefined() // 单聊不用群聊彩色名
+  })
+
+  it('群聊 🗣 前缀优先于 agent_slug', () => {
+    const m = recordToUi({ id: 'm2', role: 'model', content: '**🗣 Host**\n大家好', agent_slug: 'christina' }, resolveGroup, resolveSlug)
+    expect(m.agentId).toBe('__host__')
+    expect(m.agentName).toBe('Host')
+    expect(m.content).toBe('大家好')
+  })
+
+  it('旧消息无 agent_slug → 不盖身份(留给会话回退)', () => {
+    const m = recordToUi({ id: 'm3', role: 'model', content: 'hi' }, resolveGroup, resolveSlug)
+    expect(m.agentId).toBeUndefined()
+    expect(m.agentName).toBeUndefined()
+  })
+
+  it('agent_slug 不在册 → 设 agentId 但 name 留空(回退会话名,不退默认头像)', () => {
+    const m = recordToUi({ id: 'm4', role: 'model', content: 'hi', agent_slug: 'ghost' }, resolveGroup, resolveSlug)
+    expect(m.agentId).toBe('ghost')
+    expect(m.agentName).toBeUndefined()
+  })
+})
 
 const initial = useApp.getState()
 const assistant = (): UiMessage => ({

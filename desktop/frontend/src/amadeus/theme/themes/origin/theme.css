@@ -1,0 +1,61 @@
+/* Origin · 本源 — the default theme. Lovable "paper" language: cream ground, charcoal
+ * monochrome accent, soft-shadow-as-border, restrained radii. (Source: Forsion-LCL #/tangu.)
+ *
+ * Origin is the default, so its palette lives on the bare [data-mode] selectors (a stored
+ * theme that no longer exists — e.g. legacy 'qbird' — falls through to Origin, no flash),
+ * and its radii/font are the :root fallback. Other themes override via [data-theme='id'].
+ * Derived tints (--selection/--drop/--primary-soft) compute once from --primary. */
+
+:root {
+  /* Restrained, near-angular radii — the paper feel. */
+  --radius-xs: 6px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+
+  --font-ui: 'Hanken Grotesk', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+[data-mode='light'] {
+  color-scheme: light;
+  --bg: #f7f4ed;
+  --bg-alt: #f3efe7;
+  --surface: #fefdf9;
+  --surface-2: #fffefb;
+  --border: #efece4;
+  --border-strong: rgba(28, 28, 28, 0.14);
+  --text: #1c1c1c;
+  --text-sec: rgba(28, 28, 28, 0.82);
+  --text-muted: #5f5f5d;
+  --shadow-panel: 0 1px 2px rgba(42, 36, 26, 0.04), 0 10px 26px rgba(42, 36, 26, 0.05);
+
+  --primary: #1c1c1c;
+  --primary-2: #000000;
+  --on-primary: #fcfbf8;
+  --selection: color-mix(in srgb, var(--primary) 14%, transparent);
+  --drop: color-mix(in srgb, var(--primary) 12%, transparent);
+  --primary-soft: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+[data-mode='dark'] {
+  color-scheme: dark;
+  --bg: #1c1a16;
+  --bg-alt: #211e18;
+  --surface: #262219;
+  --surface-2: #2e2a20;
+  --border: #34302a;
+  --border-strong: rgba(242, 239, 232, 0.15);
+  --text: #f2efe8;
+  --text-sec: rgba(242, 239, 232, 0.82);
+  --text-muted: #a8a096;
+  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 26px rgba(0, 0, 0, 0.35);
+
+  --primary: #ece7dd;
+  --primary-2: #fffaf0;
+  --on-primary: #1c1a16;
+  --selection: color-mix(in srgb, var(--primary) 18%, transparent);
+  --drop: color-mix(in srgb, var(--primary) 14%, transparent);
+  --primary-soft: color-mix(in srgb, var(--primary) 14%, transparent);
+}

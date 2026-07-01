@@ -156,7 +156,7 @@ router.get('/agent/sessions/:id/messages', authMiddleware, async (req: AuthReque
     const limit = Math.floor(Math.min(Math.max(1, Number(req.query.limit) || 200), 500)); // floor:非整数插进 LIMIT 会成非法 SQL
     const before = Number(req.query.before) || 0;
     const rows = await query<any[]>(
-      `SELECT id, role, content, reasoning, tool_calls, tool_results, attachments, display_files, timestamp, model_id, is_error
+      `SELECT id, role, content, reasoning, tool_calls, tool_results, attachments, display_files, agent_slug, timestamp, model_id, is_error
        FROM chat_messages WHERE session_id = ?${before ? ' AND timestamp < ?' : ''}
        ORDER BY timestamp DESC LIMIT ${limit}`,
       before ? [req.params.id, before] : [req.params.id],

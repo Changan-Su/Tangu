@@ -8,7 +8,7 @@ import { basename, dirname, join } from 'path'
 import { pathToFileURL } from 'url'
 import { readFile, writeFile, mkdir, chmod, readdir, stat, rename, cp } from 'fs/promises'
 import { execFile, spawn } from 'child_process'
-import { BackendManager, type BackendStatus } from './backendManager'
+import { BackendManager, bundledPythonBin, type BackendStatus } from './backendManager'
 import {
   forsionDeviceLogin, forsionLogout, forsionWhoami, loadTanguCreds,
 } from './forsionAuth'
@@ -16,6 +16,9 @@ import { importMcp, importSkills, scanAll } from './discovery'
 import { checkForUpdates, downloadUpdate, installUpdate } from './updater'
 import { readThemesDir, seedDefaultThemes } from './themes'
 import { extractZipToDir, MARKET_SUBDIR, MARKET_MANIFEST, isSafeSlug, readInstalledVersion } from './marketInstall'
+// Amadeus Space:vendored 笔记后端(vault IPC + 资产协议)。renderImport 别名后保持 verbatim。
+import { registerIpc as registerAmadeusIpc } from './amadeus/ipc'
+import { registerAssetSchemes as registerAmadeusAssetSchemes, registerAssetProtocol as registerAmadeusAssetProtocol } from './amadeus/assetProtocol'
 
 /** ~/.tangu(与包内 core/tanguHome.ts 同约定;TANGU_HOME 可整体重定向)。 */
 const tanguHomeDir = (): string => process.env.TANGU_HOME || join(app.getPath('home'), '.tangu')
@@ -160,6 +163,14 @@ async function runEnvCheck(): Promise<EnvProbe[]> {
     }
     out.push({ tool: p.tool, found: version !== null, version, installId, installCommand })
   }
+  // 内置 Python:默认 pythonMode=bundled 时 agent 用内置解释器,故 python 视为已满足(展示内置版本、无需系统安装)。
+  const pyBin = bundledPythonBin()
+  if (pyBin) {
+    const v = await probeVersion(pyBin, ['--version'])
+    const idx = out.findIndex((o) => o.tool === 'python3')
+    const entry: EnvProbe = { tool: 'python3', found: true, version: `${v || 'Python'} · bundled`, installId: null, installCommand: null }
+    if (idx >= 0) out[idx] = entry; else out.push(entry)
+  }
   return out
 }
 
@@ -173,6 +184,10 @@ interface TanguStoredConfig {
   cloudUrl: string // managed:传给 tangu-server 的 Forsion 云端
   cloudToken: string // managed:forsion_token(空则子进程回退 tangu login 凭证)
   sandbox: 'auto' | 'docker' | 'none'
+  /** Python 来源:bundled=内置解释器(默认,免装/隔离);system=用系统已装 python。 */
+  pythonMode: 'bundled' | 'system'
+  /** 网络镜像:china=中国大陆镜像源(pip/npm/git + 市场 github 下载);default=直连。 */
+  mirror: 'default' | 'china'
   /** 「Tangu 默认工作区」本地目录(空=按 ~/Tangu 兜底);新建本机会话默认 cwd。 */
   defaultWorkspaceDir: string
   browserEnabled: boolean
@@ -188,6 +203,12 @@ interface TanguStoredConfig {
   forsionSyncEnabled: boolean
   /** 上次成功同步时刻(epoch ms)。 */
   forsionLastSyncedAt: number
+  /** 笔记(Amadeus)拖入附件存放方式:attachments=同目录 attachments/;same=与笔记同目录;vault=固定文件夹。 */
+  notesAttachmentMode: 'attachments' | 'same' | 'vault'
+  /** notesAttachmentMode==='vault' 时的 vault 相对文件夹(如 "assets")。 */
+  notesAttachmentFolder: string
+  /** 导入文件是否默认开启预览(![[file]] 形式);false=插入 [名](路径) 链接。 */
+  notesImportPreview: boolean
 }
 
 /**
@@ -206,6 +227,8 @@ const DEFAULT_CONFIG: TanguStoredConfig = {
   cloudUrl: '',
   cloudToken: '',
   sandbox: 'auto',
+  pythonMode: 'bundled',
+  mirror: 'default',
   defaultWorkspaceDir: '',
   browserEnabled: true,
   browserEngine: 'auto',
@@ -218,6 +241,9 @@ const DEFAULT_CONFIG: TanguStoredConfig = {
   wechatAllowedPeers: [],
   forsionSyncEnabled: false,
   forsionLastSyncedAt: 0,
+  notesAttachmentMode: 'attachments',
+  notesAttachmentFolder: 'assets',
+  notesImportPreview: true,
 }
 
 /** 默认工作区目录(配置未填时兜底 ~/Tangu);best-effort 创建,失败不阻断。 */
@@ -231,6 +257,7 @@ async function ensureDefaultWorkspaceDir(stored: TanguStoredConfig): Promise<str
 // 其余键(cloud/sandbox/workspace/browser/wechat)以 ~/.tangu/config.json 各段为权威,落盘亦写那里。
 const SHELL_KEYS: Array<keyof TanguStoredConfig> = [
   'mode', 'backendUrl', 'token', 'wechatAllowedPeers', 'forsionSyncEnabled', 'forsionLastSyncedAt',
+  'pythonMode', 'mirror', // 桌面专属(内置 python 是桌面才有的能力;镜像经后端 env 注入,不落 config.json 段)
 ]
 const configPath = (): string => join(app.getPath('userData'), 'tangu-desktop-config.json')
 
@@ -261,7 +288,7 @@ async function readShellConfig(): Promise<Partial<TanguStoredConfig>> {
 async function loadConfig(): Promise<TanguStoredConfig> {
   const shell = await readShellConfig()
   const home = await readHomeConfig()
-  const cloud = home.cloud || {}, browser = home.browser || {}, wechat = home.wechat || {}
+  const cloud = home.cloud || {}, browser = home.browser || {}, wechat = home.wechat || {}, notes = home.notes || {}
   const merged: TanguStoredConfig = {
     ...DEFAULT_CONFIG,
     ...shell, // 旧 desktop 文件:既给 shell 键,也作未迁移段的回落
@@ -276,6 +303,11 @@ async function loadConfig(): Promise<TanguStoredConfig> {
     ...(home.wechat !== undefined ? {
       wechatEnabled: wechat.enabled !== false, wechatDefaultSessionId: wechat.defaultSessionId || '',
       wechatRemoteApprovalMode: wechat.remoteApprovalMode || 'readonly',
+    } : {}),
+    ...(home.notes !== undefined ? {
+      notesAttachmentMode: notes.mode || 'attachments',
+      notesAttachmentFolder: notes.folder || 'assets',
+      notesImportPreview: notes.preview !== false,
     } : {}),
   }
   // 环境变量兜底:TANGU_CLOUD_URL(managed/登录默认)、TANGU_BACKEND_URL(external 外部地址)。
@@ -300,8 +332,8 @@ async function saveConfig(patch: Partial<TanguStoredConfig>): Promise<TanguStore
   }
   // config-backed 键 → config.json 段
   const home = await readHomeConfig()
-  const cloud = { ...(home.cloud || {}) }, browser = { ...(home.browser || {}) }, wechat = { ...(home.wechat || {}) }
-  let cT = false, bT = false, wT = false, oT = false
+  const cloud = { ...(home.cloud || {}) }, browser = { ...(home.browser || {}) }, wechat = { ...(home.wechat || {}) }, notes = { ...(home.notes || {}) }
+  let cT = false, bT = false, wT = false, oT = false, nT = false
   if ('cloudUrl' in patch) { cloud.url = patch.cloudUrl; cT = true }
   if ('cloudToken' in patch) { cloud.token = patch.cloudToken; cT = true }
   if ('modelId' in patch) { cloud.defaultModel = patch.modelId; cT = true }
@@ -315,10 +347,14 @@ async function saveConfig(patch: Partial<TanguStoredConfig>): Promise<TanguStore
   if ('wechatEnabled' in patch) { wechat.enabled = patch.wechatEnabled; wT = true }
   if ('wechatDefaultSessionId' in patch) { wechat.defaultSessionId = patch.wechatDefaultSessionId; wT = true }
   if ('wechatRemoteApprovalMode' in patch) { wechat.remoteApprovalMode = patch.wechatRemoteApprovalMode; wT = true }
+  if ('notesAttachmentMode' in patch) { notes.mode = patch.notesAttachmentMode; nT = true }
+  if ('notesAttachmentFolder' in patch) { notes.folder = patch.notesAttachmentFolder; nT = true }
+  if ('notesImportPreview' in patch) { notes.preview = patch.notesImportPreview; nT = true }
   if (cT) home.cloud = cloud
   if (bT) home.browser = browser
   if (wT) home.wechat = wechat
-  if (cT || bT || wT || oT) await writeHomeConfig(home)
+  if (nT) home.notes = notes
+  if (cT || bT || wT || oT || nT) await writeHomeConfig(home)
   return loadConfig()
 }
 
@@ -353,6 +389,8 @@ function ensureBackend(): Promise<void> {
       cloudToken: stored.cloudToken,
       modelId: stored.modelId || undefined,
       sandbox: stored.sandbox,
+      pythonMode: stored.pythonMode,
+      mirror: stored.mirror,
       browserEnabled: stored.browserEnabled,
       browserEngine: stored.browserEngine,
       browserSearchEngine: stored.browserSearchEngine,
@@ -449,6 +487,9 @@ function recoverRenderer(reason: string): void {
 if (process.platform === 'win32') app.commandLine.appendSwitch('disable-gpu-process-crash-limit')
 if (process.env.TANGU_DISABLE_GPU === '1') app.disableHardwareAcceleration()
 
+// Amadeus Space:amadeus-asset:// 自定义协议须在 app ready 前登记为 privileged。
+registerAmadeusAssetSchemes()
+
 app.whenReady().then(async () => {
   await loadTanguEnvFile() // 先于一切 loadConfig(其 env 兜底读 TANGU_CLOUD_URL/TANGU_BACKEND_URL)
   await seedDefaultThemes(themesDir()) // 首次运行种入 soft 示例主题(themes/ 已存在则跳过;内部吞错不阻塞启动)
@@ -459,7 +500,7 @@ app.whenReady().then(async () => {
     await saveConfig(patch)
     // 模式/托管参数变化 → 重启托管后端(切到 external 则停掉)。
     const managedKeys: Array<keyof TanguStoredConfig> = [
-      'mode', 'cloudUrl', 'cloudToken', 'sandbox',
+      'mode', 'cloudUrl', 'cloudToken', 'sandbox', 'pythonMode', 'mirror',
       'browserEnabled', 'browserEngine', 'browserSearchEngine', 'browserAllowPrivateUrls', 'browserCommandTimeoutMs',
       'wechatEnabled', 'wechatRemoteApprovalMode',
     ]
@@ -670,6 +711,23 @@ app.whenReady().then(async () => {
     return { ok: true }
   })
 
+  // ── 设置界面「打开文件夹」:在系统文件管理器打开 agent / skills 目录(~/.tangu/{agents,skills})──
+  ipcMain.handle('agents:openDir', async (_e, slug?: string) => {
+    const base = join(tanguHomeDir(), 'agents')
+    // slug 安全化(只允许文件名字符,防路径穿越);无效/缺省则打开 agents 根目录。
+    const safe = typeof slug === 'string' && /^[A-Za-z0-9_-]+$/.test(slug) ? slug : ''
+    const dir = safe ? join(base, safe) : base
+    await mkdir(dir, { recursive: true })
+    await shell.openPath(dir)
+    return { ok: true }
+  })
+  ipcMain.handle('skills:openDir', async () => {
+    const dir = join(tanguHomeDir(), 'skills')
+    await mkdir(dir, { recursive: true })
+    await shell.openPath(dir)
+    return { ok: true }
+  })
+
   // ── 跨生态 agent 资产发现/导入(~/.claude、~/.codex、~/.hermes → ~/.tangu)──
   // 导入的 MCP 一律 enabled:false(绝不自动运行外来命令),故**不**触发后端重启;
   // 技能落盘 ~/.tangu/skills/ 后由后端按 mtime 重扫即时生效。
@@ -771,6 +829,13 @@ app.whenReady().then(async () => {
     return base
   }
   const MARKET_UA = 'Forsion-Tangu'
+  /** 中国大陆镜像:给 github release/raw 下载地址加代理前缀(TANGU_GITHUB_PROXY 可覆盖)。
+   *  ponytail: gh 代理站点更迭频繁,默认 ghfast.top;失效时改 ~/.tangu/.env 的 TANGU_GITHUB_PROXY 或关镜像。 */
+  const githubMirror = (url: string): string => {
+    if (!/^https:\/\/(github\.com|[^/]*\.githubusercontent\.com)\//.test(url)) return url
+    const prefix = (process.env.TANGU_GITHUB_PROXY || 'https://ghfast.top/').replace(/\/+$/, '')
+    return `${prefix}/${url}`
+  }
 
   ipcMain.handle('market:list', async (_e, type?: string) => {
     const base = await marketBase()
@@ -794,7 +859,10 @@ app.whenReady().then(async () => {
     const info = (await infoRes.json()) as { type: string; installSlug: string; downloadUrl: string; source: string }
     const sub = MARKET_SUBDIR[info.type]
     if (!sub || !isSafeSlug(info.installSlug)) throw new Error('非法的安装目标')
-    const zipRes = await fetch(info.downloadUrl, { headers: { 'User-Agent': MARKET_UA } })
+    // 中国大陆镜像:github 源(release 资产)下载走代理;zip 源(Forsion 对象存储)本就可达,不改。
+    const stored = await loadConfig()
+    const dl = stored.mirror === 'china' && info.source === 'github' ? githubMirror(info.downloadUrl) : info.downloadUrl
+    const zipRes = await fetch(dl, { headers: { 'User-Agent': MARKET_UA } })
     if (!zipRes.ok) throw new Error(`下载失败 HTTP ${zipRes.status}`)
     const buf = Buffer.from(await zipRes.arrayBuffer())
     const dest = join(tanguHomeDir(), sub, info.installSlug)
@@ -932,6 +1000,9 @@ app.whenReady().then(async () => {
 
   void ensureBackend()
   createWindow()
+  // Amadeus Space:装载 vault IPC(暴露给 window.amadeus)+ 资产协议(指向当前 vault 根)。
+  const { getVaultRoot } = registerAmadeusIpc(() => mainWindow)
+  registerAmadeusAssetProtocol(getVaultRoot)
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

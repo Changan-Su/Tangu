@@ -34,7 +34,7 @@ import { PluginSettingsPage } from './PluginSettingsPage'
 import { AgentClisTab } from './AgentClisTab'
 import { QrImage } from './QrImage'
 
-type StaticTab = 'general' | 'connection' | 'forsion' | 'model' | 'mcp' | 'skills' | 'agents' | 'plugins' | 'agent-clis' | 'browser' | 'wechat' | 'theme' | 'shortcuts' | 'advanced' | 'developer' | 'about'
+type StaticTab = 'general' | 'connection' | 'forsion' | 'model' | 'mcp' | 'skills' | 'agents' | 'plugins' | 'agent-clis' | 'browser' | 'wechat' | 'notes' | 'theme' | 'shortcuts' | 'advanced' | 'developer' | 'about'
 // 动态插件设置页用 `plugin:<id>`(Obsidian 式一级入口)。
 export type Tab = StaticTab | `plugin:${string}`
 
@@ -426,6 +426,8 @@ export const SettingsModal: React.FC<{
       cloudUrl: stored.cloudUrl,
       cloudToken: stored.cloudToken,
       sandbox: stored.sandbox,
+      pythonMode: stored.pythonMode || 'bundled',
+      mirror: stored.mirror || 'default',
     }).then(setStored)
   }
 
@@ -583,6 +585,7 @@ export const SettingsModal: React.FC<{
     // 技能云端可用:desktop 或 Tangu Web 都显示(保持 desktop 原有顺序:agents→skills→mcp…)。
     ...((isDesktop || cloudWeb) ? ([['skills', t('settings.tab.skills')]] as Array<[Tab, string]>) : []),
     ...(isDesktop ? ([['mcp', 'MCP'], ['wechat', t('settings.tab.wechat')], ['browser', t('settings.tab.browser')], ['plugins', t('settings.tab.plugins')]] as Array<[Tab, string]>) : []),
+    ...(isDesktop && !!window.amadeus ? ([['notes', t('settings.tab.notes')]] as Array<[Tab, string]>) : []),
     ['theme', t('settings.tab.theme')],
     ['shortcuts', t('settings.tab.shortcuts')],
     ['advanced', t('settings.tab.advanced')],
@@ -597,7 +600,7 @@ export const SettingsModal: React.FC<{
   const navGroups: Array<{ key: string; label: string; tabs: Tab[] }> = [
     { key: 'options', label: t('settings.group.options'), tabs: ['general', 'theme', 'shortcuts', 'advanced', 'developer', 'about'] },
     { key: 'ai', label: t('settings.group.ai'), tabs: ['model', 'agents', 'skills', 'mcp'] },
-    { key: 'core', label: t('settings.group.corePlugins'), tabs: ['wechat', 'browser'] },
+    { key: 'core', label: t('settings.group.corePlugins'), tabs: ['wechat', 'browser', 'notes'] },
     { key: 'community', label: t('settings.group.communityPlugins'), tabs: ['plugins'] },
   ]
 
@@ -724,6 +727,29 @@ export const SettingsModal: React.FC<{
                             </select>
                           </div>
                         </div>
+                        <div className="field-row">
+                          <div className="field" style={{ maxWidth: 200 }}>
+                            <label>{t('settings.python.label')}</label>
+                            <select
+                              value={stored.pythonMode || 'bundled'}
+                              onChange={(e) => setStored({ ...stored, pythonMode: e.target.value as StoredDesktopConfig['pythonMode'] })}
+                            >
+                              <option value="bundled">{t('settings.python.bundled')}</option>
+                              <option value="system">{t('settings.python.system')}</option>
+                            </select>
+                          </div>
+                          <div className="field" style={{ maxWidth: 200 }}>
+                            <label>{t('settings.mirror.label')}</label>
+                            <select
+                              value={stored.mirror || 'default'}
+                              onChange={(e) => setStored({ ...stored, mirror: e.target.value as StoredDesktopConfig['mirror'] })}
+                            >
+                              <option value="default">{t('settings.mirror.default')}</option>
+                              <option value="china">{t('settings.mirror.china')}</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div className="hint" style={{ marginBottom: 10 }}>{t('settings.python.hint')}</div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
                           <button className="btn primary sm" onClick={saveManaged}>{t('settings.backend.saveRestart')}</button>
                           <button
@@ -808,7 +834,7 @@ export const SettingsModal: React.FC<{
                     {/* 账号 */}
                     <div className="field">
                       <label>{t('settings.forsion.accountLabel')}</label>
-                      {authSt?.loggedIn ? (
+                      {authSt?.loggedIn && authSt?.tokenValid !== false ? (
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                           <span className="conn-pill ok"><span className="dot" />
                             {t('settings.forsion.loggedInAs', { name: authSt.nickname || authSt.username || '' })}
@@ -819,8 +845,12 @@ export const SettingsModal: React.FC<{
                         </div>
                       ) : (
                         <div>
+                          {/* token 仍在但失效 → 不当「已登录」,显式提示过期 + 重新登录(forsionLogin 会 ensureBackend 重连)。 */}
+                          {authSt?.loggedIn && authSt?.tokenValid === false && (
+                            <div className="hint" style={{ color: 'var(--danger)', marginBottom: 8 }}>{t('settings.forsion.expired')}</div>
+                          )}
                           <button className="btn primary sm" onClick={() => void doForsionLogin()} disabled={loggingIn}>
-                            {loggingIn ? <Loader2 size={12} className="spin" /> : <LogIn size={12} />} {t('settings.forsion.login')}
+                            {loggingIn ? <Loader2 size={12} className="spin" /> : <LogIn size={12} />} {authSt?.loggedIn && authSt?.tokenValid === false ? t('settings.forsion.relogin') : t('settings.forsion.login')}
                           </button>
                           {device && (
                             <div style={{ marginTop: 10 }}>
@@ -889,6 +919,54 @@ export const SettingsModal: React.FC<{
                     <div className="field">
                       <label>{t('settings.forsion.gatedTitle')}</label>
                       <div className="hint">{t('settings.forsion.gatedList')}</div>
+                    </div>
+                  </>
+                )}
+
+                {tab === 'notes' && stored && (
+                  <>
+                    <div className="field">
+                      <label>{t('settings.notes.modeLabel')}</label>
+                      <select
+                        value={stored.notesAttachmentMode || 'attachments'}
+                        onChange={(e) => void window.tangu!.setConfig({ notesAttachmentMode: e.target.value as StoredDesktopConfig['notesAttachmentMode'] }).then(setStored)}
+                      >
+                        <option value="attachments">{t('settings.notes.modeAttachments')}</option>
+                        <option value="same">{t('settings.notes.modeSame')}</option>
+                        <option value="vault">{t('settings.notes.modeVault')}</option>
+                      </select>
+                      <div className="hint">{t('settings.notes.modeHint')}</div>
+                    </div>
+                    {(stored.notesAttachmentMode || 'attachments') === 'vault' && (
+                      <div className="field">
+                        <label>{t('settings.notes.folderLabel')}</label>
+                        <div className="settings-inline-row">
+                          <input
+                            type="text"
+                            value={stored.notesAttachmentFolder ?? 'assets'}
+                            onChange={(e) => setStored({ ...stored, notesAttachmentFolder: e.target.value })}
+                            placeholder="assets"
+                          />
+                          <button
+                            className="btn primary sm"
+                            onClick={() => void window.tangu!.setConfig({ notesAttachmentFolder: (stored.notesAttachmentFolder || 'assets').trim().replace(/^\/+|\/+$/g, '') }).then(setStored)}
+                          >
+                            {t('settings.btn.save')}
+                          </button>
+                        </div>
+                        <div className="hint">{t('settings.notes.folderHint')}</div>
+                      </div>
+                    )}
+                    <div className="field">
+                      <label className="inline-check" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={stored.notesImportPreview !== false}
+                          onChange={(e) => void window.tangu!.setConfig({ notesImportPreview: e.target.checked }).then(setStored)}
+                        />
+                        {t('settings.notes.previewLabel')}
+                      </label>
+                      <div className="hint">{t('settings.notes.previewHint')}</div>
                     </div>
                   </>
                 )}
@@ -1730,9 +1808,14 @@ export const SettingsModal: React.FC<{
                     <div className="field">
                       <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         {t('settings.skills.libraryLabel')}
-                        <button className="icon-btn" style={{ width: 22, height: 22 }} onClick={loadAllSkills}>
+                        <button className="icon-btn" style={{ width: 22, height: 22 }} onClick={loadAllSkills} title={t('common.refresh')}>
                           <RefreshCw size={12} className={allSkillsLoading ? 'spin' : ''} />
                         </button>
+                        {window.tangu?.openSkillsDir && (
+                          <button className="icon-btn" style={{ width: 22, height: 22 }} title={t('settings.skills.openFolder')} onClick={() => void window.tangu?.openSkillsDir?.()}>
+                            <FolderOpen size={12} />
+                          </button>
+                        )}
                       </label>
                       <div className="hint" style={{ marginBottom: 8 }}>
                         {t('settings.skills.libraryHintPrefix')}~/.tangu/skills/&lt;id&gt;/SKILL.md{t('settings.skills.libraryHintSuffix')}

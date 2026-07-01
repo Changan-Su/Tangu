@@ -96,12 +96,21 @@ export function ChatView({ leaf, params }: ViewProps) {
   const running = s.running
   const execConfig = s.execConfig
 
-  const mvCfg: AgentConfig = activeId ? execConfig : {
-    execMode: s.newChatWs?.kind === 'cloud' ? 'sandbox' : 'host',
-    approvalMode: 'auto-edit',
-    cwd: s.newChatWs?.kind === 'cloud' ? undefined : (s.newChatWs?.path || undefined),
-    ...s.newChatCfg,
-  }
+  const mvCfg: AgentConfig = activeId
+    // 已有会话:配置未加载完(execMode 缺失)时按 project_path 兜底判 host/sandbox,避免加载窗口内
+    // 拖文件误走 25MB 上传;配置一旦到达(含用户显式选的 sandbox)即以 execConfig 为准。
+    ? (execConfig.execMode ? execConfig : {
+        execMode: activeSession?.project_path ? 'host' : 'sandbox',
+        approvalMode: 'auto-edit',
+        cwd: activeSession?.project_path || undefined,
+        ...execConfig,
+      })
+    : {
+        execMode: s.newChatWs?.kind === 'cloud' ? 'sandbox' : 'host',
+        approvalMode: 'auto-edit',
+        cwd: s.newChatWs?.kind === 'cloud' ? undefined : (s.newChatWs?.path || undefined),
+        ...s.newChatCfg,
+      }
   const mvModelId = activeId
     ? (activeSession?.model_id || s.cfg.modelId || s.modelsResp?.defaultModelId || '')
     : (s.newChatModel || s.cfg.modelId || s.modelsResp?.defaultModelId || '')

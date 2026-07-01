@@ -1,0 +1,358 @@
+/* ═══ Tangu Desktop × Lovable — fully scoped under .tangu-lovable (zero leak into LCL) ═══ */
+/* Re-skin = remap Tangu's token contract to Lovable values (see tanguData.tokenMap). */
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Nunito:wght@400;600;700;800&display=swap');
+
+.tangu-lovable {
+  /* ── Lovable (default skin) — softened: cards read by gentle fill + soft shadow, not 1px outlines ── */
+  --bg: #f7f4ed; --bg-card: #fefdf9; --bg-glass: rgba(247,244,237,0.9); --sidebar-bg: #f3efe7;
+  --text: #1c1c1c; --text-light: rgba(28,28,28,0.82); --text-muted: #5f5f5d;
+  --text-faint: rgba(28,28,28,0.4); --text-ghost: rgba(28,28,28,0.28);
+  --border: #efece4; --border-width: 1px; --shadow: rgba(0,0,0,0.05);
+  --accent: #1c1c1c; --accent-hover: #000000; --accent-light: rgba(28,28,28,0.05); --accent-rgb: 28,28,28;
+  --green: #4f6f52; --danger: #a3503f; --danger-light: rgba(163,80,63,0.08);
+  --overlay-subtle: rgba(28,28,28,0.03); --overlay-light: rgba(28,28,28,0.04);
+  --overlay-medium: rgba(28,28,28,0.07); --overlay-strong: rgba(28,28,28,0.14);
+  --radius-sm: 6px; --radius-md: 8px; --radius-lg: 10px; --radius-chat-surface: 12px; --radius-chat-card: 10px;
+  --font-ui: 'Hanken Grotesk', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-body: var(--font-ui); --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  --user-bg: rgba(28,28,28,0.04); --tool-bg: rgba(28,28,28,0.03); --tool-text: #5f5f5d; --panel-blur: none;
+  --duration-instant: 0.1s; --duration-fast: 0.15s; --duration-slow: 0.25s; --ease-out: cubic-bezier(0.16,1,0.3,1);
+  --inset: rgba(255,255,255,0.2) 0 0.5px 0 0 inset, rgba(0,0,0,0.2) 0 0 0 0.5px inset, rgba(0,0,0,0.05) 0 1px 2px 0;
+  --focus: rgba(0,0,0,0.1) 0 4px 12px;
+  /* elevation tokens — soft shadows replace borders, so cards lift instead of being outlined */
+  --card-shadow: 0 1px 2px rgba(42,36,26,0.04), 0 10px 26px rgba(42,36,26,0.05);
+  --btn-shadow: var(--inset); --icon-shadow: var(--inset);
+  --on-accent: #fcfbf8; /* text on accent-filled surfaces (inverts in dark) */
+
+  position: relative; min-height: 100vh; width: 100%; overflow-y: auto;
+  background: var(--bg); color: var(--text); font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  transition: background var(--duration-slow) var(--ease-out), color var(--duration-slow) var(--ease-out);
+}
+
+/* ── Echo skin (coral / lavender, rounded, soft frosted) — only overrides what differs from base ── */
+.tangu-lovable[data-skin='echo'] {
+  --bg: #fbf5ef; --bg-card: #fffdfb; --bg-glass: rgba(255,253,251,0.8); --sidebar-bg: #f6ede4;
+  --text: #36291f; --text-light: #5c4d42; --text-muted: #897668; --text-faint: #b3a294; --text-ghost: #cdbfb2;
+  --border: #f0e4d8; --shadow: rgba(190,140,110,0.12);
+  --accent: #ff8a6b; --accent-hover: #f57254; --accent-light: rgba(255,138,107,0.12); --accent-rgb: 255,138,107;
+  --green: #5aa977; --danger: #e0685a; --danger-light: rgba(224,104,90,0.10);
+  --overlay-subtle: rgba(120,80,55,0.03); --overlay-light: rgba(120,80,55,0.05);
+  --overlay-medium: rgba(120,80,55,0.09); --overlay-strong: rgba(120,80,55,0.16);
+  --radius-sm: 12px; --radius-md: 14px; --radius-lg: 14px; --radius-chat-surface: 18px; --radius-chat-card: 16px;
+  --font-ui: 'Nunito', ui-rounded, 'PingFang SC', system-ui, sans-serif;
+  --user-bg: rgba(255,138,107,0.12); --tool-bg: rgba(182,164,236,0.10); --tool-text: #897668;
+  --card-shadow: 0 4px 18px rgba(200,150,120,0.16); --btn-shadow: 0 3px 12px rgba(255,138,107,0.32);
+  --icon-shadow: 0 1px 5px rgba(200,150,120,0.18);
+}
+
+/* ── Qbird skin (Apple HIG graphite + muted teal) — toned-down shadow & saturation ── */
+.tangu-lovable[data-skin='qbird'] {
+  --bg: #f5f5f7; --bg-card: #fcfcfd; --bg-glass: rgba(255,255,255,0.85); --sidebar-bg: #eeeef1;
+  --text: #1d1d1f; --text-light: #3a3a3c; --text-muted: #6e6e73; --text-faint: #8e8e93; --text-ghost: #aeaeb2;
+  --border: #e7e7ea; --shadow: rgba(0,0,0,0.04);
+  --accent: #4d8794; --accent-hover: #3f717c; --accent-light: rgba(77,135,148,0.10); --accent-rgb: 77,135,148;
+  --green: #5f9b73; --danger: #cf6155; --danger-light: rgba(207,97,85,0.10);
+  --overlay-subtle: rgba(0,0,0,0.025); --overlay-light: rgba(0,0,0,0.035);
+  --overlay-medium: rgba(0,0,0,0.06); --overlay-strong: rgba(0,0,0,0.12);
+  --radius-sm: 10px; --radius-md: 12px; --radius-lg: 13px; --radius-chat-surface: 14px; --radius-chat-card: 12px;
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
+  --user-bg: rgba(77,135,148,0.09); --tool-bg: rgba(0,0,0,0.025); --tool-text: #6e6e73;
+  --card-shadow: 0 1px 2px rgba(0,0,0,0.035), 0 3px 10px rgba(0,0,0,0.035); --btn-shadow: 0 1px 2px rgba(0,0,0,0.10);
+  --icon-shadow: 0 1px 2px rgba(0,0,0,0.045);
+}
+
+/* ── Custom skin (neutral graphite base; accent + bg ambiance come from inline customSkinVars(seed)) ── */
+.tangu-lovable[data-skin='custom'] {
+  --bg: #f6f6f7; --bg-card: #fcfcfd; --bg-glass: rgba(255,255,255,0.85); --sidebar-bg: #eeeef0;
+  --text: #1d1d1f; --text-light: #3a3a3c; --text-muted: #6e6e73; --text-faint: #8e8e93; --text-ghost: #aeaeb2;
+  --border: #e6e6e9; --shadow: rgba(0,0,0,0.05);
+  --green: #5f9b73; --danger: #cf6155; --danger-light: rgba(207,97,85,0.10);
+  --overlay-subtle: rgba(0,0,0,0.025); --overlay-light: rgba(0,0,0,0.04); --overlay-medium: rgba(0,0,0,0.07); --overlay-strong: rgba(0,0,0,0.13);
+  --radius-sm: 9px; --radius-md: 11px; --radius-lg: 12px; --radius-chat-surface: 13px; --radius-chat-card: 11px;
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif;
+  --tool-bg: rgba(0,0,0,0.03); --tool-text: #6e6e73;
+  --card-shadow: 0 1px 2px rgba(0,0,0,0.035), 0 3px 10px rgba(0,0,0,0.045); --btn-shadow: 0 1px 2px rgba(0,0,0,0.12); --icon-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+/* ════ Dark mode — one override block per skin (only what flips for dark) ════ */
+
+/* Lovable dark — warm "night paper": ink inverts to cream, accent becomes the light */
+.tangu-lovable[data-skin='lovable'][data-mode='dark'] {
+  --bg: #1c1a16; --bg-card: #262219; --bg-glass: rgba(28,26,22,0.9); --sidebar-bg: #211e18;
+  --text: #f2efe8; --text-light: rgba(242,239,232,0.82); --text-muted: #a8a096;
+  --text-faint: rgba(242,239,232,0.42); --text-ghost: rgba(242,239,232,0.3);
+  --border: #34302a; --shadow: rgba(0,0,0,0.4);
+  --accent: #ece7dd; --accent-hover: #fffaf0; --accent-light: rgba(236,231,221,0.10); --accent-rgb: 236,231,221; --on-accent: #1c1a16;
+  --green: #8fb295; --danger: #d99080; --danger-light: rgba(217,144,128,0.12);
+  --overlay-subtle: rgba(242,239,232,0.03); --overlay-light: rgba(242,239,232,0.05);
+  --overlay-medium: rgba(242,239,232,0.08); --overlay-strong: rgba(242,239,232,0.15);
+  --user-bg: rgba(242,239,232,0.06); --tool-bg: rgba(242,239,232,0.04); --tool-text: #a8a096;
+  --card-shadow: 0 1px 2px rgba(0,0,0,0.3), 0 10px 26px rgba(0,0,0,0.35);
+  --btn-shadow: 0 1px 2px rgba(0,0,0,0.4); --icon-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+/* Echo dark — deep plum-black, lifted coral + lavender (Echo's own dark family) */
+.tangu-lovable[data-skin='echo'][data-mode='dark'] {
+  --bg: #19131a; --bg-card: #241b26; --bg-glass: rgba(25,19,26,0.85); --sidebar-bg: #1f1722;
+  --text: #f3eaf5; --text-light: rgba(243,234,245,0.82); --text-muted: #b3a3bb;
+  --text-faint: rgba(243,234,245,0.42); --text-ghost: rgba(243,234,245,0.3);
+  --border: #352b3a; --shadow: rgba(0,0,0,0.4);
+  --accent: #ff9a7d; --accent-hover: #ffb199; --accent-light: rgba(255,154,125,0.14); --accent-rgb: 255,154,125; --on-accent: #2a160f;
+  --green: #6fbf8a; --danger: #f08a7a; --danger-light: rgba(240,138,122,0.14);
+  --overlay-subtle: rgba(243,234,245,0.03); --overlay-light: rgba(243,234,245,0.05);
+  --overlay-medium: rgba(243,234,245,0.09); --overlay-strong: rgba(243,234,245,0.16);
+  --user-bg: rgba(255,154,125,0.14); --tool-bg: rgba(182,164,236,0.14); --tool-text: #b3a3bb;
+  --card-shadow: 0 4px 18px rgba(0,0,0,0.42); --btn-shadow: 0 3px 12px rgba(255,138,107,0.3); --icon-shadow: 0 1px 5px rgba(0,0,0,0.3);
+}
+
+/* Qbird dark — macOS graphite + muted teal (low-sat, soft shadow per the tuning) */
+.tangu-lovable[data-skin='qbird'][data-mode='dark'] {
+  --bg: #1c1c1e; --bg-card: #2a2a2c; --bg-glass: rgba(44,44,46,0.82); --sidebar-bg: #242426;
+  --text: #f2f2f5; --text-light: #c7c7cc; --text-muted: #9a9aa0; --text-faint: #76767c; --text-ghost: #5a5a60;
+  --border: #3a3a3c; --shadow: rgba(0,0,0,0.4);
+  --accent: #5fa3b2; --accent-hover: #74b3c0; --accent-light: rgba(95,163,178,0.14); --accent-rgb: 95,163,178; --on-accent: #102126;
+  --green: #6fb085; --danger: #e0857a; --danger-light: rgba(224,133,122,0.14);
+  --overlay-subtle: rgba(255,255,255,0.03); --overlay-light: rgba(255,255,255,0.05);
+  --overlay-medium: rgba(255,255,255,0.08); --overlay-strong: rgba(255,255,255,0.14);
+  --user-bg: rgba(95,163,178,0.13); --tool-bg: rgba(255,255,255,0.03); --tool-text: #9a9aa0;
+  --card-shadow: 0 1px 2px rgba(0,0,0,0.35), 0 3px 10px rgba(0,0,0,0.3); --btn-shadow: 0 1px 2px rgba(0,0,0,0.4); --icon-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+/* Custom dark — neutral graphite night; accent + bg ambiance from inline customSkinVars(seed, dark) */
+.tangu-lovable[data-skin='custom'][data-mode='dark'] {
+  --bg: #1b1b1d; --bg-card: #29292b; --bg-glass: rgba(41,41,43,0.82); --sidebar-bg: #232325;
+  --text: #f2f2f5; --text-light: #c7c7cc; --text-muted: #9a9aa0; --text-faint: #76767c; --text-ghost: #5a5a60;
+  --border: #38383b; --shadow: rgba(0,0,0,0.4);
+  --green: #6fb085; --danger: #e0857a; --danger-light: rgba(224,133,122,0.14);
+  --overlay-subtle: rgba(255,255,255,0.03); --overlay-light: rgba(255,255,255,0.05); --overlay-medium: rgba(255,255,255,0.08); --overlay-strong: rgba(255,255,255,0.14);
+  --user-bg: rgba(255,255,255,0.06); --tool-bg: rgba(255,255,255,0.03); --tool-text: #9a9aa0;
+  --card-shadow: 0 1px 2px rgba(0,0,0,0.35), 0 3px 10px rgba(0,0,0,0.3); --btn-shadow: 0 1px 2px rgba(0,0,0,0.4); --icon-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+/* flat mode — strip elevation (parity with #/tangu-soft data-flat); cards read by border + fill alone */
+.tangu-lovable[data-flat='1'] { --card-shadow: none; --btn-shadow: none; --icon-shadow: none; }
+.tangu-lovable[data-flat='1'] .tg-window { box-shadow: none; }
+
+.tg-wrap { max-width: 1200px; margin: 0 auto; padding: 56px 28px 96px; }
+
+/* ── hero ── */
+.tg-hero { display: flex; align-items: center; gap: 18px; margin-bottom: 44px; }
+.tg-hero__mark { width: 56px; height: 56px; flex: 0 0 auto; border-radius: 14px; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; font-size: 26px; box-shadow: var(--btn-shadow); }
+.tg-hero h1 { margin: 0 0 8px; font-size: 30px; font-weight: 600; letter-spacing: -0.9px; }
+.tg-hero h1 span { color: var(--text-muted); font-weight: 400; }
+.tg-hero p { margin: 0 0 12px; font-size: 15px; line-height: 1.55; color: var(--text-muted); max-width: 64ch; }
+.tg-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.tg-chips span { font-size: 12px; padding: 4px 11px; border-radius: 9999px; border: 1px solid var(--border); color: var(--text-light); }
+.tg-controls { display: flex; align-items: center; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+.tg-skins { display: inline-flex; gap: 4px; padding: 4px; border-radius: 9999px; background: var(--overlay-subtle); border: 1px solid var(--border); }
+.tg-mode { display: inline-flex; align-items: center; gap: 6px; padding: 9px 14px; border-radius: 9999px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-light); cursor: pointer; font-family: var(--font-ui); font-size: 13px; font-weight: 600; box-shadow: var(--icon-shadow); transition: color var(--duration-fast) var(--ease-out); }
+.tg-mode:hover { color: var(--text); }
+.tg-color { width: 34px; height: 34px; padding: 0; border: none; border-radius: 9999px; background: none; cursor: pointer; box-shadow: var(--icon-shadow); flex: 0 0 auto; }
+.tg-color::-webkit-color-swatch-wrapper { padding: 0; }
+.tg-color::-webkit-color-swatch { border: none; border-radius: 9999px; }
+.tg-color::-moz-color-swatch { border: none; border-radius: 9999px; }
+.tg-skin-btn { display: inline-flex; flex-direction: column; align-items: flex-start; padding: 6px 16px; border: none; background: transparent; border-radius: 9999px; cursor: pointer; font-family: var(--font-ui); color: var(--text-muted); line-height: 1.25; transition: background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out); }
+.tg-skin-btn b { font-size: 13px; font-weight: 600; }
+.tg-skin-btn span { font-size: 10px; color: var(--text-faint); }
+.tg-skin-btn:not(.is-active):hover { color: var(--text); background: var(--overlay-light); }
+.tg-skin-btn.is-active { background: var(--accent); color: var(--on-accent); box-shadow: var(--btn-shadow); }
+.tg-skin-btn.is-active span { color: var(--on-accent); opacity: 0.72; }
+
+/* ── sections ── */
+.tg-sec { margin-bottom: 52px; }
+.tg-h2 { margin: 0 0 16px; font-size: 22px; font-weight: 600; letter-spacing: -0.6px; display: flex; align-items: baseline; gap: 10px; }
+.tg-h2 em { font-style: normal; font-size: 12.5px; font-weight: 400; color: var(--text-faint); letter-spacing: 0; }
+.tg-h3 { margin: 26px 0 14px; font-size: 14px; font-weight: 600; color: var(--text-light); }
+.tg-note { margin: 12px 2px 0; font-size: 12.5px; line-height: 1.55; color: var(--text-muted); }
+.tg-note code, .tg-takeaways code { font-family: var(--font-mono); font-size: 0.9em; background: var(--overlay-light); padding: 1px 5px; border-radius: 4px; }
+
+/* ── assembled preview window ── */
+.tg-window { height: 660px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--bg); box-shadow: var(--focus); }
+.tangu-lovable .app { display: flex; height: 100%; }
+.tangu-lovable .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.tangu-lovable .chat-area { flex: 1; min-height: 0; overflow-y: auto; }
+.tangu-lovable .stream-inner { max-width: 760px; margin: 0 auto; padding: 24px 20px; display: flex; flex-direction: column; gap: 18px; }
+
+/* ── sidebar ── */
+.tangu-lovable .sidebar { width: 224px; flex: 0 0 auto; display: flex; flex-direction: column; background: var(--sidebar-bg); border-right: 1px solid var(--border); }
+.tangu-lovable .sidebar-header { padding: 14px 14px 10px; }
+.tangu-lovable .sidebar-brand { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; letter-spacing: 0.01em; }
+.tangu-lovable .tg-mark { width: 22px; height: 22px; border-radius: 7px; background: var(--accent); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; box-shadow: var(--btn-shadow); }
+.tangu-lovable .session-list { flex: 1; overflow-y: auto; padding: 8px; }
+.tangu-lovable .ws-group-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 6px 4px; font-size: 11.5px; font-weight: 600; color: var(--text-faint); }
+.tangu-lovable .tg-count { font-size: 11px; color: var(--text-ghost); }
+.tangu-lovable .ws-sessions { padding-left: 6px; }
+.tangu-lovable .session-item { display: flex; align-items: center; gap: 7px; width: 100%; text-align: left; padding: 7px 9px; border: none; background: transparent; border-radius: var(--radius-sm); cursor: pointer; font-family: var(--font-ui); font-size: 13px; color: var(--text-light); }
+.tangu-lovable .session-item:hover { background: var(--overlay-light); }
+.tangu-lovable .session-item.active { background: var(--overlay-medium); color: var(--text); }
+.tangu-lovable .session-dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; }
+.tangu-lovable .session-dot.running { background: var(--accent); }
+.tangu-lovable .session-dot.unread { background: var(--danger); }
+.tangu-lovable .session-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tangu-lovable .session-menu-btn { color: var(--text-ghost); opacity: 0; }
+.tangu-lovable .session-item:hover .session-menu-btn { opacity: 1; }
+.tangu-lovable .special-card { margin-top: 4px; padding: 6px 8px; border-radius: var(--radius-sm); cursor: pointer; }
+.tangu-lovable .special-card:hover { background: var(--overlay-light); }
+.tangu-lovable .special-card-head { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: var(--text-light); }
+.tangu-lovable .sc-icon { color: var(--text-faint); }
+.tangu-lovable .sc-title { flex: 1; }
+.tangu-lovable .sidebar-footer { display: flex; align-items: center; gap: 8px; padding: 10px; border-top: 1px solid var(--border); }
+.tangu-lovable .account-card { flex: 1; display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 9999px; cursor: pointer; }
+.tangu-lovable .account-card:hover { background: var(--overlay-light); }
+.tangu-lovable .tg-avatar { width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
+.tangu-lovable .tg-acc-name { flex: 1; font-size: 13px; font-weight: 500; }
+.tangu-lovable .tg-tier { font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 9999px; border: 1px solid var(--border); color: var(--text-muted); }
+
+/* ── chat header ── */
+.tangu-lovable .chat-header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; min-height: 48px; border-bottom: 1px solid var(--border); }
+.tangu-lovable .chat-title { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tangu-lovable .conn-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 10px; border-radius: 9999px; border: 1px solid var(--border); color: var(--text-muted); }
+.tangu-lovable .conn-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+
+/* ── buttons (Lovable signatures) ── */
+.tangu-lovable .icon-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 30px; padding: 0 7px; border: none; border-radius: 9999px; background: var(--bg-card); color: var(--text); cursor: pointer; font-size: 15px; box-shadow: var(--icon-shadow); opacity: 0.7; transition: opacity var(--duration-fast) var(--ease-out); }
+.tangu-lovable .icon-btn:hover { opacity: 1; }
+.tangu-lovable .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: var(--radius-sm); border: none; cursor: pointer; font-family: var(--font-ui); font-size: 14px; transition: opacity var(--duration-fast) var(--ease-out); }
+.tangu-lovable .btn:active { opacity: 0.8; }
+.tangu-lovable .btn.sm { padding: 6px 12px; font-size: 13px; }
+.tangu-lovable .btn.primary { background: var(--accent); color: var(--on-accent); box-shadow: var(--btn-shadow); }
+.tangu-lovable .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--overlay-strong); }
+.tangu-lovable .btn.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+
+/* ── messages ── */
+.tangu-lovable .msg-row { display: flex; flex-direction: column; }
+.tangu-lovable .msg-row.user { align-items: flex-end; }
+.tangu-lovable .msg-user-wrap { max-width: 80%; display: flex; flex-direction: column; align-items: flex-end; }
+.tangu-lovable .msg-user-bubble { background: var(--user-bg); border-radius: var(--radius-chat-card); padding: 9px 13px; font-size: 14px; line-height: 1.55; white-space: pre-wrap; }
+.tangu-lovable .msg-actions { display: flex; gap: 4px; margin-top: 5px; opacity: 0; transition: opacity var(--duration-fast); }
+.tangu-lovable .msg-user-wrap:hover .msg-actions, .tangu-lovable .msg-assistant:hover .msg-actions { opacity: 1; }
+.tangu-lovable .msg-action-btn { width: 26px; height: 26px; border: none; background: transparent; border-radius: var(--radius-sm); color: var(--text-faint); cursor: pointer; font-size: 13px; }
+.tangu-lovable .msg-action-btn:hover { background: var(--overlay-light); color: var(--text); }
+.tangu-lovable .msg-role { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 8px; }
+.tangu-lovable .tg-role-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.tangu-lovable .msg-asst-col { display: flex; flex-direction: column; gap: 10px; }
+.tangu-lovable .msg-content { font-size: 14px; line-height: 1.65; font-family: var(--font-body); }
+.tangu-lovable .msg-content code { font-family: var(--font-mono); font-size: 0.88em; background: var(--overlay-light); padding: 1px 5px; border-radius: 4px; }
+
+/* thinking */
+.tangu-lovable .thinking-block { border-left: 2px solid var(--border); padding-left: 12px; }
+.tangu-lovable .thinking-toggle { border: none; background: transparent; cursor: pointer; font-family: var(--font-ui); font-size: 12.5px; color: var(--text-muted); padding: 0; }
+.tangu-lovable .tg-dim { color: var(--text-faint); }
+.tangu-lovable .thinking-content { margin-top: 6px; font-size: 13px; line-height: 1.6; color: var(--text-muted); }
+
+/* tool card */
+.tangu-lovable .tool-card { border: var(--border-width) solid var(--border); border-radius: var(--radius-md); background: var(--tool-bg); box-shadow: var(--card-shadow); }
+.tangu-lovable .tool-card-head { display: flex; align-items: center; gap: 7px; width: 100%; padding: 7px 10px; border: none; background: transparent; cursor: pointer; font-family: var(--font-ui); font-size: 13px; color: var(--text); /* buttons don't inherit color — set it so name/icon flip in dark */ }
+.tangu-lovable .tg-chev { color: var(--text-faint); }
+.tangu-lovable .tool-name { font-weight: 600; }
+.tangu-lovable .tool-hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+.tangu-lovable .tool-chip { font-size: 11px; color: var(--text-faint); padding: 1px 7px; border: 1px solid var(--border); border-radius: 9999px; }
+.tangu-lovable .tg-status.ok { color: var(--green); }
+.tangu-lovable .tg-status.err { color: var(--danger); }
+
+/* approval / inquiry / plan / todo cards */
+.tangu-lovable .approval-card, .tangu-lovable .inquiry-card { border: var(--border-width) solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; background: var(--bg-card); box-shadow: var(--card-shadow); }
+.tangu-lovable .approval-title, .tangu-lovable .inquiry-q { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.tangu-lovable .tg-accent-ic { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--accent); font-size: 11px; }
+.tangu-lovable .approval-preview { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; font-family: var(--font-mono); font-size: 12.5px; margin-bottom: 8px; }
+.tangu-lovable .approval-actions, .tangu-lovable .inquiry-opts, .tangu-lovable .inquiry-input { display: flex; gap: 8px; }
+.tangu-lovable .inquiry-opts { flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.tangu-lovable .inquiry-input { gap: 6px; }
+.tangu-lovable .inline-input { flex: 1; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); font-family: var(--font-ui); font-size: 13px; color: var(--text); outline: none; }
+.tangu-lovable .inline-input:focus { box-shadow: 0 0 0 2px rgba(59,130,246,0.5); }
+.tangu-lovable .todo-card { border: var(--border-width) solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; background: var(--bg-card); box-shadow: var(--card-shadow); }
+.tangu-lovable .tg-card-title { font-size: 12.5px; font-weight: 700; margin-bottom: 7px; }
+.tangu-lovable .todo-row { display: flex; gap: 7px; font-size: 13px; line-height: 1.7; }
+.tangu-lovable .todo-mark { flex: 0 0 auto; }
+.tangu-lovable .todo-mark.completed { color: var(--green); }
+.tangu-lovable .todo-mark.in_progress { color: var(--accent); }
+.tangu-lovable .todo-mark.pending { color: var(--text-ghost); }
+.tangu-lovable .tg-done { text-decoration: line-through; color: var(--text-faint); }
+
+/* system / group vote */
+.tangu-lovable .msg-row.msg-system { align-items: center; }
+.tangu-lovable .msg-system-text { display: inline-flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--text-muted); }
+.tangu-lovable .tg-votes { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.tangu-lovable .tg-votes > span { display: inline-flex; gap: 3px; }
+.tangu-lovable .tg-yes { color: var(--accent); }
+.tangu-lovable .tg-no { color: var(--text-ghost); }
+
+/* ── composer ── */
+.tangu-lovable .composer { padding: 8px 20px 16px; }
+.tangu-lovable .composer-inner { max-width: 760px; margin: 0 auto; }
+.tangu-lovable .composer-box { background: var(--bg-card); border: var(--border-width) solid var(--border); border-radius: var(--radius-chat-surface); padding: 12px 14px; box-shadow: var(--card-shadow); }
+.tangu-lovable .attach-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 6px 3px 9px; border: 1px solid var(--border); border-radius: 9999px; margin-bottom: 8px; }
+.tangu-lovable .attach-chip button { border: none; background: transparent; cursor: pointer; color: var(--text-faint); }
+.tangu-lovable .composer-ta { font-size: 14px; line-height: 1.55; color: var(--text-light); min-height: 38px; }
+.tangu-lovable .composer-inrow { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.tangu-lovable .grow { flex: 1; }
+.tangu-lovable .composer-mic { opacity: 0.4; }
+.tangu-lovable .composer-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.tangu-lovable .composer-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 5px 11px; border-radius: 9999px; border: 1px solid var(--border); background: var(--bg); color: var(--text-light); cursor: pointer; }
+.tangu-lovable .composer-ctx { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); }
+.tangu-lovable .tg-ctxbar { width: 52px; height: 5px; border-radius: 3px; background: var(--overlay-medium); overflow: hidden; }
+.tangu-lovable .tg-ctxbar > span { display: block; height: 100%; background: var(--accent); }
+.tangu-lovable .model-pill { display: inline-flex; align-items: center; font-size: 12.5px; padding: 5px 11px; border-radius: 9999px; border: 1px solid var(--border); color: var(--text-light); cursor: pointer; }
+
+/* ── right panel ── */
+.tangu-lovable .right-panel { width: 248px; flex: 0 0 auto; display: flex; flex-direction: column; border-left: 1px solid var(--border); }
+.tangu-lovable .right-panel-tabs { display: flex; border-bottom: 1px solid var(--border); }
+.tangu-lovable .right-panel-tabs button { flex: 1; padding: 9px 0; border: none; background: transparent; cursor: pointer; font-family: var(--font-ui); font-size: 12px; color: var(--text-muted); border-bottom: 2px solid transparent; }
+.tangu-lovable .right-panel-tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+.tangu-lovable .right-panel-body { flex: 1; overflow-y: auto; padding: 10px; }
+.tangu-lovable .file-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; }
+.tangu-lovable .file-row:hover { background: var(--overlay-light); }
+.tangu-lovable .file-row.selected { background: var(--accent-light); }
+.tangu-lovable .file-name { font-family: var(--font-mono); font-size: 12.5px; }
+
+/* ── settings field ── */
+.tangu-lovable .field { display: flex; flex-direction: column; }
+.tangu-lovable .field label { font-size: 12px; color: var(--text-muted); margin-bottom: 5px; }
+.tangu-lovable .field input { width: 100%; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card); font-family: var(--font-ui); font-size: 13px; color: var(--text); outline: none; }
+.tangu-lovable .field input:focus { box-shadow: 0 0 0 2px rgba(59,130,246,0.5); }
+.tangu-lovable .hint { font-size: 11.5px; color: var(--text-faint); margin-top: 4px; }
+
+/* ── theme card ── */
+.tangu-lovable .theme-card { width: 180px; border: var(--border-width) solid var(--border); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--card-shadow); }
+.tangu-lovable .theme-preview { height: 64px; background: linear-gradient(135deg, var(--bg), var(--border)); }
+.tangu-lovable .theme-meta { padding: 9px 11px; }
+.tangu-lovable .theme-name { font-size: 13px; font-weight: 600; }
+.tangu-lovable .theme-tagline { font-size: 11px; color: var(--text-faint); margin: 2px 0 6px; }
+.tangu-lovable .theme-swatches { display: flex; gap: 4px; }
+.tangu-lovable .theme-swatches i { width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--border); }
+
+/* ── component tree ── */
+.tg-tree { border: var(--border-width) solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; background: var(--bg-card); box-shadow: var(--card-shadow); }
+.tg-tree__row { display: flex; align-items: baseline; gap: 12px; padding: 3px 0; }
+.tg-tree__name { font-family: var(--font-mono); font-size: 12.5px; color: var(--text); white-space: nowrap; }
+.tg-tree__role { font-size: 12px; color: var(--text-muted); }
+
+/* ── component catalog ── */
+.tg-catalog { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.tg-cell { margin: 0; display: flex; flex-direction: column; }
+.tg-cell.is-wide { grid-column: 1 / -1; }
+.tg-cell__view { background: var(--bg-card); border: var(--border-width) solid var(--border); border-radius: var(--radius-lg); padding: 18px; min-height: 88px; display: flex; align-items: center; justify-content: center; box-shadow: var(--card-shadow); }
+.tg-cell__cap { padding: 9px 4px 0; }
+.tg-cell__cap b { display: block; font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+.tg-cell__cap span { font-size: 12px; color: var(--text-muted); }
+.tg-mini-side { width: 220px; background: var(--sidebar-bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 6px; }
+.tg-btnrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+@media (max-width: 720px) { .tg-catalog { grid-template-columns: 1fr; } .tg-cell.is-wide { grid-column: auto; } }
+
+/* ── token map table ── */
+.tg-tokens { border: var(--border-width) solid var(--border); border-radius: var(--radius-lg); overflow: hidden; background: var(--bg-card); box-shadow: var(--card-shadow); }
+.tg-token { display: grid; grid-template-columns: 200px 240px 1fr; gap: 12px; align-items: center; padding: 8px 14px; }
+.tg-token:nth-child(even) { background: var(--overlay-subtle); }
+.tg-token__var { font-family: var(--font-mono); font-size: 12.5px; color: var(--text); }
+.tg-token__val { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); }
+.tg-token__val code { font-family: var(--font-mono); }
+.tg-token__sw { width: 16px; height: 16px; flex: 0 0 auto; border-radius: 4px; border: 1px solid var(--border); }
+.tg-token__role { font-size: 12px; color: var(--text-muted); }
+@media (max-width: 720px) { .tg-token { grid-template-columns: 1fr; gap: 3px; } }
+
+/* ── takeaways ── */
+.tg-takeaways ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; }
+.tg-takeaways li { font-size: 13.5px; line-height: 1.6; color: var(--text-muted); padding-left: 18px; position: relative; }
+.tg-takeaways li::before { content: '—'; position: absolute; left: 0; color: var(--text-faint); }
+.tg-takeaways b { color: var(--text); font-weight: 600; }

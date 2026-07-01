@@ -10,6 +10,7 @@ import {
   isPluginEnabledSync, setPluginEnabled, getScopeSettings, setScopeSettings,
   listPluginFiles, readPluginFile, writePluginFile, deletePluginFile, parseScope,
 } from '../plugins/settingsStore.js';
+import { resolveReplySegment, splitMessage } from '../services/replySegment.js';
 
 const router = Router();
 
@@ -32,6 +33,25 @@ function pluginView(m: ReturnType<typeof listPluginMetas>[number]) {
 router.get('/agent/plugins', authMiddleware, (_req: AuthRequest, res) => {
   if (!ensureLocal(res)) return;
   res.json({ plugins: listPluginMetas().map(pluginView) });
+});
+
+// 通道无关的分段结果。Web 等非微信客户端可批量把已持久化回复按 reply-segment 的
+// 全局⊕agent 设置还原成气泡，而不复制核心拆分算法或绕过插件启用态。
+router.post('/agent/reply-segments', authMiddleware, (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    const texts = Array.isArray(req.body?.texts)
+      ? req.body.texts.filter((x: any) => typeof x === 'string').slice(0, 200)
+      : [];
+    const agentSlug = typeof req.body?.agentSlug === 'string' && req.body.agentSlug
+      ? req.body.agentSlug
+      : undefined;
+    const cfg = resolveReplySegment(agentSlug);
+    res.json({
+      enabled: cfg.enabled,
+      segments: texts.map((text: string) => cfg.enabled ? splitMessage(text) : [text]),
+    });
+  } catch (e: any) { res.status(400).json({ detail: e?.message || 'segment failed' }); }
 });
 
 // 运行期重扫:市场装新插件后无需重启即出现在列表并可启用。返回新激活的 id 与是否仍需重启(贡献路由的插件)。

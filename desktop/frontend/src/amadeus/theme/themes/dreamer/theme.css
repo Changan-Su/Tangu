@@ -1,0 +1,103 @@
+/* Dreamer · 梦想家 — the round floating-card language. A warm gradient stage with a corner
+ * glow; the sidebar and the note become rounded sheets that float on it, with generous radii
+ * and soft shadows. (Source: Forsion-LCL #/tangu-soft, soft/暖桃 theme.)
+ *
+ * Overrides Origin via [data-theme='dreamer']. Non-mode tokens (radii/font) use
+ * :root[data-theme='dreamer'] so they out-specify Origin's :root regardless of load order. */
+
+:root[data-theme='dreamer'] {
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 26px;
+
+  --font-ui: 'Plus Jakarta Sans', 'Nunito', 'ui-rounded', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+[data-theme='dreamer'][data-mode='light'] {
+  color-scheme: light;
+  --bg: linear-gradient(158deg, #fceee4 0%, #f6edf9 52%, #edeefc 100%);
+  --bg-alt: #f3eef7;
+  --glow: radial-gradient(110% 75% at 82% -12%, rgba(244, 196, 176, 0.55), transparent 56%);
+  --surface: #ffffff;
+  --surface-2: #f7f4fb;
+  --border: rgba(90, 70, 130, 0.1);
+  --border-strong: rgba(90, 70, 130, 0.18);
+  --text: #2e2a36;
+  --text-sec: #6b6675;
+  --text-muted: #a59fb0;
+  --shadow-panel: 0 1px 2px rgba(70, 50, 100, 0.05), 0 12px 30px -10px rgba(90, 70, 130, 0.18);
+
+  --primary: #8b7fd6;
+  --primary-2: #c3b8ee;
+  --on-primary: #ffffff;
+  --selection: color-mix(in srgb, var(--primary) 16%, transparent);
+  --drop: color-mix(in srgb, var(--primary) 14%, transparent);
+  --primary-soft: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+
+[data-theme='dreamer'][data-mode='dark'] {
+  color-scheme: dark;
+  --bg: linear-gradient(158deg, #221c2e 0%, #1d1a28 55%, #181a2a 100%);
+  --bg-alt: #211d2b;
+  --glow: radial-gradient(110% 75% at 82% -12%, rgba(150, 120, 205, 0.24), transparent 56%);
+  --surface: #2a2536;
+  --surface-2: #322c44;
+  --border: rgba(200, 180, 240, 0.1);
+  --border-strong: rgba(200, 180, 240, 0.18);
+  --text: #efe9f6;
+  --text-sec: #b3acc2;
+  --text-muted: #7d7690;
+  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.35), 0 14px 34px -10px rgba(0, 0, 0, 0.55);
+
+  --primary: #a99cf0;
+  --primary-2: #8b7fd6;
+  --on-primary: #1c1726;
+  --selection: color-mix(in srgb, var(--primary) 22%, transparent);
+  --drop: color-mix(in srgb, var(--primary) 16%, transparent);
+  --primary-soft: color-mix(in srgb, var(--primary) 16%, transparent);
+}
+
+/* ── Structural: float the regions as rounded sheets on the glowing gradient stage ─── */
+[data-theme='dreamer'] .app {
+  /* corner glow layered over the gradient; padding + gap separate the floating sheets */
+  background: var(--glow), var(--bg);
+  padding: 10px;
+  gap: 10px;
+}
+[data-theme='dreamer'] .sidebar {
+  background: var(--surface);
+  border-right: none;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+}
+/* The content area stays open on the gradient; the note itself is a floating sheet. */
+[data-theme='dreamer'] .main {
+  background: transparent;
+}
+[data-theme='dreamer'] .page-view {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  margin: 6px auto 24px;
+  padding: 30px 40px 80px;
+}
+[data-theme='dreamer'] .welcome {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  padding: 36px 40px;
+}
+[data-theme='dreamer'] .statusbar {
+  background: transparent;
+  border-top: none;
+}
+/* Soft full-bleed active highlight instead of the angular left bar. */
+[data-theme='dreamer'] .page-item[data-active],
+[data-theme='dreamer'] .page-item[data-active].tree-file,
+[data-theme='dreamer'] .settings-navitem[data-active] {
+  background: var(--primary-soft);
+  box-shadow: none;
+}

@@ -59,6 +59,9 @@
  * (右栏远离交通灯,不动 → 用 .wb-tab--left 精确只命中左栏组)。 */
 [data-platform='mac'] .dockview-theme-lcl .dv-groupview:has(.wb-tab--left) .dv-tabs-and-actions-container { padding-left: 26px; }
 .rb-group { display: flex; flex-direction: column; gap: 4px; align-items: center; }
+/* Space 图标 = 顶部 ribbon 项(可拖动改序,排在折叠钮之下、商店之上):当前空间高亮。 */
+.rb-space.on { background: var(--accent-light, var(--overlay-light, rgba(127, 127, 127, 0.12))); color: var(--accent, var(--text)); }
+.rb-space.on:hover { color: var(--accent, var(--text)); }
 .rb-btn {
   -webkit-app-region: no-drag;
   width: 32px;
@@ -74,6 +77,23 @@
   transition: background var(--duration-fast, 0.15s), color var(--duration-fast, 0.15s);
 }
 .rb-btn:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.1)); color: var(--text); }
+/* 折叠/展开切换钮(常驻顶部)+ 顶部图标的拖动槽(可改序)。 */
+.rb-slot { -webkit-app-region: no-drag; display: flex; justify-content: center; border-radius: var(--radius-sm, 8px); }
+.rb-slot.dragging { opacity: 0.4; }
+.rb-slot.drag-over { box-shadow: inset 0 0 0 1px var(--accent); }
+.rb-label { font-size: 13px; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rb { transition: width var(--duration-fast, 0.15s) ease; }
+/* ribbon 内可交互元素一律 no-drag(否则落在 -webkit-app-region:drag 的 .rb 上会被当成拖窗)。 */
+.rb-btn, .rb-group .account-card, .rb-group .ribbon-account { -webkit-app-region: no-drag; }
+.rb-group .account-card { flex: 0 0 auto; }
+
+/* 展开态:宽条,按钮变「图标 + 名称」左对齐行;底部账号卡铺满。 */
+.rb-expanded { width: 224px; align-items: stretch; }
+.rb-expanded .rb-group { align-items: stretch; }
+.rb-expanded .rb-top,
+.rb-expanded .rb-bottom { padding: 0 8px; }
+.rb-expanded .rb-slot { width: 100%; justify-content: stretch; }
+.rb-expanded .rb-btn { width: 100%; justify-content: flex-start; gap: 10px; padding: 0 10px; height: 34px; }
 
 /* ===== 状态栏(底固定条) ===== */
 .sb {
@@ -195,7 +215,7 @@
   --dv-floating-box-shadow: var(--card-shadow, 0 8px 24px rgba(0, 0, 0, 0.2));
   --dv-tabs-container-scrollbar-color: var(--overlay-medium, rgba(127, 127, 127, 0.3));
   --dv-drag-over-background-color: var(--accent-light, rgba(127, 127, 127, 0.12));
-  --dv-drag-over-border-color: var(--accent);
+  --dv-drag-over-border: 1px solid var(--accent); /* Dockview 用的是 border 简写(非 -color),落点框描边 */
   --dv-tab-close-icon-color: var(--text-faint, var(--text-muted));
   --dv-border-radius: var(--radius-md, 12px);
 }
@@ -234,7 +254,10 @@
   display: flex;
   align-items: center;
   color: var(--text-muted);
-  transition: color var(--duration-fast, 0.15s), background var(--duration-fast, 0.15s);
+  /* 含 transform:Dockview smooth-reorder(FLIP)靠 .dv-tab--shifting 的 transition:transform 补间「排斥让位」,
+   * 但本主题这条 (0,3,0) 比 Dockview 的 .dv-tab--shifting (0,2,0) 更特异 → 会顶掉它的 transform 过渡使让位变瞬跳,
+   * 故这里把 transform 一并纳入过渡,保住丝滑动画(拖拽塌缩时 Dockview 内联 transition:none 仍会即时压掉,不受影响)。 */
+  transition: color var(--duration-fast, 0.15s), background var(--duration-fast, 0.15s), transform var(--dv-transition-duration, 200ms) ease-out;
 }
 .dockview-theme-lcl .dv-tab:hover { color: var(--text); }
 /* 命名标签(非图标 tab)圆角胶囊本体在 .wb-tab 上 */
@@ -265,7 +288,46 @@
   color: inherit;
 }
 .wb-tab-ic { flex-shrink: 0; opacity: 0.85; }
-.wb-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-tab-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 主区(命名)tab 固定宽度 → 标题超出截断为「…」;侧栏图标 tab(.wb-tab--icon)不受影响。 */
+.dockview-theme-lcl .dv-tab:not(:has(.wb-tab--icon)) { width: 170px; flex-shrink: 0; }
+.dockview-theme-lcl .dv-tab:not(:has(.wb-tab--icon)) .wb-tab { width: 100%; }
+/* 浏览器式 × 关闭钮:默认隐藏且不可点(避免误关),hover tab / 激活 tab 时显形可点。 */
+.wb-tab-close {
+  -webkit-app-region: no-drag;
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; margin-right: -4px;
+  border: none; background: transparent; color: inherit;
+  border-radius: var(--radius-sm, 6px); cursor: pointer;
+  opacity: 0; pointer-events: none;
+  transition: opacity var(--duration-fast, 0.15s), background var(--duration-fast, 0.15s);
+}
+.dockview-theme-lcl .dv-tab:hover .wb-tab-close,
+.dockview-theme-lcl .dv-tab.dv-active-tab .wb-tab-close { opacity: 0.6; pointer-events: auto; }
+.dockview-theme-lcl .dv-tab .wb-tab-close:hover { opacity: 1; background: var(--overlay-light, rgba(127, 127, 127, 0.15)); }
+
+/* 自定义拖拽落点竖线(浏览器式):Dockview 原生用「tab 挪位 + 幽灵」不给竖线(且瞬间移除 --dragging 类),
+ * 故由 WorkspaceHost 按指针在 tab 条里算插入位置、画这根 accent 竖线(tab / 侧栏图标 任意 view 都适用)。 */
+.wb-drop-line {
+  position: fixed; width: 2px; border-radius: 1px;
+  background: var(--accent); opacity: 0.55; /* 低调:去掉发光晕(高亮感来源),用主题色 + 半透明收成一根安静的插入光标 */
+  pointer-events: none; z-index: 9999; display: none;
+}
+/* 面板内分屏落点:半屏 accent 磨砂高亮(低调),盖在目标组正文对应半边。pointer-events:none 免挡 computeDropTarget 的 elementFromPoint。
+ * transition 让高亮在上下左右半边之间平滑滑移。z-index 略低于竖线。 */
+.wb-drop-zone {
+  position: fixed; border-radius: var(--radius-md, 10px);
+  background: var(--accent); opacity: 0.14;
+  outline: 1.5px solid var(--accent); outline-offset: -1.5px;
+  pointer-events: none; z-index: 9998; display: none;
+  transition: left 0.12s ease, top 0.12s ease, width 0.12s ease, height 0.12s ease;
+}
+/* 关掉每组的「分屏」落点(边缘 top/bottom/left/right);只留 center(移动/并入)。用户不要拖 tab 分屏。 */
+.dockview-theme-lcl .dv-drop-target-top,
+.dockview-theme-lcl .dv-drop-target-bottom,
+.dockview-theme-lcl .dv-drop-target-left,
+.dockview-theme-lcl .dv-drop-target-right { display: none !important; }
 
 /* ＋新建标签:放在所有 tab 之后(reorder 让 right-actions 紧跟 tabs,void 仍在其后填充 →
  * 既「在所有 tab 后面」又不靠最右(避免与右栏折叠钮重叠),且保留空白拖拽区。 */
@@ -273,19 +335,38 @@
 .dockview-theme-lcl .dv-tabs-and-actions-container > .dv-right-actions-container { order: 2; }
 .dockview-theme-lcl .dv-tabs-and-actions-container > .dv-void-container { order: 3; }
 
+/* tab 栏空白处可拖整个窗口(mac frameless,同 ribbon)。tab/前后缀按钮 no-drag 保持可点。 */
+.dockview-theme-lcl .dv-tabs-and-actions-container { -webkit-app-region: drag; }
+.dockview-theme-lcl .dv-tab,
+.dockview-theme-lcl .dv-prefix,
+.dockview-theme-lcl .dv-new-tab,
+.dockview-theme-lcl .dv-nav-btn,
+.dockview-theme-lcl .dv-edge-toggle { -webkit-app-region: no-drag; }
+/* 拖拽面板期间(WorkspaceHost 打 data-dv-dragging)临时关掉 tab 栏 / 侧栏的窗口拖拽区:
+ * app-region:drag 会吞掉 Dockview 落点探测所需的 pointer/DnD 事件 → 否则拖到 tab 栏/侧栏上看不到落点框。 */
+html[data-dv-dragging] .dockview-theme-lcl .dv-tabs-and-actions-container,
+html[data-dv-dragging] .dockview-theme-lcl .dv-void-container,
+html[data-dv-dragging] .t2s-side { -webkit-app-region: no-drag; }
+
 /* 主区标签栏左前缀:左栏折叠钮 */
 .dv-prefix { display: inline-flex; align-items: center; gap: 2px; padding-left: 4px; }
+/* 左栏收起 → 主区折叠钮成为最左,躲开 mac 交通灯(与左栏 tab 同款避让)。 */
+[data-platform='mac'] .dv-prefix--edge { padding-left: 26px; }
+.dv-nav-btn,
 .dv-new-tab,
 .dv-edge-toggle {
   display: inline-flex; align-items: center; justify-content: center;
   width: 26px; height: 26px;
+  border: none; background: transparent;
   border-radius: var(--radius-sm, 8px);
   color: var(--text-muted); cursor: pointer; flex-shrink: 0;
   transition: background var(--duration-fast, 0.15s), color var(--duration-fast, 0.15s);
 }
 .dv-new-tab { margin: 0 4px; }
 .dv-new-tab:hover,
-.dv-edge-toggle:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.1)); color: var(--text); }
+.dv-edge-toggle:hover,
+.dv-nav-btn:hover:not(:disabled) { background: var(--overlay-light, rgba(127, 127, 127, 0.1)); color: var(--text); }
+.dv-nav-btn:disabled { opacity: 0.32; cursor: default; }
 /* 右栏折叠钮:浮在工作区右上角(=右panel最右缘),收起后仍在原处。 */
 .dv-edge-right {
   position: absolute;

@@ -1,0 +1,45 @@
+/* ═══ Amadeus #/amadeus — 只放「笔记内容编排」需要的极少量胶水，全部 scoped 在两套基座根下 ═══ */
+/* 配色 / 卡片 / 阴影 / 圆角 / 取色 全部复用基座（.tangu-soft 的 --ink/--card/--accent…；.tangu-lovable 的 --text/--bg-card/--accent…）。*/
+/* 这里只补基座里没有的笔记专属件：笔记标题/元信息、块标题/列表、嵌入头、引用块、新块占位、标签 chip、语言切换段。*/
+
+/* ── round：复用 #/tangu-soft 基座（.ts-card 已给卡面/圆角/软影；.am-* 仅补内容）── */
+.tangu-soft .am-block { padding: 14px 17px; }
+.tangu-soft .am-h { font-size: 16px; font-weight: 700; margin: 0 0 6px; letter-spacing: -0.2px; }
+.tangu-soft .am-ul { margin: 6px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; line-height: 1.6; }
+.tangu-soft .am-note-title { font-size: 23px; font-weight: 700; padding: 2px 4px 0; letter-spacing: -0.3px; }
+.tangu-soft .am-note-meta { display: flex; gap: 12px; font-size: 12px; color: var(--ink-faint); padding: 0 4px; }
+.tangu-soft .am-row { display: flex; gap: var(--gap); }
+.tangu-soft .am-row .am-block { flex: 1; min-width: 0; }
+.tangu-soft .am-embed-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.tangu-soft .am-embed-badge { font-size: 11px; font-weight: 700; color: var(--accent); background: var(--accent-soft); padding: 2px 8px; border-radius: 999px; }
+.tangu-soft .am-embed-src { font-size: 11px; color: var(--ink-faint); background: none; border: none; cursor: pointer; }
+.tangu-soft .am-quote { background: var(--accent-soft); border-radius: var(--radius); padding: 13px 16px; box-shadow: var(--shadow-sm); }
+.tangu-soft .am-quote .ts-text { font-style: italic; color: var(--ink-soft); }
+.tangu-soft .am-newblock { width: 100%; text-align: left; padding: 12px 16px; border-radius: var(--radius); border: 1.5px dashed var(--ink-ghost); color: var(--ink-faint); font-size: 13px; background: transparent; cursor: pointer; font-family: var(--font); }
+.tangu-soft .am-newblock:hover { color: var(--accent); border-color: var(--accent); }
+.tangu-soft .am-tags { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 6px 2px; }
+.tangu-soft .am-tag { font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--card-2); color: var(--ink-soft); }
+.tangu-soft .am-olist { display: flex; flex-direction: column; gap: 1px; }
+.tangu-soft .am-oitem { padding: 6px 9px; border-radius: var(--radius-sm); font-size: 12.5px; color: var(--ink-soft); cursor: pointer; }
+.tangu-soft .am-oitem:hover { background: var(--card-2); color: var(--ink); }
+.tangu-soft .am-oitem.sub { padding-left: 20px; font-size: 12px; color: var(--ink-faint); }
+.tangu-soft .am-langseg .ts-seg-btn small { max-width: 13ch; }
+
+/* ── lovable：复用 #/tangu 基座（用基座的 --bg-card/--border/--card-shadow 拼一张笔记块卡）── */
+.tangu-lovable .am-block { background: var(--bg-card); border: var(--border-width) solid var(--border); border-radius: var(--radius-md); box-shadow: var(--card-shadow); padding: 13px 16px; }
+.tangu-lovable .am-h { font-size: 15.5px; font-weight: 700; margin: 0 0 6px; }
+.tangu-lovable .am-ul { margin: 6px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; line-height: 1.6; color: var(--text-light); }
+.tangu-lovable .am-note-title { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin-bottom: 2px; }
+.tangu-lovable .am-note-meta { display: flex; gap: 12px; font-size: 12px; color: var(--text-faint); margin-bottom: 4px; }
+.tangu-lovable .am-row { display: flex; gap: 12px; }
+.tangu-lovable .am-row .am-block { flex: 1; min-width: 0; }
+.tangu-lovable .am-embed-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.tangu-lovable .am-embed-badge { font-size: 11px; font-weight: 700; color: var(--accent); background: var(--accent-light); padding: 2px 8px; border-radius: 999px; }
+.tangu-lovable .am-embed-src { font-size: 11px; color: var(--text-faint); background: none; border: none; cursor: pointer; }
+.tangu-lovable .am-quote { background: var(--accent-light); border-radius: var(--radius-md); padding: 12px 15px; }
+.tangu-lovable .am-quote .msg-content { font-style: italic; color: var(--text-muted); }
+.tangu-lovable .am-newblock { width: 100%; text-align: left; padding: 11px 14px; border-radius: var(--radius-md); border: 1px dashed var(--text-ghost); color: var(--text-faint); font-size: 13px; background: transparent; cursor: pointer; font-family: var(--font-ui); }
+.tangu-lovable .am-newblock:hover { color: var(--text); border-color: var(--overlay-strong); }
+.tangu-lovable .am-tags { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 8px 4px; }
+.tangu-lovable .am-tag { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-muted); }
+.tangu-lovable .am-note-doc { max-width: 640px; margin: 0 auto; padding: 6px 0; display: flex; flex-direction: column; gap: 12px; }

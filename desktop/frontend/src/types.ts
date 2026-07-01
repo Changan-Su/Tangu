@@ -426,6 +426,10 @@ export interface StoredDesktopConfig extends TanguDesktopConfig {
   cloudUrl: string
   cloudToken: string
   sandbox: 'auto' | 'docker' | 'none'
+  /** Python 来源:bundled=内置解释器(默认,免装/隔离);system=用系统已装 python。 */
+  pythonMode?: 'bundled' | 'system'
+  /** 网络镜像:china=中国大陆镜像源(pip/npm/git + 市场 github 下载);default=直连。 */
+  mirror?: 'default' | 'china'
   browserEnabled?: boolean
   browserEngine?: 'auto' | 'chrome' | 'lightpanda'
   browserSearchEngine?: 'duckduckgo' | 'bing' | 'google' | 'baidu'
@@ -441,6 +445,12 @@ export interface StoredDesktopConfig extends TanguDesktopConfig {
   forsionSyncEnabled?: boolean
   /** 上次成功同步时刻(epoch ms;UI 展示)。 */
   forsionLastSyncedAt?: number
+  /** 笔记拖入附件存放方式:attachments=同目录 attachments/;same=与笔记同目录;vault=固定文件夹。 */
+  notesAttachmentMode?: 'attachments' | 'same' | 'vault'
+  /** notesAttachmentMode==='vault' 时的 vault 相对文件夹(如 "assets")。 */
+  notesAttachmentFolder?: string
+  /** 导入文件是否默认开启预览(![[file]] 形式);false=插入 [名](路径) 链接。 */
+  notesImportPreview?: boolean
   backendState?: BackendStatusInfo
   /** 主进程附带的用户主目录(本机模式 cwd 兜底)。 */
   homeDir?: string
@@ -519,6 +529,9 @@ declare global {
       /** 拖入式主题:列 ~/.tangu/themes/(每项 {id,manifest,css})/ 打开该文件夹。 */
       listThemes?(): Promise<Array<{ id: string; manifest: Record<string, unknown>; css: string }>>
       openThemesDir?(): Promise<{ ok: boolean }>
+      /** 设置界面「打开文件夹」:在系统文件管理器打开 agent(slug 缺省=agents 根)/ skills 目录(仅桌面)。 */
+      openAgentDir?(slug?: string): Promise<{ ok: boolean }>
+      openSkillsDir?(): Promise<{ ok: boolean }>
       /** Forsion Market:浏览(公开)/ 详情含 README / 安装(下载+按类型解压到 ~/.tangu)/ 已装列表。 */
       marketList?(type?: string): Promise<{ items: MarketCard[] }>
       marketDetail?(id: string): Promise<MarketDetail>

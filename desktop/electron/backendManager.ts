@@ -34,6 +34,35 @@ export interface ManagedBackendSettings {
   wechatStateDir?: string
   /** Forsion/Tangu 默认工作区目录(~/Tangu 或用户自定义);注入后端作微信远程会话的 cwd。 */
   defaultWorkspaceDir?: string
+  /** Python 来源:bundled=内置解释器(默认,免装/与用户 python 隔离);system=用系统 PATH 里的 python。 */
+  pythonMode?: 'bundled' | 'system'
+  /** 网络镜像:china=中国大陆镜像源(pip/npm/git 走清华/npmmirror/gitclone);default=直连。 */
+  mirror?: 'default' | 'china'
+}
+
+/** 内置 Python 目录:打包=resources/python;dev=desktop/build/python(手动 `npm run fetch-python` 后才有)。 */
+function bundledPythonDir(): string | null {
+  const dir = app.isPackaged
+    ? join(process.resourcesPath, 'python')
+    : join(__dirname, '..', '..', 'build', 'python')
+  return existsSync(dir) ? dir : null
+}
+
+/** 内置 Python 的 PATH 前置目录 + 解释器绝对路径;缺失内置 → null(回落系统 Python)。 */
+export function resolveBundledPython(): { pathDirs: string[]; pythonBin: string } | null {
+  const dir = bundledPythonDir()
+  if (!dir) return null
+  if (process.platform === 'win32') {
+    const bin = join(dir, 'python.exe')
+    return existsSync(bin) ? { pathDirs: [dir, join(dir, 'Scripts')], pythonBin: bin } : null
+  }
+  const bin = join(dir, 'bin', 'python3')
+  return existsSync(bin) ? { pathDirs: [join(dir, 'bin')], pythonBin: bin } : null
+}
+
+/** 内置 Python 解释器绝对路径(供环境检测/设置显示);无内置 → null。 */
+export function bundledPythonBin(): string | null {
+  return resolveBundledPython()?.pythonBin ?? null
 }
 
 export interface BackendStatus {
@@ -184,6 +213,34 @@ export class BackendManager {
       if (s.wechatStateDir) env.TANGU_WECHAT_STATE_DIR = s.wechatStateDir
       // 让后端的微信远程会话落到桌面默认工作区(host 执行 cwd);兜底 ~/Tangu。
       env.TANGU_DEFAULT_WORKSPACE = s.defaultWorkspaceDir?.trim() || join(homedir(), 'Tangu')
+
+      // 内置 Python:bundled(默认)+ 拿得到内置解释器 → 前置 PATH + TANGU_PYTHON_BIN,
+      // 让 run_bash 里的 python/pip 落到隔离的内置解释器(免装、不与用户 python 冲突);'system' 用系统 PATH。
+      // Windows 上环境变量键名是 'Path' 而非 'PATH'——按大小写不敏感找回真实键,否则前置无效。
+      if (s.pythonMode !== 'system') {
+        const py = resolveBundledPython()
+        if (py) {
+          const sep = process.platform === 'win32' ? ';' : ':'
+          const pathKey = Object.keys(env).find((k) => k.toLowerCase() === 'path') || 'PATH'
+          env[pathKey] = [...py.pathDirs, env[pathKey] || ''].filter(Boolean).join(sep)
+          env.TANGU_PYTHON_BIN = py.pythonBin
+        }
+      }
+
+      // 中国大陆镜像(可逆:仅注入子进程 env,不改用户全局 dotfile;关掉即恢复直连)。pip/npm/git 子进程继承之。
+      if (s.mirror === 'china') {
+        const pip = 'https://pypi.tuna.tsinghua.edu.cn/simple'
+        if (!env.PIP_INDEX_URL) env.PIP_INDEX_URL = pip
+        if (!env.AGENT_SANDBOX_PIP_INDEX_URL) env.AGENT_SANDBOX_PIP_INDEX_URL = pip // 沙箱 pip_install 走镜像
+        if (!env.npm_config_registry) env.npm_config_registry = 'https://registry.npmmirror.com' // npx/npm 亦读此
+        // git:GIT_CONFIG_COUNT 叠加 insteadOf(不覆盖用户 ~/.gitconfig),github → gitclone 镜像。
+        // ponytail: gitclone.com 是第三方镜像,可能限速;关掉「中国大陆镜像」即恢复直连。
+        if (!env.GIT_CONFIG_COUNT) {
+          env.GIT_CONFIG_COUNT = '1'
+          env.GIT_CONFIG_KEY_0 = 'url.https://gitclone.com/github.com/.insteadOf'
+          env.GIT_CONFIG_VALUE_0 = 'https://github.com/'
+        }
+      }
       const child = spawn(cmd, args, {
         env,
         stdio: ['ignore', 'pipe', 'pipe'],

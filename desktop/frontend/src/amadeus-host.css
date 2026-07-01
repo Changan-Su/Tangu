@@ -1,0 +1,114 @@
+/* Amadeus Space 宿主样式。
+ * 只有「编辑器」复用 Amadeus 组件(PageView/Milkdown 块),需其组件样式 + 契约 token;故仅为编辑器引入
+ * vendored styles.css(.page-view/块/Milkdown)+ recipes.css + bridge.css,统一在 .am-app.tangu-lovable
+ * 作用域里经 bridge 取 Tangu :root 词表(随换肤/明暗同步)。
+ * 左栏笔记库与右栏大纲/反链是 Tangu 原生重建(t2s- / .ctx-menu / 下面的 amx- 类,直接用 Tangu token),
+ * 不再引 Amadeus 的 NotesView/VaultSidebar 外壳与 theme/lcl/tangu.css(早期快照,见 host 注释历史)。 */
+/* vendored styles.css 已在文件内整表 scope 到 `.am-app`(其 ~279 条通用类如 .settings-nav、.icon-btn、
+ * .hint、.main、.row 原为独立 app 写、无作用域,会串味 Tangu 全局:轻则按钮尺寸/配色错乱,重则
+ * .settings-body 的 position/overflow 这类「只有 Amadeus 设、Tangu 没设」的附加属性错位弹层布局、
+ * 下半区点不动。@layer 只能压同名同属性,拦不住附加属性,故改用 `.am-app` 作用域彻底隔离)。
+ * bridge/recipes 无需 scope:本就 tangu-lovable + am- 前缀限定,只精修编辑器块。 */
+@import './amadeus/styles.css';
+@import './amadeus/theme/lcl/recipes.css';
+@import './amadeus/lcl/bridge.css';
+
+/* ── 编辑器(.am-app 作用域:Amadeus 块组件经 bridge 取色) ── */
+.am-app.amx-pane { height: 100%; overflow: auto; background: var(--bg); color: var(--text); }
+.amx-editor { padding: 8px 0 40px; }
+/* 标题与正文同处 PageView 的居中 920 框(两边各 48px 留白)。Obsidian 式:标题与正文文字都贴到内容最左边
+ * (正文左侧的拖拽槽/边缘缩进被下方 .am-app 覆盖归零,拖拽手柄移进左留白)。故标题左内距仅 2px 与正文对齐。 */
+.amx-doc { max-width: 920px; margin: 0 auto; padding: 0 48px; }
+/* 可编辑标题:与编辑器一级标题同字号(1.7em × 15px = 25.5px / 700);悬浮·聚焦给底色提示可改;提交即 renamePage。 */
+.amx-title-input {
+  width: 100%; border: none; outline: none; background: transparent; color: var(--text);
+  font-family: inherit; font-size: 25.5px; font-weight: 700; line-height: 1.3;
+  margin: 0 0 2px; padding: 4px 6px 4px 2px; border-radius: var(--radius-sm, 8px);
+  transition: background var(--duration-fast, 0.15s);
+}
+.amx-title-input:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.06)); }
+.amx-title-input:focus { background: var(--overlay-light, rgba(127, 127, 127, 0.1)); }
+
+/* 编辑器正文排版:两边留白 + Obsidian 式贴左对齐。Amadeus 块默认左侧有 edge-zone(14)+列内距(2)+
+ * 拖拽槽(22)+块体(4)≈42px 缩进,把正文文字推得很靠右。这里将其归零 → 正文文字贴到内容最左边(与标题齐),
+ * 拖拽手柄绝对定位到左侧留白、悬浮显示;右侧操作留在 22px 右列。
+ * 代价:失去「拖到行两侧边缘裂出新列」的投放区(单列笔记无影响,块内拖拽重排照常)。 */
+.am-app .page-view { padding-left: 48px; padding-right: 48px; }
+.am-app .edge-zone { flex-basis: 0; }
+.am-app .column { padding-left: 0; padding-right: 0; }
+.am-app .block-host { grid-template-columns: 1fr 22px; }
+.am-app .block-gutter { position: absolute; left: -26px; top: 0; }
+.am-app .block-body { padding-left: 2px; }
+.am-app .drop-line { left: 0; }
+
+/* 顶部工具条(sticky,随滚动常驻顶部):左 前进后退 + 路径面包屑 / 右 模式切换钮。 */
+.amx-toolbar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 6px 10px 2px; background: var(--bg); }
+/* 前进 / 后退导航(常驻左上角)。 */
+.amx-nav { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.amx-nav-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: none; background: transparent; color: var(--text-muted); border-radius: var(--radius-sm, 8px); cursor: pointer; transition: background var(--duration-fast, 0.15s), color var(--duration-fast, 0.15s); }
+.amx-nav-btn:hover:not(:disabled) { background: var(--overlay-light, rgba(127, 127, 127, 0.1)); color: var(--text); }
+.amx-nav-btn:disabled { opacity: 0.35; cursor: default; }
+/* 面包屑:文件夹 / 文件,点段在左栏定位高亮。占据 nav 与切换钮之间的空间。 */
+.amx-crumbs { display: flex; align-items: center; flex-wrap: nowrap; flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 12.5px; }
+.amx-crumb-seg { display: inline-flex; align-items: center; min-width: 0; }
+.amx-crumb-sep { flex: 0 0 auto; margin: 0 4px; color: var(--text-faint, var(--text-muted)); }
+.amx-crumb { border: none; background: transparent; color: var(--text-muted); font: inherit; cursor: pointer; padding: 2px 5px; border-radius: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.amx-crumb:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.1)); color: var(--text); }
+.amx-crumb-seg:last-child .amx-crumb { color: var(--text); font-weight: 550; }
+/* 定位高亮脉冲(面包屑点击后,左栏对应行/组短暂高亮)。 */
+@keyframes amx-flash-kf { 0% { background: transparent; } 35% { background: var(--accent-light, rgba(127, 127, 127, 0.22)); } 100% { background: transparent; } }
+.t2s-srow.amx-flash, .t2s-group.amx-flash { animation: amx-flash-kf 1.1s ease; border-radius: var(--radius-sm, 8px); }
+.amx-mode-btn {
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--bg-card, var(--bg)); color: var(--text-muted);
+  font-family: inherit; font-size: 12px; padding: 4px 9px; border-radius: var(--radius-sm, 8px);
+  transition: background var(--duration-fast, 0.15s), color var(--duration-fast, 0.15s);
+}
+.amx-mode-btn:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.08)); color: var(--text); }
+.amx-source {
+  display: block; box-sizing: border-box; width: 100%; max-width: 920px; margin: 0 auto;
+  min-height: 60vh; border: none; outline: none; resize: none; overflow: hidden;
+  background: transparent; color: var(--text); white-space: pre-wrap; word-break: break-word;
+  font-family: var(--font-mono, ui-monospace, 'SF Mono', Menlo, monospace);
+  font-size: 14px; line-height: 1.7; padding: 4px 48px 80px;
+}
+.amx-empty { padding: 16px; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
+
+/* ── 右栏面板(原生 Tangu token,不在 .am-app 内) ── */
+.amx-panel { height: 100%; overflow: auto; background: var(--bg); color: var(--text); padding: 4px 6px 12px; }
+.amx-panel-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint, var(--text-muted)); padding: 10px 8px 6px; }
+.amx-panel-empty { padding: 14px 10px; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
+.amx-list { display: flex; flex-direction: column; gap: 1px; }
+.amx-list-item {
+  display: block; width: 100%; text-align: left; border: none; background: transparent;
+  color: var(--text-light, var(--text)); font: inherit; font-size: 13px; line-height: 1.5;
+  padding: 5px 10px; border-radius: var(--radius-sm, 8px); cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.amx-list-item:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.08)); color: var(--text); }
+.amx-backlink-snippet { display: block; font-size: 11px; color: var(--text-muted); white-space: normal; margin-top: 2px; }
+
+/* 图片嵌入块 `![[pic.png]]`:满宽自适应,圆角贴合块。宽度可选 `![[pic.png|300]]` 由内联 style 覆盖。 */
+.am-app .embed-image-body { padding: 2px 4px; }
+.am-app .embed-image { display: block; max-width: 100%; height: auto; border-radius: 8px; }
+
+/* 非图片文件卡片 `![[report.pdf]]`:图标 + 文件名 + 打开(点击 openAttachment)。 */
+.am-app .embed-file {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+  border: 1px solid var(--border); border-left: 2px solid var(--primary); border-radius: 8px;
+  background: var(--surface-2); color: var(--text); font: inherit; font-size: 13.5px;
+  padding: 8px 12px; cursor: pointer; text-align: left;
+  transition: background var(--dur-fast, 0.15s), border-color var(--dur-fast, 0.15s);
+}
+.am-app .embed-file:hover { background: var(--surface); border-color: var(--primary); }
+.am-app .embed-file-ic { flex: 0 0 auto; font-size: 15px; }
+.am-app .embed-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.am-app .embed-file-open { flex: 0 0 auto; font-size: 11.5px; color: var(--text-muted); }
+
+/* 拖入文件高亮:编辑器四周虚线提示可放下。 */
+.amx-editor.amx-dragover { outline: 2px dashed var(--accent, var(--primary)); outline-offset: -8px; border-radius: 12px; }
+
+/* 双链 [[wikilink]]:Obsidian 式醒目紫,区别于正文(Tangu 默认 accent 近黑、不够醒目)。明暗各一档。
+ * 比 styles.css 的 `.milkdown .ProseMirror .wikilink` 多一层 .am-app → 特异性更高,覆盖其 color。 */
+.am-app .milkdown .ProseMirror .wikilink { color: #6c5ce7; text-decoration-color: color-mix(in srgb, #6c5ce7 45%, transparent); }
+.am-app[data-mode='dark'] .milkdown .ProseMirror .wikilink { color: #a89bf5; text-decoration-color: color-mix(in srgb, #a89bf5 45%, transparent); }

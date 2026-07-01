@@ -60,6 +60,8 @@ export interface FinalizeMessageInput {
   toolResults: any[];
   /** agent 在对话区展示给用户的文件(DisplayFileItem[];path 或 dataUrl)。缺省/空=不写。 */
   displayFiles?: any[];
+  /** 产出这条消息的 agent slug —— 客户端按它还原头像/昵称(否则重载只能回退到「会话默认 agent」)。 */
+  agentSlug?: string;
 }
 
 export interface StateStore {

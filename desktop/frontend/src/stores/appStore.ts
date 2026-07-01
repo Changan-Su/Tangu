@@ -34,7 +34,7 @@ function saveUnread(s: Set<string>): void {
 const GROUP_SPEAKER_RE = /^\*\*🗣\s*([^*\n]+?)\s*\*\*\n+([\s\S]*)$/
 
 /** 历史行 → UI 消息(tool_calls/tool_results 配对成 toolEvents)。 */
-function recordToUi(r: any, resolveGroup?: (name: string) => { slug?: string; color: string }): UiMessage {
+export function recordToUi(r: any, resolveGroup?: (name: string) => { slug?: string; color: string }, resolveSlug?: (slug: string) => string | undefined): UiMessage {
   const role = r.role === 'model' || r.role === 'assistant' ? 'assistant' : 'user'
   let content = r.content || ''
   let agentId: string | undefined
@@ -49,6 +49,12 @@ function recordToUi(r: any, resolveGroup?: (name: string) => { slug?: string; co
       agentId = g.slug
       agentColor = g.color
     }
+  }
+  // 非群聊:用消息自身存的 agent_slug 还原展示身份(头像/昵称),否则重载只能回退到「会话默认 agent」。
+  // 旧消息无此列(NULL)→ 不盖,仍走会话回退。不设 agentColor:单聊保持默认配色,不染群聊那种彩色名。
+  if (role === 'assistant' && !agentId && r.agent_slug) {
+    agentId = r.agent_slug
+    agentName = resolveSlug?.(r.agent_slug) || agentName
   }
   const msg: UiMessage = {
     id: r.id, role, content, reasoning: r.reasoning || undefined,
@@ -115,6 +121,9 @@ function agentStamp(s: Pick<AppState, 'engines' | 'agentDefs' | 'defaultAgentSlu
 const runAborts = new Map<string, AbortController>()
 const subscribedRuns = new Set<string>()
 const stoppedRuns = new Set<string>()
+// 卡死兜底:SSE 偶尔丢「终止帧」(后端 run 挂死/被 orphan janitor 标失败但事件没进流)→ 助手消息永远停在
+// streaming。看门狗周期性查:该 run 已不在后端活跃集 → 重载消息收尾(有内容标 done,无则 error),解除卡死。
+const runWatchdogs = new Map<string, ReturnType<typeof setInterval>>()
 const loadedHistory = new Set<string>()
 let lastAuthExpiredAt = 0 // handleAuthExpired 去抖:轮询/SSE/models 可能同时多次 401
 const MAX_MSG_CHARS = 1_500_000 // 单条助手正文软上限(防超长正文+markdown 重渲染撑爆渲染进程)
@@ -581,6 +590,28 @@ export const useApp = create<AppState>((set, get) => ({
     runAborts.set(runId, ac)
     const assistantRef = { current: assistantId }
     set((s) => ({ runningBySession: { ...s.runningBySession, [sessionId]: runId } }))
+    // 看门狗:每 30s 查一次。仅当助手消息仍在 streaming、且后端活跃集已无此 run(终止帧丢失 / 被判失败)
+    // 才兜底收尾——后端还在跑(慢模型/长任务)时 run 仍在活跃集,绝不误杀。
+    runWatchdogs.set(runId, setInterval(() => { void (async () => {
+      if (get().runningBySession[sessionId] !== runId) return
+      const cur = (get().messagesBySession[sessionId] || []).find((m) => m.id === assistantRef.current)
+      if (!cur || cur.status !== 'streaming') return
+      let active: Array<{ id: string; status?: string }> = []
+      try { active = await listActiveRuns(get().cfg, sessionId) } catch { return }
+      if (active.some((r) => r.id === runId && (r.status === 'running' || r.status === 'queued' || !r.status))) return
+      // 后端已不跑此 run,但 UI 还卡 streaming → 重载消息收尾。
+      let rec: any
+      try { rec = (await api.listMessages(get().cfg, sessionId)).find((r: any) => r.id === assistantRef.current) } catch { return }
+      get().patchMessage(sessionId, assistantRef.current, (m) => {
+        const content = rec?.content || m.content
+        return content
+          ? { ...m, content, status: 'done' as const }
+          : { ...m, status: 'error' as const, error: get().tr('app.eventStreamInterrupted') }
+      })
+      stoppedRuns.add(runId)
+      ac.abort() // 停掉还在空转的 SSE 重连循环
+      endRun(set, get, sessionId, runId)
+    })() }, 30000))
     void subscribeRunEvents(get().cfg, runId, (ev) => get().reduceEvent(sessionId, runId, assistantRef, ev), ac.signal)
       .catch((e) => {
         if (!stoppedRuns.has(runId)) {
@@ -717,14 +748,22 @@ export const useApp = create<AppState>((set, get) => ({
         api.getSessionConfig(c, sessionId).catch(() => ({} as AgentConfig)),
         listActiveRuns(c, sessionId),
       ])
-      set((s) => ({ configBySession: { ...s.configBySession, [sessionId]: config } }))
+      // 配置拉取失败/为空时,别把本机(project_path)会话降级成非 host——否则 execMode 缺失,拖文件走
+      // 「上传工作区(25MB 限制)」而非本机路径插入,且因 loadedHistory 已标记不再重拉 → 刷新前一直卡住。
+      // 从会话记录的 project_path 派生 host 兜底,真实 config 覆盖其上(用户显式设过 sandbox 时仍以 config 为准)。
+      const sess = get().sessions.find((x) => x.id === sessionId) || get().archivedSessions.find((x) => x.id === sessionId)
+      const base: AgentConfig = sess?.project_path
+        ? { execMode: 'host', approvalMode: 'auto-edit', cwd: sess.project_path }
+        : {}
+      set((s) => ({ configBySession: { ...s.configBySession, [sessionId]: { ...base, ...config } } }))
       void api.getSessionUsage(c, sessionId)
         .then((base) => set((s) => ({ usageBySession: { ...s.usageBySession, [sessionId]: { ctx: s.usageBySession[sessionId]?.ctx || 0, base, live: 0 } } })))
         .catch(() => {})
       set((s) => {
         const existing = s.messagesBySession[sessionId] || []
         const resolveGroup = groupSpeakerResolver(s.agentDefs, t('group.host'))
-        const ui = records.map((r) => recordToUi(r, resolveGroup))
+        const resolveSlug = (slug: string) => s.agentDefs.find((a) => a.slug === slug)?.name
+        const ui = records.map((r) => recordToUi(r, resolveGroup, resolveSlug))
         const byId = new Map(ui.map((m) => [m.id, m] as const))
         for (const m of existing) byId.set(m.id, m)
         return { messagesBySession: { ...s.messagesBySession, [sessionId]: [...byId.values()].sort((a, b) => a.timestamp - b.timestamp) } }
@@ -759,7 +798,8 @@ export const useApp = create<AppState>((set, get) => ({
       set((s) => {
         const existing = s.messagesBySession[sessionId] || []
         const resolveGroup = groupSpeakerResolver(s.agentDefs, get().tr('group.host'))
-        const ui = records.map((r) => recordToUi(r, resolveGroup))
+        const resolveSlug = (slug: string) => s.agentDefs.find((a) => a.slug === slug)?.name
+        const ui = records.map((r) => recordToUi(r, resolveGroup, resolveSlug))
         const byId = new Map(ui.map((m) => [m.id, m] as const))
         for (const m of existing) byId.set(m.id, m)
         const merged = [...byId.values()].sort((a, b) => a.timestamp - b.timestamp)
@@ -1234,6 +1274,8 @@ export const useApp = create<AppState>((set, get) => ({
       connMessage: t('app.sessionExpired'),
     })
     s.toast(t('app.sessionExpired'), true)
+    // 通知常驻的账号卡(自管 authStatus,不订阅本 store)刷新 → 显示过期态 + 点击改走重新登录。
+    try { window.dispatchEvent(new Event('tangu:auth-expired')) } catch { /* ignore */ }
     get().openSettings('forsion') // 复用现成 forsion tab 的登录入口
   },
 
@@ -1258,6 +1300,8 @@ function endRun(set: (fn: (s: AppState) => Partial<AppState>) => void, get: () =
   runAborts.delete(runId)
   subscribedRuns.delete(runId)
   stoppedRuns.delete(runId)
+  const wd = runWatchdogs.get(runId)
+  if (wd) { clearInterval(wd); runWatchdogs.delete(runId) }
   set((s) => {
     if (s.runningBySession[sessionId] !== runId) return {}
     const next = { ...s.runningBySession }

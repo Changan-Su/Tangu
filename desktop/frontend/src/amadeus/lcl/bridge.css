@@ -1,0 +1,57 @@
+/* Token bridge — alias Amadeus's component token contract (--surface/--primary/--text-sec/…)
+ * onto each vendored LCL base's own vocabulary, scoped under the base root. This lets every
+ * existing Amadeus component (PageView, panels, dialogs…) render INSIDE a base and inherit
+ * its exact look, with no component rewrites. Scoped under .tangu-* → zero effect on the
+ * legacy UI. Where a name already exists in the base (--bg/--text/--border/--radius-sm/
+ * --font-ui…), the base value is used as-is. */
+
+.tangu-soft {
+  /* soft base speaks --card/--ink/--accent/--radius… */
+  --bg: var(--card-2);
+  --bg-alt: var(--card-2);
+  --surface: var(--card);
+  --surface-2: var(--card-2);
+  --border: var(--ink-ghost);
+  --border-strong: var(--ink-faint);
+  --text: var(--ink);
+  --text-sec: var(--ink-soft);
+  --text-muted: var(--ink-faint);
+  --primary: var(--accent);
+  --primary-2: var(--accent-hover);
+  --on-primary: var(--on-accent);
+  --selection: var(--accent-soft);
+  --drop: var(--accent-soft);
+  --primary-soft: var(--accent-soft);
+  --shadow-panel: var(--shadow);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
+  --radius-xl: var(--radius);
+  --radius-pill: 9999px;
+  --ease-apple: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --dur-fast: 150ms;
+  --dur-normal: 250ms;
+  --font-ui: var(--font);
+  --font-mono: var(--mono);
+}
+
+.tangu-lovable {
+  /* lovable base already speaks --bg/--bg-card/--text/--accent/--radius-sm|md|lg/--font-ui… */
+  --bg-alt: var(--sidebar-bg);
+  --surface: var(--bg-card);
+  --surface-2: var(--bg-card);
+  --border-strong: var(--overlay-strong);
+  --text-sec: var(--text-light);
+  --primary: var(--accent);
+  --primary-2: var(--accent-hover);
+  --on-primary: var(--on-accent);
+  --selection: var(--accent-light);
+  --drop: var(--accent-light);
+  --primary-soft: var(--accent-light);
+  --shadow-panel: var(--card-shadow);
+  --radius-xs: var(--radius-sm);
+  --radius-xl: var(--radius-lg);
+  --radius-pill: 9999px;
+  --ease-apple: var(--ease-out);
+  --dur-fast: var(--duration-fast);
+  --dur-normal: var(--duration-slow);
+}

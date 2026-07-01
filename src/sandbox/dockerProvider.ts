@@ -51,6 +51,8 @@ export const PKG_DIR = process.env.AGENT_SANDBOX_PKG_DIR || path.join(os.tmpdir(
 const ALLOW_INSTALL = (process.env.AGENT_SANDBOX_ALLOW_INSTALL ?? 'true') !== 'false';
 const INSTALL_ONLY_BINARY = (process.env.AGENT_SANDBOX_INSTALL_ONLY_BINARY ?? 'true') !== 'false';
 const INSTALL_TIMEOUT_MS = Number(process.env.AGENT_SANDBOX_INSTALL_TIMEOUT_MS) || 120_000;
+// pip 镜像源(中国大陆:桌面「中国大陆镜像」开关经 env 注入清华源);空=直连 PyPI。
+const PIP_INDEX_URL = (process.env.AGENT_SANDBOX_PIP_INDEX_URL || process.env.PIP_INDEX_URL || '').trim();
 const MAX_INSTALL_PKGS = 20;
 // 包名/版本规格允许集：名字[extras](==/>=/... 版本)*；禁止 flags/URL/路径/shell 元字符。
 const PKG_SPEC_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9,._-]+\])?([=<>!~]=?[0-9A-Za-z.*+!-]+)*$/;
@@ -332,6 +334,7 @@ export async function installPackages(packages: string[], opts?: ExecOpts): Prom
     await acquire();
     try {
       const cmd = ['pip', 'install', '--target', '/pkgs', '--no-input', '--no-cache-dir', '--disable-pip-version-check'];
+      if (PIP_INDEX_URL) cmd.push('--index-url', PIP_INDEX_URL); // 中国大陆镜像:清华 PyPI 等
       if (INSTALL_ONLY_BINARY) cmd.push('--only-binary', ':all:');
       cmd.push(...pkgs);
       return await runInDocker({

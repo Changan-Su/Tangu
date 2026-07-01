@@ -105,7 +105,7 @@ async function main(): Promise<void> {
     host,
     brain,
     billing: createNoopBilling(),
-    profile: createTanguProfile({ sandboxMode, defaultModelId: cfg.defaultModelId || undefined }),
+    profile: createTanguProfile({ sandboxMode, defaultModelId: cfg.defaultModelId || undefined, toolBuiltins: cfg.toolBuiltins }),
     mcp,
     engines,
   });
@@ -126,8 +126,10 @@ async function main(): Promise<void> {
     if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
   });
-  let version = '';
-  try {
+  // 版本标识:优先构建注入的 TANGU_WORKER_VERSION(git sha / build id,见 Dockerfile.standalone),
+  // 回退 package.json 版本。admin panel / Tangu Manager 据此显示「跑的是哪个 build」。
+  let version = process.env.TANGU_WORKER_VERSION || '';
+  if (!version) try {
     version = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version || '';
   } catch { /* dist 布局异常时留空 */ }
   const startedAt = new Date().toISOString();

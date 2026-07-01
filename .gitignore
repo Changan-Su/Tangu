@@ -9,6 +9,8 @@ dist/
 out/
 desktop/out/
 desktop/dist/
+# 打包前 beforeBuild 下载的内置 Python(体积大、按平台/arch 拉取,不入库)
+desktop/build/python/
 
 # TypeScript
 *.tsbuildinfo

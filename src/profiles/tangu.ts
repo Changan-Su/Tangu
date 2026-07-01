@@ -9,6 +9,8 @@ import { defaultPromptSections } from './promptSections.js';
 export function createTanguProfile(opts: {
   sandboxMode: 'docker' | 'none';
   defaultModelId?: string;
+  /** 内置工具白名单。省略 = 'all'（全开）。容器编排（Tangu Manager）经 TANGU_TOOL_BUILTINS 下发裁剪。 */
+  toolBuiltins?: 'all' | string[];
 }): AppProfile {
   return {
     appId: 'tangu',
@@ -22,7 +24,7 @@ export function createTanguProfile(opts: {
       customTools: true,
     },
     capabilities: { hostExec: true, groupChat: true, memory: true, log: true },
-    toolLoadout: { builtins: 'all' },
+    toolLoadout: { builtins: opts.toolBuiltins ?? 'all' },
     promptSections: defaultPromptSections,
   };
 }

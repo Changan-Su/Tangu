@@ -39,7 +39,8 @@ export async function startRun(
     body: JSON.stringify({
       session_id: params.sessionId,
       model_id: params.modelId || cfg.modelId || undefined,
-      app_id: 'tangu',
+      // standalone(桌面)基线 profile 应答 'tangu';Tangu Web 走云端注册的 'tangu-web' app profile。
+      app_id: window.tangu?.cloudWeb ? 'tangu-web' : 'tangu',
       message: params.message,
       attachments: params.attachments || [],
       agent_config: params.agentConfig || {},

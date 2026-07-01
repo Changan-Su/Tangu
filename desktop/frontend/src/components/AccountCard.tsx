@@ -32,7 +32,10 @@ export const AccountCard: React.FC<{
     const off = window.tangu?.onAuthDevice?.((info) => {
       if (info?.url) onToast?.(`${t('sidebar.account.center')}: ${info.url}${info.userCode ? ` (${info.userCode})` : ''}`)
     })
-    return () => { off?.() }
+    // token 过期(handleAuthExpired 派发)→ 重拉 authStatus,使本卡显示过期态 + 点击改走重新登录。
+    const onExpired = (): void => refresh()
+    window.addEventListener('tangu:auth-expired', onExpired)
+    return () => { off?.(); window.removeEventListener('tangu:auth-expired', onExpired) }
   }, [refresh, onToast, t])
 
   const login = async (): Promise<void> => {
@@ -56,15 +59,19 @@ export const AccountCard: React.FC<{
   const openCenter = (): void => { void window.tangu?.openAccountCenter?.() }
 
   const loggedIn = !!auth?.loggedIn
+  // 过期 = token 仍在(loggedIn)但 whoami 判定失效(tokenValid:false)。此时绝不当「已登录」对待。
+  const expired = loggedIn && auth?.tokenValid === false
   const display = auth?.nickname || auth?.username || 'Forsion'
   const initial = display.trim().charAt(0).toUpperCase() || 'F'
+  // 过期 → 点击走「重新登录」(桌面 forsionLogin,登后 ensureBackend 重连后端);已登录(有效)→ 账号中心;未登录 → 登录。
+  const activate = (): void => { (loggedIn && !expired) ? openCenter() : void login() }
 
   if (compact) {
     return (
       <button
-        className="ribbon-account"
-        title={loggedIn ? display : t('sidebar.account.login')}
-        onClick={() => (loggedIn ? openCenter() : void login())}
+        className={`ribbon-account${expired ? ' expired' : ''}`}
+        title={expired ? t('sidebar.account.expired') : loggedIn ? display : t('sidebar.account.login')}
+        onClick={activate}
       >
         {loggedIn && auth?.avatar && !imgError ? (
           <img className="account-avatar" src={auth.avatar} alt="" onError={() => setImgError(true)} />
@@ -77,12 +84,12 @@ export const AccountCard: React.FC<{
 
   return (
     <div
-      className="account-card"
+      className={`account-card${expired ? ' expired' : ''}`}
       role="button"
       tabIndex={0}
-      title={loggedIn ? t('sidebar.account.center') : t('sidebar.account.loginHint')}
-      onClick={() => (loggedIn ? openCenter() : void login())}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); loggedIn ? openCenter() : void login() } }}
+      title={expired ? t('sidebar.account.expired') : loggedIn ? t('sidebar.account.center') : t('sidebar.account.loginHint')}
+      onClick={activate}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate() } }}
     >
       {loggedIn && auth?.avatar && !imgError ? (
         <img className="account-avatar" src={auth.avatar} alt="" onError={() => setImgError(true)} />
@@ -92,9 +99,9 @@ export const AccountCard: React.FC<{
       <span className="account-meta">
         <span className="account-name-row">
           <span className="account-name">{loggedIn ? display : (loggingIn ? t('sidebar.account.loggingIn') : t('sidebar.account.login'))}</span>
-          {loggedIn && <TierBadge tier={auth?.membershipTier} />}
+          {loggedIn && !expired && <TierBadge tier={auth?.membershipTier} />}
         </span>
-        <span className="account-sub">{loggedIn ? t('sidebar.account.center') : t('sidebar.account.loginSub')}</span>
+        <span className="account-sub">{expired ? t('sidebar.account.expired') : loggedIn ? t('sidebar.account.center') : t('sidebar.account.loginSub')}</span>
       </span>
       {loggedIn && (
         <button className="icon-btn account-logout" title={t('sidebar.account.logout')} onClick={(e) => { e.stopPropagation(); void logout() }}>

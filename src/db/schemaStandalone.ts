@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   tool_results JSONB,
   attachments JSONB,
   display_files JSONB,
+  agent_slug VARCHAR(64),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

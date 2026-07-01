@@ -14,8 +14,11 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 interface RunCtx {
   userId: string;
   runId?: string;
-  /** 本 run 激活的 Normal Agent slug —— 记忆/日志据此落到 ~/.tangu/agents/<slug>/(缺省 = 默认 agent)。 */
+  /** 本 run 激活的 Normal Agent slug —— 记忆/日志据此落到 ~/.tangu/agents/<slug>/(缺省 = 默认 agent)。
+   *  注意这是「记忆作用域」slug:shareDefaultMemory 的 agent 会是 DEFAULT,不能直接拿来当展示身份。 */
   agentSlug?: string;
+  /** 本 run 实际激活的 agent slug(展示身份用,不受 shareDefaultMemory 折叠成 DEFAULT 影响)。 */
+  displayAgentSlug?: string;
 }
 
 const als = new AsyncLocalStorage<RunCtx>();
@@ -25,8 +28,8 @@ const als = new AsyncLocalStorage<RunCtx>();
  * 用 enterWith 而非 run:改写当前同步帧之后整个异步子树的 store,故 system prompt 的 getMemory
  * 与每个 executeTool 都能读到 agentSlug。
  */
-export function enterRunContext(userId: string, runId?: string, agentSlug?: string): void {
-  als.enterWith({ userId, runId, agentSlug });
+export function enterRunContext(userId: string, runId?: string, agentSlug?: string, displayAgentSlug?: string): void {
+  als.enterWith({ userId, runId, agentSlug, displayAgentSlug: displayAgentSlug ?? agentSlug });
 }
 
 /** 当前 run 的 userId(不在 run 上下文内时 undefined)。 */
@@ -42,6 +45,12 @@ export function currentRunId(): string | undefined {
 /** 当前 run 激活的 agent slug(本地记忆层据此选 agent 文件夹;不在 run 上下文内时 undefined)。 */
 export function currentAgentSlug(): string | undefined {
   return als.getStore()?.agentSlug;
+}
+
+/** 当前 run 的展示身份 slug(写进消息 agent_slug,供客户端还原头像/昵称;缺省回退记忆作用域 slug)。 */
+export function currentDisplayAgentSlug(): string | undefined {
+  const s = als.getStore();
+  return s?.displayAgentSlug ?? s?.agentSlug;
 }
 
 /**

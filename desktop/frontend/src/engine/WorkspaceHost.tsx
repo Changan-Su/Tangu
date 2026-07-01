@@ -3,7 +3,7 @@
  * 从 panel props 造 Leaf 再调 def.factory)。onReady 恢复上次布局,否则调 buildDefault;
  * 布局变更持久化。主题叠 dockview-theme-light|dark + .dockview-theme-lcl(--dv-* → LCL token)。
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   DockviewReact,
   type DockviewReadyEvent,
@@ -12,13 +12,16 @@ import {
   type IDockviewHeaderActionsProps,
   type DockviewTheme,
 } from 'dockview-react'
-import { X, Plus, PanelLeft, PanelRight } from 'lucide-react'
+import { X, Plus, PanelLeft, PanelRight, ArrowLeft, ArrowRight } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import 'dockview-react/dist/styles/dockview.css'
 import type { Leaf, ViewDefinition } from './types'
 import { label } from './types'
 import { allViews, getView, subscribeViews } from './viewRegistry'
 import { useWorkspace, tryRestoreLayout, scheduleWorkspaceSave } from './workspaceStore'
+import { useNav } from './navStore'
+import { getActiveSpace } from './spaceRegistry'
+import { computeDropTarget, type DropTarget } from './dropModel'
 
 /** 从 Dockview panel props 造引擎 Leaf。 */
 function leafFromProps(props: IDockviewPanelProps): Leaf {
@@ -65,6 +68,7 @@ const WbTab: React.FC<IDockviewPanelHeaderProps> = ({ api, params }) => {
   const loc = (params as { __loc?: string } | undefined)?.__loc
   const iconOnly = loc === 'left' || loc === 'right'
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const tabRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!menu) return
     const close = (): void => setMenu(null)
@@ -72,17 +76,41 @@ const WbTab: React.FC<IDockviewPanelHeaderProps> = ({ api, params }) => {
     window.addEventListener('contextmenu', close)
     return () => { window.removeEventListener('click', close); window.removeEventListener('contextmenu', close) }
   }, [menu])
+  // 原生 dragstart(非 React prop):须先于祖先 .dv-tab 的 Dockview 监听截断,见 onTabDragStart 注释。
+  useEffect(() => {
+    const el = tabRef.current
+    if (!el) return
+    const onDragStart = (e: DragEvent): void => onTabDragStart(e, el, api.id)
+    el.addEventListener('dragstart', onDragStart)
+    return () => el.removeEventListener('dragstart', onDragStart)
+  }, [api.id])
   return (
     <div
+      ref={tabRef}
       className={`wb-tab${iconOnly ? ' wb-tab--icon' : ''}${loc === 'left' ? ' wb-tab--left' : ''}`}
       title={api.title}
+      draggable
       onContextMenu={closable ? (e) => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY }) } : undefined}
     >
       {Icon && <Icon size={iconOnly ? 15 : 13} className="wb-tab-ic" />}
       {!iconOnly && <span className="wb-tab-name">{api.title}</span>}
+      {/* 命名(主区)tab 加浏览器式 × 关闭钮;图标(侧栏)tab 仍走右键关闭。
+       *  mousedown 阻断冒泡,避免被 Dockview 当成 tab 激活/拖拽起点。 */}
+      {!iconOnly && closable && (
+        <button
+          className="wb-tab-close"
+          title={document.documentElement.lang.startsWith('zh') ? '关闭' : 'Close'}
+          draggable={false}
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => { e.stopPropagation(); e.preventDefault() }}
+          onClick={(e) => { e.stopPropagation(); e.preventDefault(); useWorkspace.getState().closeLeaf(api.id) }}
+        >
+          <X size={12} />
+        </button>
+      )}
       {menu && createPortal(
         <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}>
-          <button onClick={() => { api.close(); setMenu(null) }}>
+          <button onClick={() => { useWorkspace.getState().closeLeaf(api.id); setMenu(null) }}>
             <X size={13} /> {document.documentElement.lang.startsWith('zh') ? '关闭' : 'Close'}
           </button>
         </div>,
@@ -112,10 +140,21 @@ function isMainGroup(panels: IDockviewHeaderActionsProps['panels']): boolean {
  *  折叠左栏后此钮仍在原处(左panel右缘=主区左缘),可重开。 */
 function makePrefixActions(): React.FC<IDockviewHeaderActionsProps> {
   return function PrefixActions({ panels }) {
+    // 左栏收起后,主区组成为最左 → 折叠钮要躲开 mac 交通灯(加 --edge,见 engine.css)。
+    const leftCollapsed = !useWorkspace((s) => s.leftVisible)
+    const canBack = useNav((s) => s.idx > 0)
+    const canFwd = useNav((s) => s.idx >= 0 && s.idx < s.entries.length - 1)
     if (!isMainGroup(panels)) return null
     const zh = document.documentElement.lang.startsWith('zh')
     return (
-      <div className="dv-prefix">
+      <div className={`dv-prefix${leftCollapsed ? ' dv-prefix--edge' : ''}`}>
+        {/* 主面板常驻前进/后退(Workbench 级,任意 view 都有;历史由各 feature recordNav 喂)。 */}
+        <button className="dv-nav-btn" disabled={!canBack} title={zh ? '后退 (⌘/Ctrl+⌥+←)' : 'Back'} onClick={() => useNav.getState().back()}>
+          <ArrowLeft size={15} />
+        </button>
+        <button className="dv-nav-btn" disabled={!canFwd} title={zh ? '前进 (⌘/Ctrl+⌥+→)' : 'Forward'} onClick={() => useNav.getState().forward()}>
+          <ArrowRight size={15} />
+        </button>
         <button className="dv-edge-toggle" title={zh ? '左侧栏' : 'Toggle left panel'} onClick={() => useWorkspace.getState().toggleSidebar('left')}>
           <PanelLeft size={15} />
         </button>
@@ -130,11 +169,98 @@ function makeSuffixActions(): React.FC<IDockviewHeaderActionsProps> {
     if (!isMainGroup(panels)) return null
     const zh = document.documentElement.lang.startsWith('zh')
     return (
-      <button className="dv-new-tab" title={zh ? '新建标签页' : 'New tab'} onClick={() => useWorkspace.getState().openView('launcher', {}, 'main')}>
+      <button className="dv-new-tab" title={zh ? '新建标签页' : 'New tab'} onClick={() => { const sp = getActiveSpace(); if (sp?.newPage) sp.newPage(); else useWorkspace.getState().openView('launcher', {}, 'main') }}>
         <Plus size={15} />
       </button>
     )
   }
+}
+
+// ── 受控自定义拖放层(Dockview disableDnd,自管发起/提示/提交)──
+// 唯一真源 computeDropTarget(dropModel.ts)同时驱动「提示」(竖线/半屏高亮)与「提交」(dropView 程序化 moveTo):
+// 提示显示在哪就落在哪(根治提示≠落点)。固定 3 面板:tab 栏=并标签页;正文半边=面板内分屏(侧栏仅上下,主区四向);违规=null 弹回。
+let draggingId: string | null = null
+let dropLineEl: HTMLDivElement | null = null
+let dropZoneEl: HTMLDivElement | null = null
+
+function indicatorEl(cls: 'wb-drop-line' | 'wb-drop-zone'): HTMLDivElement {
+  const el = document.createElement('div')
+  el.className = cls
+  document.body.appendChild(el)
+  return el
+}
+
+// 让位动画:tab 模式把插入点及其后的 tab 右移一个「被拖 tab 宽」腾位(CSS transition:transform 补间)。同位不重放。
+let shifted: HTMLElement[] = []
+let shiftKey = ''
+function resetShift(): void {
+  if (!shifted.length) return
+  for (const t of shifted) t.style.transform = ''
+  shifted = []
+  shiftKey = ''
+}
+function applyShift(group: { element?: HTMLElement; id?: string }, index: number): void {
+  const key = `${group.id ?? ''}:${index}`
+  if (key === shiftKey) return
+  resetShift()
+  shiftKey = key
+  const strip = group.element?.querySelector('.dv-tabs-container')
+  if (!strip) return
+  const tabs = Array.from(strip.querySelectorAll<HTMLElement>('.dv-tab')).filter((t) => !t.classList.contains('wb-tab-dragging'))
+  const dragged = document.querySelector<HTMLElement>('.dv-tab.wb-tab-dragging')
+  const gap = dragged ? dragged.getBoundingClientRect().width : 150
+  for (let i = index; i < tabs.length; i++) { tabs[i].style.transform = `translateX(${gap}px)`; shifted.push(tabs[i]) }
+}
+
+function hideIndicator(): void {
+  if (dropLineEl) dropLineEl.style.display = 'none'
+  if (dropZoneEl) dropZoneEl.style.display = 'none'
+  resetShift()
+}
+
+function showTarget(t: DropTarget): void {
+  const g = t.group as unknown as { element?: HTMLElement; id?: string }
+  if (t.mode === 'tab') {
+    if (dropZoneEl) dropZoneEl.style.display = 'none'
+    const el = (dropLineEl ??= indicatorEl('wb-drop-line'))
+    el.style.display = 'block'
+    el.style.left = `${Math.round(t.lineX) - 1}px`
+    el.style.top = `${Math.round(t.top)}px`
+    el.style.height = `${Math.round(t.height)}px`
+    applyShift(g, t.index)
+  } else {
+    if (dropLineEl) dropLineEl.style.display = 'none'
+    resetShift()
+    const el = (dropZoneEl ??= indicatorEl('wb-drop-zone'))
+    el.style.display = 'block'
+    el.style.left = `${Math.round(t.rect.left)}px`
+    el.style.top = `${Math.round(t.rect.top)}px`
+    el.style.width = `${Math.round(t.rect.width)}px`
+    el.style.height = `${Math.round(t.rect.height)}px`
+  }
+}
+
+// 收尾:清 draggingId + data-dv-dragging(app-region 拖窗区复位)+ 撤源 tab 标记 + 撤提示。
+function clearDragState(): void {
+  draggingId = null
+  if (document.documentElement.dataset.dvDragging) delete document.documentElement.dataset.dvDragging
+  document.querySelector('.dv-tab.wb-tab-dragging')?.classList.remove('wb-tab-dragging')
+  hideIndicator()
+}
+
+// WbTab 拖拽发起:记源 panelId + 标记源 tab(供 computeDropTarget/让位排除)+ 打 data-dv-dragging
+// (见 engine.css:拖拽期把 tab 栏 -webkit-app-region:drag 抑成 no-drag,否则 macOS 把窗拖区当非客户区吞掉 dragover/drop)。
+// 【关键】必须原生监听在 .wb-tab 上并 stopPropagation:Dockview 的 Html5DragSource 在祖先 .dv-tab 上挂了 dragstart,
+// disableDnd 时它会 event.preventDefault() 掐掉拖拽(backend.js)。原生冒泡 .wb-tab 先于 .dv-tab → 截断即可放行;
+// React 的 onDragStart 委托在 root、晚于 .dv-tab 的原生监听,来不及(故不能用 React prop)。
+function onTabDragStart(e: DragEvent, el: HTMLElement, panelId: string): void {
+  e.stopPropagation()
+  if (!e.dataTransfer) return
+  draggingId = panelId
+  e.dataTransfer.effectAllowed = 'move'
+  e.dataTransfer.setData('application/x-tangu-view', panelId)
+  document.documentElement.dataset.dvDragging = '1'
+  el.closest('.dv-tab')?.classList.add('wb-tab-dragging')
 }
 
 export const WorkspaceHost: React.FC<{
@@ -154,6 +280,52 @@ export const WorkspaceHost: React.FC<{
   const prefixActions = useMemo(() => makePrefixActions(), [])
   const suffixActions = useMemo(() => makeSuffixActions(), [])
 
+  // 受控拖放全局监听(捕获阶段,仅当 draggingId 存在 = 是我们发起的视图拖拽,故不干扰聊天框的文件拖入):
+  //  dragover → computeDropTarget 算落点 + 画提示 + preventDefault 放行;drop → 同一结果 dropView 程序化落子;dragend → 收尾。
+  //  提交走 moveTo(不受 app-region 影响);dragover/drop 命中 tab 栏需 data-dv-dragging 抑制窗拖区(onTabDragStart 已打)。
+  //  收尾只认 dragend(HTML5 收尾信号:drop/取消/ESC 都 fire),drop 里也兜底清一次(源节点被 moveTo 移走时 dragend 可能不达 window)。
+  useEffect(() => {
+    const onDragOver = (e: DragEvent): void => {
+      if (!draggingId) return
+      const api = useWorkspace.getState().api
+      const t = api ? computeDropTarget(api, e.clientX, e.clientY) : null
+      if (!t) { hideIndicator(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'none'; return }
+      e.preventDefault() // 有效落点才放行 drop
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+      showTarget(t)
+    }
+    const onDrop = (e: DragEvent): void => {
+      const id = draggingId
+      if (!id) return
+      e.preventDefault()
+      const api = useWorkspace.getState().api
+      const t = api ? computeDropTarget(api, e.clientX, e.clientY) : null
+      if (t) useWorkspace.getState().dropView(id, t)
+      clearDragState()
+    }
+    window.addEventListener('dragover', onDragOver, true)
+    window.addEventListener('drop', onDrop, true)
+    window.addEventListener('dragend', clearDragState, true)
+    return () => {
+      window.removeEventListener('dragover', onDragOver, true)
+      window.removeEventListener('drop', onDrop, true)
+      window.removeEventListener('dragend', clearDragState, true)
+      clearDragState()
+    }
+  }, [])
+
+  // 主面板前进/后退快捷键(⌘/Ctrl+⌥+←/→,捕获阶段先于视图内部键位)。全局:任意 view 都有。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.metaKey || e.ctrlKey) && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault(); e.stopPropagation()
+        if (e.key === 'ArrowLeft') useNav.getState().back(); else useNav.getState().forward()
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
+
   const onReady = (e: DockviewReadyEvent): void => {
     const ws = useWorkspace.getState()
     ws.setApi(e.api)
@@ -167,11 +339,13 @@ export const WorkspaceHost: React.FC<{
       }
       buildDefault?.()
     }
+    // 布局变更:只同步侧栏可见态 + 存盘。跨组变形已由 dropView 显式写 __loc(不再位置反查 reconcile)。
     const syncLayout = (): void => {
       ws.syncPanelState()
       scheduleWorkspaceSave()
     }
     e.api.onDidLayoutChange(syncLayout)
+    // 拖放全走受控自定义层(见上 useEffect + onTabDragStart);此处不再挂 Dockview 原生 onWillDrag*/onDidDrop。
     e.api.onDidActivePanelChange(({ panel }) => ws.setFocusedLeaf(panel))
     const activeType = ((e.api.activePanel?.params ?? {}) as { __type?: string }).__type
     ws.setFocusedLeaf(activeType === 'chat' ? e.api.activePanel : e.api.panels.find((panel) => ((panel.params ?? {}) as { __type?: string }).__type === 'chat'))
@@ -186,6 +360,8 @@ export const WorkspaceHost: React.FC<{
         prefixHeaderActionsComponent={prefixActions}
         rightHeaderActionsComponent={suffixActions}
         components={components}
+        disableDnd /* 关掉 Dockview 原生手势拖放:全部改走受控自定义层(WbTab draggable + 全局 dragover/drop + dropView 程序化 moveTo)。
+                    * 程序化移动/分屏不受 disableDnd 影响,故落子照常;提示与落子同源 computeDropTarget → 天生一致。 */
         onReady={onReady}
       />
       {/* 右栏折叠钮:浮在工作区右上角(=右panel最右缘);右栏收起后仍在原处,可重开。 */}

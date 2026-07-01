@@ -10,7 +10,7 @@ import type { StreamOpts, BuildPayloadOpts } from '../seams/cloudBrain.js';
 import { LlmError, type ThinkingLevel, type ChatMessage, type ToolCall } from '../core/types.js';
 import { publish, drain, cleanup } from './eventBus.js';
 import { gateToolCall, requestApproval, type ApprovalDecision } from './approvals.js';
-import { enterRunContext } from '../seams/runContext.js';
+import { enterRunContext, currentDisplayAgentSlug } from '../seams/runContext.js';
 import path from 'node:path';
 import { agentsDir, readUserMd } from '../core/tanguHome.js';
 import { getRun, updateRunStatus, appendStep, listPendingRunsForRecovery } from './runStore.js';
@@ -34,6 +34,7 @@ import { runCostCeiling, isOverRunCost } from './runBudget.js';
 import { runGroupChat } from './groupChat.js';
 import { listPluginMetas } from '../plugins/registry.js';
 import { isPluginEnabledSync } from '../plugins/settingsStore.js';
+import { runAgentFilesSync } from './agentFileSync.js';
 
 // ── 注入依赖的 lazy 别名:保持下方调用点不变(接缝装配后才会真正取到 deps)──
 const resolveModelAndKey = (modelId: string) => deps().brain.llm.resolveModelAndKey(modelId);
@@ -331,6 +332,15 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
   const modelId = run.model_id || '';
   const input = typeof run.input === 'string' ? safeParse(run.input) : run.input || {};
   const agentConfig = input.agentConfig || {};
+  // standalone/desktop host 的 Agent 文件必须先与云端镜像对齐，再从本地激活。headless worker 没有
+  // 桌面设置页去触发 /agent/sync；若跳过此步，云端人格虽可经 brain.agents 兜底加载，Library/ 却仍为空。
+  // 同步器按 manifest mtime 幂等，未变化时只做清单比较；失败软降级，不阻断对话。
+  const agentFiles = deps().brain.agentFiles;
+  if (profile.capabilities.hostExec && agentConfig.agentSlug && agentFiles) {
+    await runAgentFilesSync(agentFiles, userId, { onlySlug: String(agentConfig.agentSlug) }).catch((e: any) => {
+      console.warn('[agent-core] pre-run agent files sync failed:', e?.message || e);
+    });
+  }
   // Normal Agent 激活:会话 agent_config.agentSlug → 合并 agent 定义里「会话未显式覆盖」的字段。
   // 本地形态读 ~/.tangu/agents;云端 worker 本地目录为空 → applyAgentActivation 经 brain.agents 兜底水合。
   // 不存在/读失败不阻断 run。模型覆盖由客户端在激活时写入会话 model_id。
@@ -343,7 +353,7 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
   // 把激活的 agent slug 穿透进 run 上下文:本地记忆层(remember/log_event/Historian)据此落到
   // ~/.tangu/agents/<slug>/;未选/无效 slug → 默认 agent。enterWith 覆盖整个异步子树。
   // memScopeSlug=共用默认时落 DEFAULT,否则该 agent 自己——保证「每个 agent 只写自己的(或显式共用默认的)」。
-  enterRunContext(userId, runId, memScopeSlug);
+  enterRunContext(userId, runId, memScopeSlug, activeAgentSlug);
   // 默认 90(原 20):重试型模型/多步任务很容易把少量轮数耗光被迫收尾;可经会话级 agentConfig.maxIterations
   // (桌面/TUI 的 /loop 指令)调节,安全上限 200 防失控。
   const maxIterations = Math.min(Math.max(1, agentConfig.maxIterations || 90), 200);
@@ -1103,6 +1113,7 @@ async function finalizeAssistantMessage(
 ): Promise<void> {
   await deps().state.finalizeAssistantMessage({
     messageId, sessionId, modelId, content, reasoning, toolCalls, toolResults, displayFiles,
+    agentSlug: currentDisplayAgentSlug(),
   });
 }
 

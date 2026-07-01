@@ -25,6 +25,9 @@ export const ONBOARDING_VERSION_KEY = 'forsion_tangu_onboarding_version'
 type Step = 'welcome' | 'connect' | 'theme' | 'model' | 'workspace' | 'env' | 'done'
 const STEP_ORDER: Step[] = ['welcome', 'connect', 'theme', 'model', 'workspace', 'env', 'done']
 
+/** 订阅 provider 的友好名(id 见 src/llm/providerOAuth.ts OAUTH_PROVIDERS);未知 id 回退原值。 */
+const SUB_PROVIDER_LABELS: Record<string, string> = { claude: 'Claude', codex: 'Codex', xai: 'xAI · Grok' }
+
 export const OnboardingWizard: React.FC<{
   /** 当前主题/明暗(与 App 同步;主题步骤即时应用 + 持久化)。 */
   themeLang: string
@@ -47,7 +50,7 @@ export const OnboardingWizard: React.FC<{
   useEffect(() => { void window.tangu?.appVersion?.().then((v) => setAppVer(v || '')).catch(() => {}) }, [])
 
   // ── ① 连接 ──
-  const [connectMode, setConnectMode] = useState<'forsion' | 'byok'>('forsion')
+  const [connectMode, setConnectMode] = useState<'forsion' | 'sub' | 'byok'>('forsion')
   const [cloudUrl, setCloudUrl] = useState('')
   const [loggingIn, setLoggingIn] = useState(false)
   const [loggedIn, setLoggedIn] = useState(false)
@@ -61,14 +64,24 @@ export const OnboardingWizard: React.FC<{
   const [pmodels, setPmodels] = useState('')
   const [byokSaved, setByokSaved] = useState(false)
   const [byokTesting, setByokTesting] = useState(false)
+  // 订阅登录(Claude/Codex/xAI 官方 OAuth,跑各自订阅额度;仅桌面端,凭证存本机)
+  const [providers, setProviders] = useState<Array<{ id: string; loggedIn: boolean }> | null>(null)
+  const [providerBusy, setProviderBusy] = useState<string | null>(null)
+  const canSubLogin = !!window.tangu?.providerLogin
+  const subLoggedIn = !!providers?.some((p) => p.loggedIn)
+  const refreshProviders = (): void => {
+    void window.tangu?.authProviders?.().then(setProviders).catch(() => setProviders([]))
+  }
 
   useEffect(() => {
     void window.tangu?.authStatus?.().then((a) => {
       setCloudUrl((u) => u || a.cloudUrl || '')
       setLoggedIn(a.loggedIn)
     })
+    refreshProviders()
     const off = window.tangu?.onAuthDevice?.((info) => setDevice(info))
     return () => off?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const doLogin = async (): Promise<void> => {
@@ -113,15 +126,37 @@ export const OnboardingWizard: React.FC<{
     }
   }
 
+  const doProviderLogin = async (id: string): Promise<void> => {
+    if (!window.tangu?.providerLogin) return
+    setProviderBusy(id)
+    setConnectMsg('')
+    try {
+      await window.tangu.setConfig({ mode: 'managed' })
+      await window.tangu.providerLogin(id)
+      refreshProviders()
+      setConnectMsg(t('onboarding.connect.subLoginOk'))
+      onReconnect()
+    } catch (e: any) {
+      setConnectMsg(String(e?.message || e).replace(/^Error invoking remote method '[^']+': Error: /, ''))
+    } finally {
+      setProviderBusy(null)
+    }
+  }
+
   // ── ③ 默认模型 ──
   const [models, setModels] = useState<ModelsResponse | null>(null)
   const [modelsLoading, setModelsLoading] = useState(false)
   const [chosenModel, setChosenModel] = useState('')
 
-  // ── ④ 默认本地工作区目录 ──
+  // ── ④ 默认本地工作区目录 + 网络镜像(环境步骤)──
   const [workspaceDir, setWorkspaceDir] = useState('')
+  const [mirror, setMirror] = useState<'default' | 'china'>('default')
   useEffect(() => {
-    void window.tangu?.getConfig?.().then((c) => { setWorkspaceDir(c.defaultWorkspaceDir || ''); setSyncEnabled(!!c.forsionSyncEnabled) }).catch(() => {})
+    void window.tangu?.getConfig?.().then((c) => {
+      setWorkspaceDir(c.defaultWorkspaceDir || '')
+      setSyncEnabled(!!c.forsionSyncEnabled)
+      setMirror(c.mirror === 'china' ? 'china' : 'default')
+    }).catch(() => {})
   }, [])
 
   const loadStepModels = (): void => {
@@ -190,7 +225,7 @@ export const OnboardingWizard: React.FC<{
     onFinish()
   }
 
-  const connectReady = loggedIn || byokSaved
+  const connectReady = loggedIn || byokSaved || subLoggedIn
 
   // ── ⓪ 欢迎页:开机式入场动画(标题/版本/按钮错峰淡入)+ 侧边丝滑展开的更新日志(markdown)。 ──
   if (step === 'welcome') {
@@ -248,6 +283,11 @@ export const OnboardingWizard: React.FC<{
                   <button className={connectMode === 'forsion' ? 'active' : ''} onClick={() => setConnectMode('forsion')}>
                     <Cloud size={12} style={{ verticalAlign: -2, marginRight: 4 }} />{t('onboarding.connect.modeForsion')}
                   </button>
+                  {canSubLogin && (
+                    <button className={connectMode === 'sub' ? 'active' : ''} onClick={() => setConnectMode('sub')}>
+                      <LogIn size={12} style={{ verticalAlign: -2, marginRight: 4 }} />{t('onboarding.connect.modeSub')}
+                    </button>
+                  )}
                   <button className={connectMode === 'byok' ? 'active' : ''} onClick={() => setConnectMode('byok')}>
                     <KeyRound size={12} style={{ verticalAlign: -2, marginRight: 4 }} />{t('onboarding.connect.modeByok')}
                   </button>
@@ -259,6 +299,7 @@ export const OnboardingWizard: React.FC<{
                   <div className="ob-benefits">
                     <div className="ob-benefits-title"><Cloud size={13} /> {t('onboarding.connect.benefitsTitle')}</div>
                     <ul>
+                      <li><strong style={{ color: 'var(--accent)' }}>{t('onboarding.connect.benefitFreeQuota')}</strong></li>
                       <li>{t('onboarding.connect.benefitSync')}</li>
                       <li>{t('onboarding.connect.benefitModels')}</li>
                     </ul>
@@ -290,6 +331,29 @@ export const OnboardingWizard: React.FC<{
                       <div className="hint" style={{ marginTop: 4 }}>{t('onboarding.connect.cloudSyncHint')}</div>
                     </>
                   )}
+                </>
+              ) : connectMode === 'sub' ? (
+                <>
+                  <div className="hint" style={{ marginBottom: 8 }}>{t('onboarding.connect.subDesc')}</div>
+                  {providers?.length ? (
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {providers.map((pr) => (
+                        <button
+                          key={pr.id}
+                          className="btn ghost sm"
+                          disabled={providerBusy === pr.id}
+                          onClick={() => void doProviderLogin(pr.id)}
+                        >
+                          {providerBusy === pr.id ? <Loader2 size={12} className="spin" /> : <LogIn size={12} />}
+                          {SUB_PROVIDER_LABELS[pr.id] || pr.id}
+                          {pr.loggedIn ? t('settings.provider.loggedInSuffix') : ''}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="hint">{providers === null ? t('common.loading') : t('onboarding.connect.subUnavailable')}</div>
+                  )}
+                  <div className="hint" style={{ marginTop: 6 }}>{t('onboarding.connect.subHint')}</div>
                 </>
               ) : (
                 <>
@@ -458,6 +522,22 @@ export const OnboardingWizard: React.FC<{
 
           {step === 'env' && (
             <>
+              {/* 网络环境:中国大陆用户一键切镜像源(pip/npm/git + 市场下载),即时落配置。 */}
+              <div className="field">
+                <label>{t('onboarding.env.mirrorLabel')}</label>
+                <select
+                  value={mirror}
+                  onChange={(e) => {
+                    const v = e.target.value === 'china' ? 'china' : 'default'
+                    setMirror(v)
+                    void window.tangu?.setConfig?.({ mirror: v })
+                  }}
+                >
+                  <option value="default">{t('onboarding.env.mirrorDefault')}</option>
+                  <option value="china">{t('onboarding.env.mirrorChina')}</option>
+                </select>
+                <div className="hint" style={{ marginTop: 6 }}>{t('onboarding.env.mirrorHint')}</div>
+              </div>
               <div className="field">
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <MonitorCheck size={13} /> {t('onboarding.env.stepLabel')}

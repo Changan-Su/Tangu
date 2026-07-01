@@ -11,7 +11,14 @@
   background: var(--sidebar-bg);
   font-family: var(--font-ui);
   color: var(--text);
+  /* 空白处可拖整个窗口(mac frameless,同 ribbon);下面把交互元素设回 no-drag。 */
+  -webkit-app-region: drag;
 }
+/* 搜索框 / 按钮 / 输入 / 可拖动的工作区分组:保持可点可拖,不当成拖窗区。 */
+.t2s-side .t2s-search,
+.t2s-side button,
+.t2s-side input,
+.t2s-side [draggable='true'] { -webkit-app-region: no-drag; }
 
 /* 品牌 */
 .t2s-brand {
@@ -48,23 +55,7 @@
 }
 .t2s-dim { opacity: 0.7; flex-shrink: 0; }
 
-/* 常驻底部:个人中心卡片 + 设置(与 desktop1.0 一致) */
-.t2s-footer {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-  padding: 6px 8px;
-  border-top: var(--border-width, 1px) solid var(--border);
-}
-.t2s-footer-settings {
-  width: 32px; height: 32px; flex-shrink: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  border: none; background: transparent; color: var(--text-muted);
-  border-radius: var(--radius-sm, 8px); cursor: pointer;
-  transition: background var(--duration-fast, 0.15s), color var(--duration-fast, 0.15s);
-}
-.t2s-footer-settings:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.1)); color: var(--text); }
+/* (账号卡 + 设置已移到左侧 ribbon 底部,原 .t2s-footer 已退役) */
 
 /* 文件面板:工作区展开后的磁盘文件树 */
 .t2sf-tree { display: flex; flex-direction: column; padding: 2px 0 6px; }

@@ -270,7 +270,7 @@ export function createHttpStateStore(cfg: HttpStateStoreConfig): StateStore {
     async finalizeAssistantMessage(m: FinalizeMessageInput) {
       await reqJson('POST', `/sessions/${encodeURIComponent(m.sessionId)}/assistant-message`, tokenForSession(m.sessionId), {
         messageId: m.messageId, modelId: m.modelId, content: m.content, reasoning: m.reasoning,
-        toolCalls: m.toolCalls, toolResults: m.toolResults, displayFiles: m.displayFiles,
+        toolCalls: m.toolCalls, toolResults: m.toolResults, displayFiles: m.displayFiles, agentSlug: m.agentSlug,
       });
     },
 

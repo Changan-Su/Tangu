@@ -8,6 +8,7 @@ export type {
   RibbonItem,
   StatusItem,
   PluginContext,
+  SpaceDefinition,
 } from './types'
 export { label } from './types'
 
@@ -18,6 +19,9 @@ export type { MainTab, SideTab } from './workspaceStore'
 export { useCommandStore, addCommand, removeCommand, openCommandPalette } from './commandRegistry'
 export { useShortcuts, effectiveHotkey, eventToHotkey, formatHotkey } from './shortcutStore'
 export { useRibbonStore, addRibbonIcon, removeRibbonIcon } from './ribbonRegistry'
+export { useSpaceStore, registerSpace, setActiveSpace, getActiveSpace } from './spaceRegistry'
+export { useNav, recordNav } from './navStore'
+export type { NavEntry } from './navStore'
 export { useStatusStore, addStatusItem, removeStatusItem } from './statusRegistry'
 export {
   saveNamedLayout,
@@ -26,3 +30,4 @@ export {
   deleteNamedLayout,
   clearLayout,
 } from './layoutPersist'
+export type { PersistedPanel } from './layoutPersist'

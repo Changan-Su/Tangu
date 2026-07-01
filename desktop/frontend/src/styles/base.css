@@ -213,6 +213,13 @@ a:hover { color: var(--accent-hover); }
   justify-content: center;
 }
 .ribbon-account .account-avatar { width: 30px; height: 30px; }
+/* 账号过期态:紧凑头像加红点角标 + 完整卡副标题转危险色(点击=重新登录)。 */
+.ribbon-account.expired { position: relative; }
+.ribbon-account.expired::after {
+  content: ''; position: absolute; top: -1px; right: -1px; width: 9px; height: 9px;
+  border-radius: 999px; background: var(--danger, #e5484d); border: 1.5px solid var(--sidebar-bg);
+}
+.account-card.expired .account-sub { color: var(--danger, #e5484d); }
 
 /* ─── 侧栏 ─── */
 .sidebar {

@@ -6,9 +6,8 @@
  * 样式全在 sidebar2.css(t2s- 前缀,token 驱动);右键菜单复用 base.css 的 .ctx-menu。
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, MoreHorizontal, Pencil, Archive, ArchiveRestore, Trash2, ChevronDown, ChevronRight, Folder, Cloud, FolderPlus, SquarePen, Sparkles, Search, Smartphone, Settings } from 'lucide-react'
+import { Plus, MoreHorizontal, Pencil, Archive, ArchiveRestore, Trash2, ChevronDown, ChevronRight, Folder, Cloud, FolderPlus, SquarePen, Sparkles, Search, Smartphone } from 'lucide-react'
 import { CLOUD_WORKSPACE_KEY, type SessionRecord, type TanguDesktopConfig, type WorkspaceDescriptor } from '../../types'
-import { AccountCard } from '../../components/AccountCard'
 import { AnimatedCollapse } from '../../components/AnimatedUI'
 import { useI18n } from '../../i18n'
 import { getWechatStatus, setWechatConnectedSession } from '../../services/backendService'
@@ -343,13 +342,7 @@ export const SidebarPane: React.FC<SidebarPaneProps> = (p) => {
         )}
       </div>
 
-      {/* 常驻底部:个人中心卡片(头像/昵称/会员/用户中心)+ 设置。与 desktop1.0 一致。 */}
-      <div className="t2s-footer">
-        <AccountCard onToast={p.onToast} onAuthChange={p.onAuthChange} />
-        <button className="t2s-footer-settings" onClick={p.onOpenSettings} title={t('sidebar.settings')}>
-          <Settings size={16} />
-        </button>
-      </div>
+      {/* 个人中心卡片 + 设置已移到左侧 ribbon 底部(见 bootstrapEngine rb-settings / rb-account)。 */}
 
       {menu && (
         <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>

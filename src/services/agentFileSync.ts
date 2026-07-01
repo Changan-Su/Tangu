@@ -15,7 +15,7 @@ import { promises as fsp } from 'node:fs';
 import { join, dirname, extname } from 'node:path';
 import { agentsDir, userMdFile } from '../core/tanguHome.js';
 import { getDeviceId } from '../core/deviceId.js';
-import { listAgents, resolveMemorySlug } from '../agents/agentRegistry.js';
+import { listAgents, parseAgentConfig, resolveMemorySlug, type NormalAgentDef } from '../agents/agentRegistry.js';
 import { splitLogBlocks, mergeBlocks } from './memorySync.js';
 import type { AgentFilesBrain, AgentFileMeta } from '../seams/cloudBrain.js';
 
@@ -83,18 +83,42 @@ function rebuildLog(header: string, blocks: string[]): string {
 
 export interface AgentFileSyncResult { ok: boolean; agents: number; pushed: number; pulled: number; deleted: number; skipped: number; error?: string }
 
-/** 跑一次全量镜像:遍历 cloudSync 开的 agent + 各记忆桶 + USER.md。云端不可达 → 抛(调用方 no-op)。 */
-export async function runAgentFilesSync(cloud: AgentFilesBrain, userId: string): Promise<AgentFileSyncResult> {
+/** 跑一次文件镜像。手动同步缺省全量；run 前可用 onlySlug 只同步当前 Agent，避免无关大文件拖慢对话。 */
+export async function runAgentFilesSync(
+  cloud: AgentFilesBrain,
+  userId: string,
+  opts?: { onlySlug?: string },
+): Promise<AgentFileSyncResult> {
   const deviceId = getDeviceId();
   const agg: AgentFileSyncResult = { ok: true, agents: 0, pushed: 0, pulled: 0, deleted: 0, skipped: 0 };
-
-  const agents = (await listAgents()).filter((a) => a.cloudSync);
-  agg.agents = agents.length;
+  const onlySlug = typeof opts?.onlySlug === 'string' && opts.onlySlug ? opts.onlySlug : undefined;
 
   // 云端清单一次拉全,按 slug 索引。
   const manifest = await cloud.getManifest(userId);
   const cloudBySlug = new Map<string, AgentFileMeta[]>();
   for (const m of manifest) cloudBySlug.set(m.slug, m.files);
+
+  // 本地已存在的 cloudSync agent 之外，还要发现「只存在云端」的 agent。否则全新的
+  // standalone worker 本地只有内置 agent，永远不会进入后面的 bucket，自然也拉不到 Library。
+  // 以云端 config.toml 的 cloud_sync=true 为 opt-in；特殊哨兵桶没有 config，自动跳过。
+  const agents: NormalAgentDef[] = (await listAgents()).filter((a) => a.cloudSync && (!onlySlug || a.slug === onlySlug));
+  const known = new Set(agents.map((a) => a.slug));
+  for (const [slug, files] of cloudBySlug) {
+    if ((onlySlug && slug !== onlySlug) || known.has(slug) || slug.startsWith('__')) continue;
+    const cfgMeta = files.find((f) => f.relPath === 'config.toml' && !f.deleted);
+    if (!cfgMeta) continue;
+    try {
+      const cfg = await cloud.getFile(userId, slug, 'config.toml');
+      if (!cfg || cfg.deleted || cfg.isBinary || !cfg.content) continue;
+      const def = parseAgentConfig(slug, cfg.content, '');
+      if (!def.cloudSync) continue;
+      agents.push(def);
+      known.add(slug);
+    } catch (e: any) {
+      console.warn(`[agentFileSync] 云端 agent ${slug} 引导失败:`, e?.message || e);
+    }
+  }
+  agg.agents = agents.length;
 
   // 分桶:slug → 要同步的 category 集(D6 去重)。
   const buckets = new Map<string, Set<Category>>();

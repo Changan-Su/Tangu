@@ -3,6 +3,7 @@
  * agent 调用 renderer 直连 HTTP,不经主进程。
  */
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import './amadeus/preload' // Amadeus Space:暴露 window.amadeus(vault IPC 桥),副作用导入
 
 export interface BackendStatus {
   state: 'stopped' | 'starting' | 'ready' | 'crashed'
@@ -94,6 +95,9 @@ const api = {
   listThemes: (): Promise<Array<{ id: string; manifest: Record<string, any>; css: string }>> =>
     ipcRenderer.invoke('themes:list'),
   openThemesDir: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('themes:openDir'),
+  // 设置界面「打开文件夹」:agent(slug 缺省=agents 根)/ skills 目录。
+  openAgentDir: (slug?: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('agents:openDir', slug),
+  openSkillsDir: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('skills:openDir'),
   // ── Forsion Market(浏览/详情/安装全走主进程:公开浏览 + 本地解压安装)──
   marketList: (type?: string): Promise<{ items: any[] }> => ipcRenderer.invoke('market:list', type),
   marketDetail: (id: string): Promise<any> => ipcRenderer.invoke('market:detail', id),

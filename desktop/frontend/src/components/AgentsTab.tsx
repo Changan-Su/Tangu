@@ -3,7 +3,7 @@
  * 仅本地后端可用（后端 /agent/agents 在云端 404 → listAgents 已降级空列表）。
  */
 import React, { useEffect, useMemo, useState } from 'react'
-import { Loader2, Plus, Trash2, Pencil, Bot, Star, GripVertical, BookOpen, User, Cloud } from 'lucide-react'
+import { Loader2, Plus, Trash2, Pencil, Bot, Star, GripVertical, BookOpen, User, Cloud, FolderOpen } from 'lucide-react'
 import { listAgents, saveAgentDef, deleteAgentDef, listModels, uploadAgentAvatar, fetchAgentAvatar, deleteAgentAvatar, getAgentsMeta, putAgentsMeta, getUserProfile, putUserProfile } from '../services/backendService'
 import { AgentMemoryModal } from './AgentMemoryModal'
 import type { ModelInfo, NormalAgentDef, TanguDesktopConfig } from '../types'
@@ -261,10 +261,18 @@ export const AgentsTab: React.FC<{ cfg: TanguDesktopConfig; onEditingChange?: (e
           <div className="field">
             <label style={{ margin: 0 }}>{t('settings.agents.brainSection')}</label>
             <div style={{ fontSize: 11.5, color: 'var(--text-faint)', margin: '2px 0 6px' }}>{t('settings.agents.brainSectionHint')}</div>
-            <button className="btn ghost sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-              onClick={() => setViewing({ slug: editing.slug!, name: editing.name } as NormalAgentDef)}>
-              <BookOpen size={13} /> {t('settings.agents.openBrain')}
-            </button>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn ghost sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                onClick={() => setViewing({ slug: editing.slug!, name: editing.name } as NormalAgentDef)}>
+                <BookOpen size={13} /> {t('settings.agents.openBrain')}
+              </button>
+              {window.tangu?.openAgentDir && (
+                <button className="btn ghost sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                  onClick={() => void window.tangu?.openAgentDir?.(editing.slug!)}>
+                  <FolderOpen size={13} /> {t('settings.agents.openFolder')}
+                </button>
+              )}
+            </div>
           </div>
         )}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

@@ -8,7 +8,9 @@ import { create } from 'zustand'
 import type { DockviewApi, IDockviewPanel } from 'dockview-react'
 import type { Leaf, ViewLocation } from './types'
 import { getView } from './viewRegistry'
+import { getActiveSpace } from './spaceRegistry'
 import { label } from './types'
+import { locOf, type DropTarget } from './dropModel'
 import {
   LAYOUT_KEY, saveLayout, loadLayout, clearLayout, saveNamedLayout, loadNamedLayout, listNamedLayouts,
   type LayoutEnvelopeV4, type PersistedPanel,
@@ -202,6 +204,8 @@ interface WorkspaceState {
   activateLeaf(id: string): void
   /** 顶栏标签关闭。 */
   closeLeaf(id: string): void
+  /** 受控拖放落子:把 panelId 视图按 computeDropTarget 的结果并入/分屏到目标组,并继承目标面板身份(__loc)。 */
+  dropView(panelId: string, target: DropTarget): void
   /** 顶栏侧栏图标点击 → 展开该侧(若收起)并显示该视图。 */
   showSideView(side: 'left' | 'right', type: string): void
   /** 关闭某侧的某视图(右键菜单)。 */
@@ -216,7 +220,8 @@ interface WorkspaceState {
   toggleSidebar(side: 'left' | 'right'): void
   saveCurrent(): void
   saveNamed(name: string): void
-  applyNamed(name: string): void
+  /** 应用命名布局。成功 true;缺失/损坏返回 false(调用方可回退 resetLayout)。 */
+  applyNamed(name: string): boolean
   namedLayouts(): string[]
 }
 
@@ -308,8 +313,41 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     get().refreshTabs()
   },
   closeLeaf: (id) => {
-    get().api?.getPanel(id)?.api.close()
+    const api = get().api
+    const panel = api?.getPanel(id)
+    if (!api || !panel) return
+    // 主区关掉「最后一个」view → 不留空白,填充当前 Space 的「新页面」。
+    // 分屏 / 多 tab(主区还有别的 panel)走默认 close:Dockview 自动移除空组 = 关掉那个分屏 panel。
+    const loc = ((panel.params ?? {}) as PanelMeta).__loc ?? 'main'
+    const wasLastMain = loc === 'main' && panelsAt(api, 'main').length <= 1
+    // 先关再填:新页面可能与被关视图同 type(如 Amadeus 单例编辑器),open-first 会复用到正被关的那个。
+    panel.api.close()
+    if (wasLastMain) {
+      const np = getActiveSpace()?.newPage
+      if (np) np()
+      else get().openView('launcher', {}, 'main')
+    }
     get().refreshTabs()
+  },
+  dropView: (panelId, target) => {
+    const api = get().api
+    const panel = api?.getPanel(panelId)
+    if (!api || !panel) return
+    const loc = locOf(target.group) // 目标面板身份 → 落子后视图继承(侧栏=图标 / 主区=tab+标题)
+    try {
+      if (target.mode === 'tab') panel.api.moveTo({ group: target.group, position: 'center', index: target.index })
+      else panel.api.moveTo({ group: target.group, position: target.dir }) // 方向 = 面板内分屏并新建组
+    } catch { return }
+    panel.api.updateParameters({ ...(panel.params ?? {}), __loc: loc })
+    // 把最后一个主区 view 拖去侧栏 → 主区空:填充当前 Space 的「新页面」(不留空白)。
+    if (panelsAt(api, 'main').length === 0) {
+      const np = getActiveSpace()?.newPage
+      if (np) np()
+      else get().openView('launcher', {}, 'main')
+    }
+    pinSides(api) // 侧栏可能变动 → 重钉黄金分割宽
+    get().refreshTabs()
+    scheduleWorkspaceSave()
   },
   showSideView: (side, type) => {
     const api = get().api
@@ -478,18 +516,18 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   applyNamed(name) {
     const api = get().api
     const blob = loadNamedLayout(name)
-    if (api && blob) {
-      try {
-        api.fromJSON(blob.dockview as never)
-        set({
-          leftVisible: blob.sidebars.left.visible,
-          rightVisible: blob.sidebars.right.visible,
-          stash: { left: blob.sidebars.left.stash, right: blob.sidebars.right.stash },
-        })
-        pinSides(api)
-      } catch {
-        /* 损坏布局忽略 */
-      }
+    if (!api || !blob) return false
+    try {
+      api.fromJSON(blob.dockview as never)
+      set({
+        leftVisible: blob.sidebars.left.visible,
+        rightVisible: blob.sidebars.right.visible,
+        stash: { left: blob.sidebars.left.stash, right: blob.sidebars.right.stash },
+      })
+      pinSides(api)
+      return true
+    } catch {
+      return false // 损坏布局:调用方回退 resetLayout
     }
   },
 
@@ -497,15 +535,30 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
 }))
 
 /** 启动时尝试恢复上次布局(给 WorkspaceHost.onReady 用)。成功返回 true。 */
+/** 布局引用的所有视图当前是否都已注册。Tangu Web 无 window.amadeus → amadeus-* 未注册;
+ *  若旧布局引用了它们,dockview.fromJSON 会异步挂载未知组件、在其 effect 里 deref undefined 崩溃
+ *  (越过下面的 try/catch)。故先校验:有未注册视图即丢弃整份布局 → 回退默认布局。 */
+function layoutViewsAllRegistered(dockview: unknown): boolean {
+  const panels = (dockview as { panels?: Record<string, { params?: { __type?: string } }> } | null)?.panels
+  if (!panels) return true
+  for (const p of Object.values(panels)) {
+    const t = p?.params?.__type
+    if (t && !getView(t)) return false
+  }
+  return true
+}
+
 export function tryRestoreLayout(api: DockviewApi): boolean {
   const layout = loadLayout()
   if (!layout) return false
+  if (!layoutViewsAllRegistered(layout.dockview)) return false
+  const known = (v: PersistedPanel): boolean => !!getView(v.type) // 收起态 stash 也剔除未注册视图,防展开时重开死视图
   try {
     api.fromJSON(layout.dockview as never)
     useWorkspace.setState({
       leftVisible: layout.sidebars.left.visible,
       rightVisible: layout.sidebars.right.visible,
-      stash: { left: layout.sidebars.left.stash, right: layout.sidebars.right.stash },
+      stash: { left: layout.sidebars.left.stash.filter(known), right: layout.sidebars.right.stash.filter(known) },
     })
     const focused = api.activePanel && panelType(api.activePanel) === 'chat'
       ? api.activePanel

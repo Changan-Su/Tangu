@@ -6,10 +6,12 @@ export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
     build: { lib: { entry: resolve('electron/main.ts') } },
+    resolve: { alias: { '@amadeus-shared': resolve('shared/amadeus') } },
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
     build: { lib: { entry: resolve('electron/preload.ts') } },
+    resolve: { alias: { '@amadeus-shared': resolve('shared/amadeus') } },
   },
   renderer: {
     root: resolve('frontend'),
@@ -21,7 +23,12 @@ export default defineConfig({
       rollupOptions: { input: resolve('frontend/index.html') },
     },
     resolve: {
-      alias: { '@': resolve('frontend/src') },
+      // @amadeus-shared = vendored Amadeus 同构编译器/IPC 契约;@amadeus = vendored Amadeus 渲染层。
+      alias: {
+        '@': resolve('frontend/src'),
+        '@amadeus': resolve('frontend/src/amadeus'),
+        '@amadeus-shared': resolve('shared/amadeus'),
+      },
     },
   },
 })

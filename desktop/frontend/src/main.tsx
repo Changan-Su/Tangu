@@ -1,8 +1,8 @@
-import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { Root } from './Root'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import './styles/base.css'
+import './amadeus-host.css' // Amadeus Space:vendored 渲染层样式(均 scoped,不碰 Tangu :root)
 import { applyTheme, preloadAllThemes } from './theme/loader'
 import { resolveInitialMode, resolveInitialLang, resolveInitialSkin } from './theme/registry'
 import { useTheme } from './stores/themeStore'
@@ -47,12 +47,11 @@ try {
   console.error('[tangu] init failed, continue to mount:', err)
 }
 
+// 不用 React.StrictMode:其开发期 double-invoke 会重复初始化 Amadeus Space 的 Milkdown 编辑器。
 createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <LocaleProvider>
-      <ErrorBoundary>
-        {isPreview ? <ChatPreview /> : <Root />}
-      </ErrorBoundary>
-    </LocaleProvider>
-  </React.StrictMode>,
+  <LocaleProvider>
+    <ErrorBoundary>
+      {isPreview ? <ChatPreview /> : <Root />}
+    </ErrorBoundary>
+  </LocaleProvider>,
 )

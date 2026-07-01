@@ -1,0 +1,1812 @@
+/* 嵌入 Tangu(Forsion Desktop)后:原全局 reset(html/body/#root/body 主题/::selection/button)
+ * 会泄漏到 Tangu UI,已移除;只保留无害的 box-sizing。Amadeus 视图在 .am-app 作用域内自治。 */
+.am-app * {
+  box-sizing: border-box;
+}
+
+/* ── App shell ───────────────────────────────────────────── */
+.am-app .app {
+  display: grid;
+  grid-template-columns: 248px 1fr;
+  grid-template-rows: 1fr auto;
+  height: 100%;
+}
+
+/* ── Status bar ──────────────────────────────────────────── */
+.am-app .statusbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 28px;
+  padding: 0 14px;
+  background: var(--bg-alt);
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.am-app .status-left {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.am-app .status-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 0 0 auto;
+}
+.am-app .status-item {
+  color: var(--text-sec);
+}
+
+/* ── Sidebar plugin panels (e.g. Outline) ────────────────── */
+.am-app .side-panel {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.am-app .side-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 6px;
+}
+.am-app .side-panel-body {
+  margin-top: 2px;
+}
+.am-app .outline {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.am-app .outline-item {
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text-sec);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background var(--dur-fast) var(--ease-apple);
+}
+.am-app .outline-item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.am-app .outline-item[data-level='1'] {
+  font-weight: 600;
+  color: var(--text);
+}
+.am-app .panel-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 6px 8px;
+}
+
+.am-app .sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 12px;
+  background: var(--bg-alt);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.am-app .sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.am-app .brand {
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: 0.2px;
+  background: linear-gradient(90deg, var(--primary), var(--primary-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.am-app .btn-ghost,
+.am-app .btn-new {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-sec);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  font-size: 12.5px;
+  transition: all var(--dur-fast) var(--ease-apple);
+}
+.am-app .btn-ghost:hover,
+.am-app .btn-new:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.am-app .btn-new {
+  margin-top: auto;
+  text-align: center;
+}
+
+.am-app .sidebar-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.am-app .icon-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-sec);
+  border-radius: var(--radius-sm);
+  width: 28px;
+  height: 26px;
+  font-size: 13px;
+  display: grid;
+  place-items: center;
+  transition: all var(--dur-fast) var(--ease-apple);
+}
+.am-app .icon-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.am-app .page-rename {
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-sm);
+  padding: 6px 9px;
+  outline: none;
+}
+
+.am-app .vault-path {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+}
+
+.am-app .page-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.am-app .page-item {
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text-sec);
+  border-radius: var(--radius-sm);
+  padding: 7px 9px;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background var(--dur-fast) var(--ease-apple);
+}
+.am-app .page-item:hover {
+  background: var(--surface-2);
+}
+.am-app .page-item[data-active] {
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+.am-app .hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 8px 9px;
+}
+
+/* ── Folder tree ─────────────────────────────────────────── */
+.am-app .tree-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--radius-sm);
+  padding: 5px 6px;
+  transition: background var(--dur-fast) var(--ease-apple);
+}
+.am-app .tree-folder:hover {
+  background: var(--surface-2);
+}
+.am-app .tree-chevron {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  flex: 0 0 auto;
+}
+.am-app .tree-name {
+  flex: 1;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-sec);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.am-app .tree-add {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 5px;
+  opacity: 0;
+  flex: 0 0 auto;
+  transition: opacity var(--dur-fast) var(--ease-apple), background var(--dur-fast);
+}
+.am-app .tree-row:hover .tree-add {
+  opacity: 1;
+}
+.am-app .tree-add:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+.am-app .tree-file {
+  display: block;
+}
+.am-app .tree-rename {
+  display: block;
+  width: calc(100% - 8px);
+}
+
+/* ── Main / page ─────────────────────────────────────────── */
+.am-app .main {
+  overflow-y: auto;
+  height: 100%;
+}
+
+.am-app .welcome {
+  max-width: 560px;
+  margin: 16vh auto;
+  padding: 0 24px;
+  color: var(--text-sec);
+}
+.am-app .welcome h1 {
+  font-size: 34px;
+  margin: 0 0 12px;
+  background: linear-gradient(90deg, var(--primary), var(--primary-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.am-app .welcome code {
+  font-family: var(--font-mono);
+  background: var(--surface-2);
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 0.9em;
+}
+
+.am-app .page-view {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 28px 40px 120px;
+}
+
+.am-app .page-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.am-app .page-title {
+  font-size: 26px;
+  font-weight: 700;
+  cursor: text;
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  margin-left: -6px;
+  transition: background var(--dur-fast) var(--ease-apple);
+}
+.am-app .page-title:hover {
+  background: var(--surface);
+}
+.am-app .page-title-edit {
+  font-family: inherit;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  margin-left: -6px;
+  outline: none;
+  min-width: 320px;
+}
+.am-app .page-status {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.am-app .page-status[data-status='saving'] {
+  color: var(--primary);
+}
+
+/* ── Layout: stack / rows / columns ──────────────────────── */
+.am-app .stack {
+  display: flex;
+  flex-direction: column;
+}
+
+.am-app .row {
+  display: flex;
+  align-items: stretch;
+}
+
+.am-app .row-cols {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 0;
+}
+
+.am-app .column {
+  min-width: 0;
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  transition: background var(--dur-fast) var(--ease-apple);
+}
+.am-app .column[data-over] {
+  background: var(--drop);
+}
+
+.am-app .col-add {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  padding: 4px 30px;
+  border-radius: var(--radius-xs);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-apple), background var(--dur-fast);
+}
+.am-app .column:hover .col-add {
+  opacity: 1;
+}
+.am-app .col-add:hover {
+  background: var(--surface-2);
+  color: var(--text-sec);
+}
+
+.am-app .col-resizer {
+  flex: 0 0 10px;
+  cursor: col-resize;
+  position: relative;
+}
+.am-app .col-resizer::after {
+  content: '';
+  position: absolute;
+  inset: 8px 4px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background var(--dur-fast) var(--ease-apple);
+}
+.am-app .col-resizer:hover::after {
+  background: var(--primary);
+}
+
+.am-app .edge-zone {
+  flex: 0 0 14px;
+  border-radius: var(--radius-xs);
+  transition: background var(--dur-fast) var(--ease-apple);
+}
+.am-app .edge-zone[data-over] {
+  background: var(--drop);
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+
+.am-app .row-gap {
+  height: 10px;
+  border-radius: var(--radius-pill);
+  transition: background var(--dur-fast) var(--ease-apple);
+}
+.am-app .row-gap[data-over] {
+  background: var(--drop);
+  box-shadow: inset 0 0 0 2px var(--primary);
+}
+
+/* ── Block host ──────────────────────────────────────────── */
+.am-app .block-host {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px 1fr 22px;
+  align-items: start;
+  border-radius: var(--radius-sm);
+  transition: background var(--dur-fast) var(--ease-apple);
+}
+
+/* Insertion line shown on the block under the pointer while dragging. */
+.am-app .drop-line {
+  position: absolute;
+  top: -2px;
+  left: 22px;
+  right: 22px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--primary);
+  box-shadow: 0 0 6px var(--primary);
+  z-index: 5;
+  pointer-events: none;
+}
+.am-app .block-host:hover {
+  background: var(--surface);
+}
+.am-app .block-host[data-dragging] {
+  opacity: 0.4;
+}
+
+.am-app .block-gutter {
+  display: flex;
+  justify-content: center;
+  padding-top: 5px;
+}
+.am-app .block-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding-top: 5px;
+}
+
+.am-app .drag-handle,
+.am-app .block-act {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  padding: 3px;
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-apple), color var(--dur-fast);
+}
+.am-app .drag-handle {
+  cursor: grab;
+}
+.am-app .drag-handle:active {
+  cursor: grabbing;
+}
+.am-app .block-host:hover .drag-handle,
+.am-app .block-host:hover .block-act {
+  opacity: 1;
+}
+.am-app .drag-handle:hover,
+.am-app .block-act:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.am-app .block-body {
+  min-width: 0;
+  padding: 2px 4px;
+}
+
+.am-app .block-unknown {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* Cross-note embed cell (read-only transclusion). */
+.am-app .embed-body {
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--primary);
+  border-radius: 6px;
+  background: var(--surface-2);
+  padding: 4px 8px 6px;
+}
+.am-app .embed-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+.am-app .embed-badge {
+  font-size: 11px;
+  color: var(--primary-2, var(--primary));
+  font-weight: 600;
+}
+.am-app .embed-src {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+.am-app .embed-src:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+.am-app .embed-loading,
+.am-app .embed-missing {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+.am-app .embed-body .md-block :is(.ProseMirror) {
+  cursor: default;
+}
+
+.am-app .drag-overlay {
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-panel);
+  padding: 8px 14px;
+  font-size: 13.5px;
+  color: var(--text);
+  max-width: 360px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.am-app .page-footer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 14px;
+  padding-left: 22px;
+}
+.am-app .add-block {
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--text-sec);
+  border-radius: var(--radius-sm);
+  padding: 6px 14px;
+  font-size: 13px;
+  transition: all var(--dur-fast) var(--ease-apple);
+}
+.am-app .add-block:hover {
+  border-color: var(--primary);
+  color: var(--text);
+}
+.am-app .hint-inline {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.am-app .empty-state {
+  color: var(--text-muted);
+  padding: 40px;
+}
+
+/* ── In-block editor (Milkdown / ProseMirror) ────────────── */
+.am-app .milkdown,
+.am-app .milkdown .ProseMirror {
+  outline: none;
+}
+.am-app .milkdown .ProseMirror {
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text);
+  caret-color: var(--primary);
+}
+.am-app .milkdown .ProseMirror > *:first-child {
+  margin-top: 0;
+}
+.am-app .milkdown .ProseMirror > *:last-child {
+  margin-bottom: 0;
+}
+.am-app .milkdown .ProseMirror h1,
+.am-app .milkdown .ProseMirror h2,
+.am-app .milkdown .ProseMirror h3 {
+  font-weight: 700;
+  line-height: 1.3;
+  margin: 0.4em 0 0.3em;
+}
+.am-app .milkdown .ProseMirror h1 {
+  font-size: 1.7em;
+}
+.am-app .milkdown .ProseMirror h2 {
+  font-size: 1.35em;
+}
+.am-app .milkdown .ProseMirror h3 {
+  font-size: 1.15em;
+}
+.am-app .milkdown .ProseMirror p {
+  margin: 0.3em 0;
+}
+.am-app .milkdown .ProseMirror ul,
+.am-app .milkdown .ProseMirror ol {
+  margin: 0.3em 0;
+  padding-left: 1.4em;
+}
+.am-app .milkdown .ProseMirror li {
+  margin: 0.1em 0;
+}
+.am-app .milkdown .ProseMirror blockquote {
+  margin: 0.4em 0;
+  padding-left: 0.9em;
+  border-left: 3px solid var(--primary);
+  color: var(--text-sec);
+}
+.am-app .milkdown .ProseMirror code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--surface-2);
+  padding: 1px 5px;
+  border-radius: 6px;
+}
+.am-app .milkdown .ProseMirror pre {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--surface-2);
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+.am-app .milkdown .ProseMirror pre code {
+  background: none;
+  padding: 0;
+}
+.am-app .milkdown .ProseMirror a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.am-app .milkdown .ProseMirror img {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+  display: block;
+  margin: 0.4em 0;
+}
+.am-app .milkdown .ProseMirror .wikilink {
+  color: var(--primary);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.am-app .milkdown .ProseMirror .wikilink:hover {
+  background: var(--drop);
+  border-radius: 3px;
+}
+.am-app .milkdown .ProseMirror hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.8em 0;
+}
+.am-app .milkdown .ProseMirror table {
+  border-collapse: collapse;
+  margin: 0.4em 0;
+  width: 100%;
+}
+.am-app .milkdown .ProseMirror th,
+.am-app .milkdown .ProseMirror td {
+  border: 1px solid var(--border);
+  padding: 5px 9px;
+  text-align: left;
+}
+/* GFM task lists: render data-checked as a clickable checkbox in the left gutter. */
+.am-app .milkdown .ProseMirror li[data-item-type='task'] {
+  list-style: none;
+  position: relative;
+}
+.am-app .milkdown .ProseMirror li[data-item-type='task']::before {
+  content: '';
+  position: absolute;
+  left: -1.5em;
+  top: 0.28em;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--surface-2);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-apple),
+    border-color var(--dur-fast) var(--ease-apple);
+}
+.am-app .milkdown .ProseMirror li[data-item-type='task']:hover::before {
+  border-color: var(--primary);
+}
+.am-app .milkdown .ProseMirror li[data-item-type='task'][data-checked='true']::before {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.am-app .milkdown .ProseMirror li[data-item-type='task'][data-checked='true']::after {
+  content: '';
+  position: absolute;
+  left: -1.04em;
+  top: 0.42em;
+  width: 4px;
+  height: 8px;
+  border: solid var(--on-primary);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+.am-app .milkdown .ProseMirror li[data-item-type='task'][data-checked='true'] {
+  color: var(--text-muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--text-muted);
+}
+
+/* ── Slash menu ──────────────────────────────────────────── */
+.am-app .md-block {
+  position: relative;
+}
+.am-app .slash-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+.am-app .slash-menu {
+  position: absolute;
+  left: 6px;
+  top: calc(100% + 4px);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  width: 252px;
+  max-height: 344px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  padding: 6px;
+  backdrop-filter: blur(20px) saturate(140%);
+  animation: pop-in var(--dur-fast) var(--ease-apple);
+}
+.am-app .slash-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+}
+.am-app .slash-group + .slash-group {
+  margin-top: 4px;
+}
+.am-app .slash-group-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 6px 10px 3px;
+}
+.am-app .slash-item {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text-sec);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 13px;
+  transition: background var(--dur-fast) var(--ease-apple);
+}
+.am-app .slash-item[data-active] {
+  background: var(--surface);
+  color: var(--text);
+}
+.am-app .slash-icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  color: var(--text-sec);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+.am-app .slash-item[data-active] .slash-icon {
+  background: var(--drop);
+  color: var(--primary);
+}
+.am-app .slash-label {
+  font-weight: 500;
+}
+.am-app .slash-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.am-app .slash-query {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--primary);
+  padding: 2px 10px 6px;
+}
+.am-app .slash-empty {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  padding: 8px 10px;
+}
+.am-app .slash-foot {
+  display: flex;
+  gap: 12px;
+  padding: 7px 10px 3px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+/* Empty-block placeholder (shows the slash hint) */
+.am-app .milkdown .ProseMirror .is-empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-muted);
+  pointer-events: none;
+  float: left;
+  height: 0;
+  font-style: normal;
+}
+
+/* ── Command palette (quick switch / search) ─────────────── */
+.am-app .cmd-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 14vh;
+  background: rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(2px);
+}
+.am-app .cmd-panel {
+  width: min(560px, 90vw);
+  max-height: 64vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+  backdrop-filter: blur(20px) saturate(140%);
+}
+.am-app .cmd-input {
+  font-family: inherit;
+  font-size: 15px;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 14px 16px;
+  outline: none;
+}
+.am-app .cmd-list {
+  overflow-y: auto;
+  padding: 6px;
+}
+.am-app .cmd-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text-sec);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+.am-app .cmd-item[data-active] {
+  background: var(--surface);
+  color: var(--text);
+}
+.am-app .cmd-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.am-app .cmd-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 1 auto;
+}
+.am-app .cmd-path {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+}
+.am-app .cmd-snippet {
+  font-size: 12px;
+  color: var(--text-sec);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.am-app .cmd-snippet mark {
+  background: var(--drop);
+  color: var(--text);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+.am-app .cmd-empty {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  padding: 12px;
+}
+
+/* ── Backlinks ───────────────────────────────────────────── */
+.am-app .backlinks {
+  margin-top: 44px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.am-app .backlinks-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  padding: 4px 0;
+}
+.am-app .backlinks-chevron {
+  font-size: 10px;
+}
+.am-app .backlinks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+}
+.am-app .backlink-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: normal;
+  padding: 8px 10px;
+}
+.am-app .backlink-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.am-app .backlink-snippet {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.am-app .backlinks-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 6px 0;
+}
+
+/* ── [[ wiki autocomplete ────────────────────────────────── */
+.am-app .wiki-suggest {
+  position: fixed;
+  z-index: 60;
+  min-width: 200px;
+  max-width: 320px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  padding: 6px;
+  backdrop-filter: blur(20px) saturate(140%);
+}
+.am-app .wiki-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text-sec);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.am-app .wiki-item[data-active] {
+  background: var(--surface);
+  color: var(--text);
+}
+.am-app .wiki-create {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ── Tag pane ────────────────────────────────────────────── */
+.am-app .tag-pane {
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+  margin-top: 4px;
+}
+.am-app .tag-pane-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 6px;
+}
+.am-app .tag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 2px;
+}
+.am-app .tag-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-sec);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  font-size: 12.5px;
+}
+.am-app .tag-item:hover,
+.am-app .tag-item[data-active] {
+  background: var(--surface-2);
+}
+.am-app .tag-name {
+  color: var(--primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.am-app .tag-count {
+  color: var(--text-muted);
+  font-size: 11px;
+  flex: 0 0 auto;
+}
+.am-app .tag-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-left: 10px;
+}
+.am-app .tag-page {
+  font-size: 12px;
+  padding: 5px 8px;
+}
+
+/* ── Polish: motion / scrollbars / focus / refinements ───── */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes panel-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .am-app * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Custom scrollbars (Electron / WebKit) */
+.am-app ::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+.am-app ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.am-app ::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 10px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.am-app ::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+  background-clip: content-box;
+}
+
+/* Keyboard focus rings (mouse clicks stay clean) */
+.am-app :focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+  border-radius: var(--radius-xs);
+}
+.am-app .cmd-input:focus-visible,
+.am-app .page-rename:focus-visible,
+.am-app .page-title-edit:focus-visible {
+  outline: none;
+}
+
+/* Command palette: entrance + footer + count */
+.am-app .cmd-overlay {
+  animation: overlay-in var(--dur-fast) var(--ease-apple);
+}
+.am-app .cmd-panel {
+  animation: panel-rise var(--dur-normal) var(--ease-apple);
+}
+.am-app .cmd-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.am-app .cmd-foot kbd {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 5px;
+  color: var(--text-sec);
+}
+.am-app .cmd-foot-count {
+  flex: 0 0 auto;
+}
+
+/* Wiki autocomplete entrance */
+.am-app .wiki-suggest {
+  animation: pop-in var(--dur-fast) var(--ease-apple);
+}
+
+/* Status as a subtle pill */
+.am-app .page-status {
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.am-app .page-status[data-status='saving'] {
+  border-color: var(--primary);
+}
+.am-app .page-status:empty {
+  display: none;
+}
+
+/* Sidebar tree: file rows get a hairline indent guide + crisper active accent */
+.am-app .tree-file {
+  position: relative;
+}
+.am-app .page-item[data-active].tree-file {
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+/* Editor: table header tint, smoother hr */
+.am-app .milkdown .ProseMirror th {
+  background: var(--surface);
+  font-weight: 600;
+}
+.am-app .milkdown .ProseMirror tr:hover td {
+  background: var(--surface);
+}
+
+/* Welcome screen kbd hints */
+.am-app .welcome p {
+  line-height: 1.7;
+}
+.am-app .welcome kbd {
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 6px;
+  color: var(--text-sec);
+}
+.am-app .welcome-hints {
+  margin-top: 22px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ── Sidebar footer (new page / new folder) ──────────────── */
+.am-app .sidebar-foot {
+  margin-top: auto;
+  display: flex;
+  gap: 6px;
+}
+.am-app .sidebar-foot .btn-new {
+  margin-top: 0;
+  flex: 1;
+}
+.am-app .btn-new-folder {
+  flex: 0 0 auto;
+}
+
+/* ── Context menu ─────────────────────────────────────────── */
+.am-app .ctx-menu {
+  position: fixed;
+  z-index: 120;
+  min-width: 168px;
+  padding: 5px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  backdrop-filter: blur(20px) saturate(140%);
+  animation: pop-in var(--dur-fast) var(--ease-apple);
+}
+.am-app .ctx-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text-sec);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  font-size: 13px;
+  transition: background var(--dur-fast) var(--ease-apple);
+}
+.am-app .ctx-item:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+.am-app .ctx-item[data-danger] {
+  color: #e5484d;
+}
+.am-app .ctx-item[data-danger]:hover {
+  background: rgba(229, 72, 77, 0.12);
+  color: #e5484d;
+}
+
+/* ── Dialogs (confirm / prompt / folder picker) ──────────── */
+.am-app .dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(2px);
+  animation: overlay-in var(--dur-fast) var(--ease-apple);
+}
+.am-app .dialog {
+  width: min(420px, 90vw);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  animation: panel-rise var(--dur-normal) var(--ease-apple);
+}
+.am-app .dialog-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.am-app .dialog-msg {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.am-app .dialog-input {
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  outline: none;
+}
+.am-app .dialog-input:focus {
+  border-color: var(--primary);
+}
+.am-app .dialog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.am-app .dialog-listitem {
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text-sec);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 13px;
+}
+.am-app .dialog-listitem:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+.am-app .dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+.am-app .dialog-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-sec);
+  border-radius: var(--radius-sm);
+  padding: 7px 16px;
+  font-size: 13px;
+  transition: all var(--dur-fast) var(--ease-apple);
+}
+.am-app .dialog-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.am-app .dialog-btn[data-primary] {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+}
+.am-app .dialog-btn[data-danger] {
+  background: #e5484d;
+  border-color: #e5484d;
+  color: #fff;
+}
+
+/* ── Theme picker ─────────────────────────────────────────── */
+.am-app .sidebar {
+  position: relative;
+}
+.am-app .picker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+}
+.am-app .theme-picker {
+  position: absolute;
+  top: 46px;
+  left: 12px;
+  right: 12px;
+  z-index: 95;
+  padding: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  backdrop-filter: blur(20px) saturate(140%);
+  animation: pop-in var(--dur-fast) var(--ease-apple);
+}
+.am-app .picker-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.am-app .swatch-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.am-app .swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-pill);
+  border: none;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-apple), box-shadow var(--dur-fast);
+}
+.am-app .swatch:hover {
+  transform: scale(1.12);
+}
+.am-app .swatch[data-active] {
+  box-shadow: 0 0 0 2px var(--surface-2), 0 0 0 3px var(--text-sec);
+}
+
+/* ── Settings dialog ─────────────────────────────────────── */
+.am-app .settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(3px);
+  animation: overlay-in var(--dur-fast) var(--ease-apple);
+}
+.am-app .settings {
+  display: grid;
+  grid-template-columns: 168px 1fr;
+  width: min(720px, 92vw);
+  height: min(520px, 86vh);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+  animation: panel-rise var(--dur-normal) var(--ease-apple);
+}
+.am-app .settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 16px 10px;
+  background: var(--bg-alt);
+  border-right: 1px solid var(--border);
+}
+.am-app .settings-nav-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 4px 10px 8px;
+}
+.am-app .settings-navitem {
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text-sec);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 13px;
+  transition: background var(--dur-fast) var(--ease-apple);
+}
+.am-app .settings-navitem:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+.am-app .settings-navitem[data-active] {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+.am-app .settings-body {
+  position: relative;
+  padding: 26px 28px;
+  overflow-y: auto;
+}
+.am-app .settings-close {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+}
+.am-app .settings-close:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+.am-app .settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 460px;
+}
+.am-app .settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.am-app .settings-field-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.am-app .settings-hint {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+/* Segmented control */
+.am-app .seg {
+  display: inline-flex;
+  width: max-content;
+  gap: 3px;
+  padding: 3px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+}
+.am-app .seg-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-sec);
+  border-radius: var(--radius-pill);
+  padding: 6px 18px;
+  font-size: 13px;
+  transition: all var(--dur-fast) var(--ease-apple);
+}
+.am-app .seg-btn[data-active] {
+  background: var(--primary);
+  color: var(--on-primary);
+  font-weight: 600;
+}
+
+/* Plugin list */
+.am-app .plugin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.am-app .plugin-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.am-app .plugin-meta {
+  flex: 1;
+  min-width: 0;
+}
+.am-app .plugin-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.am-app .plugin-ver {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.am-app .plugin-badge {
+  font-size: 10.5px;
+  color: var(--primary);
+  background: var(--drop);
+  border-radius: var(--radius-pill);
+  padding: 1px 8px;
+}
+.am-app .plugin-badge[data-external] {
+  color: var(--text-muted);
+  background: var(--surface);
+}
+.am-app .settings-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.am-app .settings-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-sec);
+  border-radius: var(--radius-sm);
+  padding: 7px 14px;
+  font-size: 12.5px;
+  transition: all var(--dur-fast) var(--ease-apple);
+}
+.am-app .settings-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.am-app .settings-hint code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0 5px;
+}
+.am-app .plugin-desc {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* Toggle switch */
+.am-app .toggle {
+  position: relative;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 23px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-apple);
+}
+.am-app .toggle[data-on] {
+  background: var(--primary);
+}
+.am-app .toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 19px;
+  height: 19px;
+  border-radius: var(--radius-pill);
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform var(--dur-fast) var(--ease-apple);
+}
+.am-app .toggle[data-on] .toggle-knob {
+  transform: translateX(17px);
+}
+
+.am-app .about-title {
+  margin-bottom: 4px;
+  font-size: 22px;
+  font-weight: 700;
+  background: linear-gradient(90deg, var(--primary), var(--primary-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Toast */
+.am-app .toast {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 140;
+  padding: 10px 18px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-panel);
+  font-size: 13px;
+  color: var(--text);
+  animation: panel-rise var(--dur-normal) var(--ease-apple);
+}
+
+/* ── Theme chips (Settings → 外观): named theme + accent pills ─── */
+.am-app .theme-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.am-app .theme-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 13px 7px 9px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-sec);
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  transition: all var(--dur-fast) var(--ease-apple);
+}
+.am-app .theme-chip:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.am-app .theme-chip[data-active] {
+  border-color: var(--primary);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+.am-app .theme-chip-dot {
+  width: 15px;
+  height: 15px;
+  border-radius: var(--radius-pill);
+  flex: 0 0 auto;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+.am-app .theme-chip-label {
+  font-weight: 600;
+}
+
+/* Custom accent: native color picker + reset */
+.am-app .accent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.am-app .accent-input {
+  width: 44px;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: pointer;
+}
+.am-app .accent-input::-webkit-color-swatch {
+  border: none;
+  border-radius: calc(var(--radius-sm) - 4px);
+}
+.am-app .accent-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}

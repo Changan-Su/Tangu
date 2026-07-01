@@ -11,6 +11,7 @@ export interface StandaloneConfig {
   databaseUrl: string; // 可选:外部 Postgres 连接串;留空则用嵌入式 SQLite/WAL(零安装,落 state.db)
   dataDir: string; // 嵌入式 SQLite 落盘文件(databaseUrl 为空时用;默认 ~/.tangu/state.db,'memory'=内存)
   defaultModelId: string; // CLI 配的模型(run 未指定时用)
+  toolBuiltins?: 'all' | string[]; // 内置工具白名单(省略=全开)。Tangu Manager 经 TANGU_TOOL_BUILTINS 下发裁剪
   port: number;
   host: string;
   userId: string; // 本地单用户 id
@@ -31,6 +32,15 @@ const DEFAULTS = {
   sandbox: 'auto' as const,
 };
 
+/** csv → 工具白名单。空 = undefined(全开)；字面量 'all' = 全开；否则按逗号切成白名单数组。 */
+function parseToolBuiltins(raw: string | undefined): 'all' | string[] | undefined {
+  const s = (raw ?? '').trim();
+  if (!s) return undefined;
+  if (s === 'all') return 'all';
+  const list = s.split(',').map((x) => x.trim()).filter(Boolean);
+  return list.length ? list : undefined;
+}
+
 export function parseConfig(argv: string[]): StandaloneConfig {
   // config.json 作为 env 之下、默认之上的一层(优先级:CLI args > env > config.json > 默认)。
   // 直连 providers 不在此 seed —— 由 loadProviders(assemble.ts)统一读 config.providers 段并合并。
@@ -44,6 +54,7 @@ export function parseConfig(argv: string[]): StandaloneConfig {
     databaseUrl: process.env.TANGU_DATABASE_URL ?? process.env.DATABASE_URL ?? db.url ?? '',
     dataDir: process.env.TANGU_DATA_DIR ?? db.dataDir ?? '',
     defaultModelId: process.env.TANGU_MODEL ?? cloud.defaultModel ?? '',
+    toolBuiltins: parseToolBuiltins(process.env.TANGU_TOOL_BUILTINS),
     port: Number(process.env.TANGU_PORT ?? server.port ?? DEFAULTS.port),
     host: process.env.TANGU_HOST ?? server.host ?? DEFAULTS.host,
     userId: process.env.TANGU_USER_ID ?? server.userId ?? DEFAULTS.userId,
@@ -68,6 +79,7 @@ export function parseConfig(argv: string[]): StandaloneConfig {
       case '--db': case '--database-url': cfg.databaseUrl = v; break;
       case '--data-dir': cfg.dataDir = v; break;
       case '--model': cfg.defaultModelId = v; break;
+      case '--tool-builtins': cfg.toolBuiltins = parseToolBuiltins(v); break;
       case '--port': cfg.port = Number(v); break;
       case '--host': cfg.host = v; break;
       case '--user-id': cfg.userId = v; break;
@@ -109,6 +121,7 @@ export const HELP = `Tangu Agent — standalone(云端大脑客户端，HTTP/SSE
   --db <url>          可选:外部 Postgres 连接串;留空=嵌入式 SQLite/WAL,env TANGU_DATABASE_URL
   --data-dir <path>   嵌入式 SQLite 落盘文件(默认 ~/.tangu/state.db,'memory'=内存),env TANGU_DATA_DIR
   --model <id>        默认模型 id,env TANGU_MODEL
+  --tool-builtins <csv> 内置工具白名单(逗号分隔;'all'/省略=全开),env TANGU_TOOL_BUILTINS
   --port <n>          本地服务端口(默认 8787),env TANGU_PORT
   --host <addr>       绑定地址(默认 127.0.0.1),env TANGU_HOST
   --user-id <id>      本地单用户 id(默认 local),env TANGU_USER_ID

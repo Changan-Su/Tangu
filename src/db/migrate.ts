@@ -159,9 +159,16 @@ export async function runMigration(): Promise<void> {
     // 重复列报错吞掉即幂等)。隔离 Special Agent 工作会话不进会话列表。
     try { await query(`ALTER TABLE chat_sessions ADD COLUMN kind VARCHAR(16) NOT NULL DEFAULT 'user'`); }
     catch { /* 列已存在 */ }
-    // 老 SQLite 库补 display_files 列(agent 在对话区展示的文件;base schema 已含,此 ALTER 兜旧库)。
-    try { await query(`ALTER TABLE chat_messages ADD COLUMN display_files JSONB`); }
-    catch { /* 列已存在 */ }
+    // 老 SQLite 库逐列补齐消息媒体与作者字段。base schema 只影响新库；CREATE TABLE IF NOT EXISTS
+    // 不会给存量表补列，因此这里必须显式 ALTER（SQLite 不支持 IF NOT EXISTS，重复列错误吞掉即幂等）。
+    for (const sql of [
+      `ALTER TABLE chat_messages ADD COLUMN attachments JSONB`,
+      `ALTER TABLE chat_messages ADD COLUMN display_files JSONB`,
+      `ALTER TABLE chat_messages ADD COLUMN agent_slug VARCHAR(64)`,
+    ]) {
+      try { await query(sql); }
+      catch { /* 列已存在 */ }
+    }
     console.log('✅ [agent-core] migrations done (sqlite：base schema 已含全部列)');
     return;
   }
@@ -231,8 +238,10 @@ export async function runMigration(): Promise<void> {
     await query(`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS attachments JSONB`);
     // agent 在对话区展示的文件(display_file / generate_image / 表情包):路径或内联 dataUrl 列表。
     await query(`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS display_files JSONB`);
+    // 产出该消息的 agent slug(客户端据此还原头像/昵称;旧消息 NULL → 回退会话 agent)。
+    await query(`ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS agent_slug VARCHAR(64)`);
   } catch (e: any) {
-    console.warn('[agent-core] chat_messages.attachments/display_files 列迁移失败：', e?.message || e);
+    console.warn('[agent-core] chat_messages.attachments/display_files/agent_slug 列迁移失败：', e?.message || e);
   }
 
   console.log('✅ [agent-core] migrations done (agent_runs/agent_steps/agent_run_events)');
