@@ -97,6 +97,8 @@ interface PageState {
   vaultRoot: string | null
   pages: string[]
   folders: string[]
+  /** Non-page files (attachments/.db/…), vault-relative — shown in the vault tree. */
+  files: string[]
   activePage: string | null
   manifest: PageManifest | null
   blocks: Record<BlockId, BlockState>
@@ -204,6 +206,7 @@ export const usePageStore = create<PageState>((set, get) => {
     vaultRoot: null,
     pages: [],
     folders: [],
+    files: [],
     activePage: null,
     manifest: null,
     blocks: {},
@@ -270,6 +273,7 @@ export const usePageStore = create<PageState>((set, get) => {
         const info = await amadeus.openVault()
         if (!info) return
         set({ vaultRoot: info.root, pages: info.pages, folders: info.folders ?? [], error: null })
+        void amadeus.listFiles?.().then((files) => set({ files })).catch(() => {})
         if (info.pages.length > 0) await get().loadPage(info.pages[0])
       } catch (e) {
         set({ error: String(e) })
@@ -281,6 +285,7 @@ export const usePageStore = create<PageState>((set, get) => {
         const info = await amadeus.restoreVault()
         if (!info) return
         set({ vaultRoot: info.root, pages: info.pages, folders: info.folders ?? [], error: null })
+        void amadeus.listFiles?.().then((files) => set({ files })).catch(() => {})
         const target =
           info.lastPage && info.pages.includes(info.lastPage) ? info.lastPage : info.pages[0]
         if (target) await get().loadPage(target)
@@ -380,8 +385,12 @@ export const usePageStore = create<PageState>((set, get) => {
     },
 
     async refreshStructure() {
-      const [pages, folders] = await Promise.all([amadeus.listPages(), amadeus.listFolders()])
-      set({ pages, folders })
+      const [pages, folders, files] = await Promise.all([
+        amadeus.listPages(),
+        amadeus.listFolders(),
+        amadeus.listFiles?.() ?? [], // 旧 preload(无 listFiles)下优雅降级为空
+      ])
+      set({ pages, folders, files })
     },
 
     async deletePage(pagePath) {

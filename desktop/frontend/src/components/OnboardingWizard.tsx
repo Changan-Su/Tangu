@@ -202,8 +202,16 @@ export const OnboardingWizard: React.FC<{
     return () => off?.()
   }, [])
 
+  const needsSudo = (p: EnvProbeResult): boolean => /^sudo\b/.test(p.installCommand || '')
+
   const runInstall = async (p: EnvProbeResult): Promise<void> => {
     if (!p.installId || !window.tangu?.envRun) return
+    // sudo 命令需要 TTY 输密码,GUI 子进程里必然卡死/失败 → 改为复制命令请用户去终端执行。
+    if (needsSudo(p)) {
+      try { await navigator.clipboard.writeText(p.installCommand || '') } catch { /* ignore */ }
+      setInstallLog((prev) => [...prev, t('onboarding.env.copied', { command: p.installCommand })])
+      return
+    }
     if (!window.confirm(t('onboarding.env.installConfirm', { command: p.installCommand }))) return
     setRunningInstall(p.installId)
     setInstallLog([])
@@ -558,7 +566,8 @@ export const OnboardingWizard: React.FC<{
                         title={pr.installCommand || ''}
                         onClick={() => void runInstall(pr)}
                       >
-                        {runningInstall === pr.installId ? <Loader2 size={12} className="spin" /> : <Play size={12} />} {t('onboarding.env.install')}
+                        {runningInstall === pr.installId ? <Loader2 size={12} className="spin" /> : <Play size={12} />}{' '}
+                        {needsSudo(pr) ? t('onboarding.env.copyCmd') : t('onboarding.env.install')}
                       </button>
                     )}
                   </div>

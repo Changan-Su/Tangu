@@ -41,8 +41,9 @@ export interface ExecOpts {
 }
 
 // 默认用预装文档/数据库的自建镜像（见 sandbox/Dockerfile）；缺失时回落 python:3.12-slim。
+// 回落源可经 env 覆盖(桌面「中国大陆镜像」注入 DaoCloud 代理,Docker Hub 直连在国内常拉不动)。
 const PYTHON_IMAGE = process.env.AGENT_SANDBOX_PYTHON_IMAGE || 'forsion-agent-sandbox:py312';
-const PYTHON_IMAGE_FALLBACK = 'python:3.12-slim';
+const PYTHON_IMAGE_FALLBACK = process.env.AGENT_SANDBOX_PYTHON_IMAGE_FALLBACK || 'python:3.12-slim';
 const NODE_IMAGE = process.env.AGENT_SANDBOX_NODE_IMAGE || 'node:20-slim';
 let pythonImageResolved: string | null = null;
 

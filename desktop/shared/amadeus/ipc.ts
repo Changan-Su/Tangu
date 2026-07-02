@@ -6,6 +6,7 @@ export const IPC = {
   openVault: 'vault:open',
   restoreVault: 'vault:restore',
   listPages: 'vault:list',
+  listFiles: 'vault:files',
   loadPage: 'page:load',
   readPage: 'page:read',
   newPage: 'page:new',
@@ -113,6 +114,8 @@ export interface AmadeusApi {
   /** Re-open the last vault (persisted across launches), or null if none/unavailable. */
   restoreVault(): Promise<VaultInfo | null>
   listPages(): Promise<string[]>
+  /** All non-page files (attachments/.db/…), vault-relative — for the vault tree. */
+  listFiles(): Promise<string[]>
   loadPage(pagePath: string): Promise<LoadedPage>
   /** 只读加载(模板读取等):不写 lastPage,不算「打开」。 */
   readPage(pagePath: string): Promise<LoadedPage>

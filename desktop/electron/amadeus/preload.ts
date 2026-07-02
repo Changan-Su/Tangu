@@ -8,6 +8,7 @@ const api: AmadeusApi = {
   openVault: () => ipcRenderer.invoke(IPC.openVault),
   restoreVault: () => ipcRenderer.invoke(IPC.restoreVault),
   listPages: () => ipcRenderer.invoke(IPC.listPages),
+  listFiles: () => ipcRenderer.invoke(IPC.listFiles),
   loadPage: (pagePath) => ipcRenderer.invoke(IPC.loadPage, pagePath),
   readPage: (pagePath) => ipcRenderer.invoke(IPC.readPage, pagePath),
   newPage: (pagePath) => ipcRenderer.invoke(IPC.newPage, pagePath),

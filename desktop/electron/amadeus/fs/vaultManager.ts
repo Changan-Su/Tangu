@@ -47,8 +47,8 @@ export class VaultManager {
     return abs
   }
 
-  /** All page (.md) files, vault-relative, ignoring dot-sidecars and node_modules. */
-  async listPages(): Promise<string[]> {
+  /** All files passing `pred`, vault-relative, ignoring dot-sidecars and node_modules. */
+  private async collectFiles(pred: (name: string) => boolean): Promise<string[]> {
     const root = this.requireRoot()
     const out: string[] = []
     const walk = async (dir: string): Promise<void> => {
@@ -62,11 +62,21 @@ export class VaultManager {
         if (e.name.startsWith('.') || e.name === 'node_modules') continue
         const abs = path.join(dir, e.name)
         if (e.isDirectory()) await walk(abs)
-        else if (e.isFile() && e.name.endsWith('.md')) out.push(path.relative(root, abs))
+        else if (e.isFile() && pred(e.name)) out.push(path.relative(root, abs))
       }
     }
     await walk(root)
     return out.sort()
+  }
+
+  /** All page (.md) files, vault-relative. */
+  async listPages(): Promise<string[]> {
+    return this.collectFiles((n) => n.endsWith('.md'))
+  }
+
+  /** All non-page files (attachments/.db/…), vault-relative — for the vault tree. */
+  async listFiles(): Promise<string[]> {
+    return this.collectFiles((n) => !n.endsWith('.md'))
   }
 
   /** True if `content` matches what we last wrote to `abs` (i.e. not an external edit). */

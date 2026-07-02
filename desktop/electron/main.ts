@@ -8,6 +8,7 @@ import { basename, dirname, join } from 'path'
 import { pathToFileURL } from 'url'
 import { readFile, writeFile, mkdir, chmod, readdir, stat, rename, cp } from 'fs/promises'
 import { execFile, spawn } from 'child_process'
+import { homedir } from 'os'
 import { BackendManager, bundledPythonBin, type BackendStatus } from './backendManager'
 import {
   forsionDeviceLogin, forsionLogout, forsionWhoami, loadTanguCreds,
@@ -105,9 +106,33 @@ interface EnvProbe {
 /** env:check 登记的可执行安装命令(id → command);env:run 仅从此表取,防 renderer 注入任意命令。 */
 const pendingInstallCommands = new Map<string, string>()
 
+/** GUI 启动的 Electron 只拿到 launchd/桌面会话的精简 PATH(mac 上不含 /opt/homebrew/bin 等),
+ *  Homebrew/用户目录装的 node/git/docker 会被误判「未检测到」。环境探测与引导安装统一用补全 PATH。 */
+function envWithFullPath(extra?: Record<string, string>): NodeJS.ProcessEnv {
+  const sep = process.platform === 'win32' ? ';' : ':'
+  const additions = process.platform === 'win32'
+    ? []
+    : ['/opt/homebrew/bin', '/usr/local/bin', '/usr/local/sbin', join(homedir(), '.local', 'bin')]
+  const cur = (process.env.PATH || '').split(sep).filter(Boolean)
+  const PATH = [...cur, ...additions.filter((p) => !cur.includes(p))].join(sep)
+  return { ...process.env, PATH, ...(extra || {}) }
+}
+
+/** 「中国大陆」网络下给引导安装子进程注入的镜像 env(brew/pip/npm;不写用户 dotfile,可逆)。 */
+function chinaInstallEnv(): Record<string, string> {
+  return {
+    HOMEBREW_BOTTLE_DOMAIN: 'https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles',
+    HOMEBREW_API_DOMAIN: 'https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api',
+    HOMEBREW_BREW_GIT_REMOTE: 'https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/brew.git',
+    HOMEBREW_CORE_GIT_REMOTE: 'https://mirrors.tuna.tsinghua.edu.cn/git/homebrew/homebrew-core.git',
+    PIP_INDEX_URL: 'https://pypi.tuna.tsinghua.edu.cn/simple',
+    npm_config_registry: 'https://registry.npmmirror.com',
+  }
+}
+
 function probeVersion(cmd: string, args: string[]): Promise<string | null> {
   return new Promise((resolve) => {
-    const p = execFile(cmd, args, { timeout: 8000 }, (err, stdout, stderr) => {
+    const p = execFile(cmd, args, { timeout: 8000, env: envWithFullPath() }, (err, stdout, stderr) => {
       if (err) return resolve(null)
       resolve(String(stdout || stderr).trim().split('\n')[0].slice(0, 80) || '(ok)')
     })
@@ -115,8 +140,9 @@ function probeVersion(cmd: string, args: string[]): Promise<string | null> {
   })
 }
 
-function installCommandFor(tool: string): string | null {
+function installCommandFor(tool: string, mirror: 'default' | 'china'): string | null {
   const platform = process.platform
+  const cn = mirror === 'china'
   const byTool: Record<string, Record<string, string>> = {
     node: {
       linux: 'sudo apt-get install -y nodejs npm',
@@ -134,7 +160,8 @@ function installCommandFor(tool: string): string | null {
       win32: 'winget install Git.Git',
     },
     docker: {
-      linux: 'curl -fsSL https://get.docker.com | sh',
+      // 官方安装脚本原生支持 --mirror Aliyun(中国网络直连 get.docker.com/Docker CDN 极慢)。
+      linux: cn ? 'curl -fsSL https://get.docker.com | sh -s -- --mirror Aliyun' : 'curl -fsSL https://get.docker.com | sh',
       darwin: 'brew install --cask docker',
       win32: 'winget install Docker.DockerDesktop',
     },
@@ -144,6 +171,7 @@ function installCommandFor(tool: string): string | null {
 
 async function runEnvCheck(): Promise<EnvProbe[]> {
   pendingInstallCommands.clear()
+  const mirror = (await loadConfig()).mirror
   const probes: Array<{ tool: string; cmd: string; args: string[] }> = [
     { tool: 'node', cmd: 'node', args: ['--version'] },
     { tool: 'npm', cmd: 'npm', args: ['--version'] },
@@ -155,7 +183,7 @@ async function runEnvCheck(): Promise<EnvProbe[]> {
   for (const p of probes) {
     const version = await probeVersion(p.cmd, p.args)
     // npm 跟随 node 装,无独立安装命令
-    const installCommand = version === null && p.tool !== 'npm' ? installCommandFor(p.tool) : null
+    const installCommand = version === null && p.tool !== 'npm' ? installCommandFor(p.tool, mirror) : null
     let installId: string | null = null
     if (installCommand) {
       installId = `env_${p.tool}_${Date.now().toString(36)}`
@@ -669,8 +697,11 @@ app.whenReady().then(async () => {
     const command = pendingInstallCommands.get(String(installId))
     if (!command) throw new Error('未知安装命令 id(请先重新检测)')
     const wc = e.sender
+    // 补全 PATH(GUI 子进程找得到 brew/winget)+ 中国大陆时注入 brew/pip/npm 镜像 env,
+    // 否则「切了镜像」对引导安装完全不生效(brew bottles/GitHub 直连在国内基本走不通)。
+    const mirrorEnv = (await loadConfig()).mirror === 'china' ? chinaInstallEnv() : {}
     return await new Promise<{ exitCode: number }>((resolve) => {
-      const child = spawn(command, { shell: true })
+      const child = spawn(command, { shell: true, env: envWithFullPath(mirrorEnv) })
       const emit = (line: string): void => {
         if (!wc.isDestroyed()) wc.send('env:output', { installId, line })
       }
@@ -834,12 +865,14 @@ app.whenReady().then(async () => {
     return base
   }
   const MARKET_UA = 'Forsion-Tangu'
-  /** 中国大陆镜像:给 github release/raw 下载地址加代理前缀(TANGU_GITHUB_PROXY 可覆盖)。
-   *  ponytail: gh 代理站点更迭频繁,默认 ghfast.top;失效时改 ~/.tangu/.env 的 TANGU_GITHUB_PROXY 或关镜像。 */
-  const githubMirror = (url: string): string => {
-    if (!/^https:\/\/(github\.com|[^/]*\.githubusercontent\.com)\//.test(url)) return url
-    const prefix = (process.env.TANGU_GITHUB_PROXY || 'https://ghfast.top/').replace(/\/+$/, '')
-    return `${prefix}/${url}`
+  /** 中国大陆镜像:github release/raw 下载的候选地址序列——多代理站依次回退,最后直连兜底
+   *  (gh 代理站点更迭频繁,单点必然间歇性失效;TANGU_GITHUB_PROXY 可指定首选)。非 github 地址原样单发。 */
+  const GH_PROXIES = ['https://ghfast.top', 'https://ghproxy.net', 'https://gh-proxy.com']
+  const githubMirrorCandidates = (url: string): string[] => {
+    if (!/^https:\/\/(github\.com|[^/]*\.githubusercontent\.com)\//.test(url)) return [url]
+    const custom = (process.env.TANGU_GITHUB_PROXY || '').replace(/\/+$/, '')
+    const proxies = custom ? [custom, ...GH_PROXIES.filter((p) => p !== custom)] : GH_PROXIES
+    return [...proxies.map((p) => `${p}/${url}`), url]
   }
 
   ipcMain.handle('market:list', async (_e, type?: string) => {
@@ -864,11 +897,23 @@ app.whenReady().then(async () => {
     const info = (await infoRes.json()) as { type: string; installSlug: string; downloadUrl: string; source: string }
     const sub = MARKET_SUBDIR[info.type]
     if (!sub || !isSafeSlug(info.installSlug)) throw new Error('非法的安装目标')
-    // 中国大陆镜像:github 源(release 资产)下载走代理;zip 源(Forsion 对象存储)本就可达,不改。
+    // 中国大陆镜像:github 源(release 资产)按「多代理 → 直连」序列依次尝试;zip 源(Forsion 对象存储)本就可达,不改。
     const stored = await loadConfig()
-    const dl = stored.mirror === 'china' && info.source === 'github' ? githubMirror(info.downloadUrl) : info.downloadUrl
-    const zipRes = await fetch(dl, { headers: { 'User-Agent': MARKET_UA } })
-    if (!zipRes.ok) throw new Error(`下载失败 HTTP ${zipRes.status}`)
+    const candidates = stored.mirror === 'china' && info.source === 'github'
+      ? githubMirrorCandidates(info.downloadUrl)
+      : [info.downloadUrl]
+    let zipRes: Response | null = null
+    let lastErr = ''
+    for (const dl of candidates) {
+      try {
+        const r = await fetch(dl, { headers: { 'User-Agent': MARKET_UA } })
+        if (r.ok) { zipRes = r; break }
+        lastErr = `HTTP ${r.status}`
+      } catch (e: any) {
+        lastErr = e?.message || String(e)
+      }
+    }
+    if (!zipRes) throw new Error(`下载失败(${candidates.length} 个地址均不可达:${lastErr})`)
     const buf = Buffer.from(await zipRes.arrayBuffer())
     const dest = join(tanguHomeDir(), sub, info.installSlug)
     const files = await extractZipToDir(buf, dest, MARKET_MANIFEST[info.type] || [])

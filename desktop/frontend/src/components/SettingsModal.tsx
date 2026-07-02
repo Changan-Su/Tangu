@@ -750,6 +750,7 @@ export const SettingsModal: React.FC<{
                           </div>
                         </div>
                         <div className="hint" style={{ marginBottom: 10 }}>{t('settings.python.hint')}</div>
+                        <div className="hint" style={{ marginBottom: 10 }}>{t('settings.mirror.hint')}</div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
                           <button className="btn primary sm" onClick={saveManaged}>{t('settings.backend.saveRestart')}</button>
                           <button

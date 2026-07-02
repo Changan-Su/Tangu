@@ -240,6 +240,11 @@ export class BackendManager {
           env.GIT_CONFIG_KEY_0 = 'url.https://gitclone.com/github.com/.insteadOf'
           env.GIT_CONFIG_VALUE_0 = 'https://github.com/'
         }
+        // docker 沙箱基础镜像回落:Docker Hub 直连在国内常拉不动 → 经 DaoCloud 代理拉同一镜像。
+        // 只影响「自建 forsion-agent-sandbox 镜像缺失时的回落源」;用户已 build 自建镜像则无感。
+        if (!env.AGENT_SANDBOX_PYTHON_IMAGE_FALLBACK) {
+          env.AGENT_SANDBOX_PYTHON_IMAGE_FALLBACK = 'docker.m.daocloud.io/library/python:3.12-slim'
+        }
       }
       const child = spawn(cmd, args, {
         env,

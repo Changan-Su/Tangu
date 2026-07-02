@@ -103,6 +103,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
   })
 
   ipcMain.handle(IPC.listPages, () => vault.listPages())
+  ipcMain.handle(IPC.listFiles, () => vault.listFiles())
 
   ipcMain.handle(IPC.loadPage, async (_e, pagePath: string) => {
     const page = await loadPage(vault.pageIO(pagePath), pagePath, nowIso())

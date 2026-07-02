@@ -6,7 +6,7 @@ import { type ReactNode, type DragEvent as RDragEvent, type MouseEvent as RMouse
 import { create } from 'zustand'
 import {
   SquarePen, FolderOpen, Folder, FolderPlus, Plus, MoreHorizontal, Pencil, Trash2,
-  ChevronDown, ChevronRight, Search, Code2, Eye, CalendarDays, Star, History,
+  ChevronDown, ChevronRight, Search, Code2, Eye, CalendarDays, Star, History, Paperclip,
 } from 'lucide-react'
 import { useTheme } from './stores/themeStore'
 import { usePageStore } from '@amadeus/store/pageStore'
@@ -85,7 +85,9 @@ function Breadcrumb() {
 
 // ─────────────────────────────── 左:笔记库(原生 t2s 外壳) ───────────────────────────────
 
-interface Ctx { kind: 'page' | 'folder'; path: string; x: number; y: number }
+interface Ctx { kind: 'page' | 'folder' | 'asset'; path: string; x: number; y: number }
+
+const isNotePath = (p: string): boolean => /\.md$/i.test(p)
 
 /** 收藏⭐ / 最近🕘 分区(顶部,可折叠):渲染对 pages 过滤 → 已删除的自然消失。 */
 function PrefsSections({ row, pages }: { row: (path: string) => ReactNode; pages: string[] }) {
@@ -119,6 +121,7 @@ function PrefsSections({ row, pages }: { row: (path: string) => ReactNode; pages
 export function AmadeusPagesView() {
   const pages = usePageStore((s) => s.pages)
   const folders = usePageStore((s) => s.folders)
+  const files = usePageStore((s) => s.files)
   const activePage = usePageStore((s) => s.activePage)
   const vaultRoot = usePageStore((s) => s.vaultRoot)
 
@@ -161,8 +164,12 @@ export function AmadeusPagesView() {
   useEffect(() => { if (flash) flashRef.current?.scrollIntoView({ block: 'nearest' }) }, [flash])
 
   const q = query.trim().toLowerCase()
-  const tree = useMemo(() => buildTree(pages, folders), [pages, folders]) // 嵌套树:文件夹在前、字母序,空文件夹可见
-  const matches = useMemo(() => (q ? pages.filter((p) => baseName(p).toLowerCase().includes(q)) : []), [q, pages])
+  // 嵌套树:文件夹在前、字母序,空文件夹可见;笔记之外的所有文件(附件/.db/…)也进树,Obsidian 语义。
+  const tree = useMemo(() => buildTree([...pages, ...files], folders), [pages, files, folders])
+  const matches = useMemo(
+    () => (q ? [...pages, ...files].filter((p) => baseName(p).toLowerCase().includes(q)) : []),
+    [q, pages, files],
+  )
 
   const toggle = (f: string): void => setExpanded((prev) => {
     const n = new Set(prev); n.has(f) ? n.delete(f) : n.add(f); return n
@@ -189,14 +196,17 @@ export function AmadeusPagesView() {
     setMenu(null)
   }
 
-  const row = (path: string, depth = 0): ReactNode => (
+  const row = (path: string, depth = 0): ReactNode => {
+    const isNote = isNotePath(path)
+    const ctxKind = isNote ? 'page' : 'asset'
+    return (
     <button
       key={path}
       ref={(el) => { if (path === flash) flashRef.current = el }}
       className={`t2s-srow${path === activePage ? ' active' : ''}${path === flash ? ' amx-flash' : ''}${path === dragPath ? ' dragging' : ''}`}
       style={depth > 0 ? { paddingLeft: 18 + depth * 14 } : undefined}
-      onClick={(e) => void openNote(path, { newTab: e.metaKey || e.ctrlKey })}
-      onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'page', path, x: e.clientX, y: e.clientY }) }}
+      onClick={(e) => { isNote ? void openNote(path, { newTab: e.metaKey || e.ctrlKey }) : void amadeus.openAttachment('', path) }}
+      onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: ctxKind, path, x: e.clientX, y: e.clientY }) }}
       draggable={renaming !== path}
       onDragStart={(e) => {
         // 用元素自身作拖影并按抓取点对齐光标(同会话列表:默认拖影/setState 重渲会让内容与光标错位)。
@@ -219,13 +229,17 @@ export function AmadeusPagesView() {
           onClick={(e) => e.stopPropagation()}
         />
       ) : (
-        <span className="t2s-srow-title">{baseName(path)}</span>
+        <span className="t2s-srow-title">
+          {!isNote && <Paperclip size={11} className="t2s-dim" style={{ marginRight: 5, verticalAlign: -1 }} />}
+          {isNote ? baseName(path) : path.split(/[\\/]/).pop()}
+        </span>
       )}
-      <span className="t2s-srow-menu" onClick={(e) => { e.stopPropagation(); setMenu({ kind: 'page', path, x: e.clientX, y: e.clientY }) }}>
+      <span className="t2s-srow-menu" onClick={(e) => { e.stopPropagation(); setMenu({ kind: ctxKind, path, x: e.clientX, y: e.clientY }) }}>
         <MoreHorizontal size={14} />
       </span>
     </button>
-  )
+    )
+  }
 
   /** 递归渲染树节点(Obsidian 式嵌套):文件夹头 + 展开的子树,均按 depth 缩进。
    *  拖拽时无论是否可落都 stopPropagation,防止事件冒泡让祖先文件夹误抢落点。 */
@@ -339,6 +353,13 @@ export function AmadeusPagesView() {
           </button>
           <button onClick={() => { void amadeus.revealInFileManager(menu.path); setMenu(null) }}><FolderOpen size={13} /> 在文件管理器中显示</button>
           <button className="danger" onClick={() => { const p = menu.path; setMenu(null); if (window.confirm(`删除笔记「${baseName(p)}」?此操作不可撤销。`)) void ps().deletePage(p) }}><Trash2 size={13} /> 删除</button>
+        </div>
+      )}
+      {menu?.kind === 'asset' && (
+        <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
+          <button onClick={() => { void amadeus.openAttachment('', menu.path); setMenu(null) }}><Eye size={13} /> 打开</button>
+          <button onClick={() => { void amadeus.revealInFileManager(menu.path); setMenu(null) }}><FolderOpen size={13} /> 在文件管理器中显示</button>
+          <button className="danger" onClick={() => { const p = menu.path; setMenu(null); if (window.confirm(`删除文件「${p.split(/[\\/]/).pop()}」?此操作不可撤销。`)) void ps().deletePage(p) }}><Trash2 size={13} /> 删除</button>
         </div>
       )}
       {menu?.kind === 'folder' && (
