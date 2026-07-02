@@ -64,6 +64,7 @@ export const discussProvider: ToolProvider = {
             topic,
             context: args.context ? String(args.context) : undefined,
             maxRounds: typeof args.maxRounds === 'number' ? args.maxRounds : undefined,
+            parentSessionId: ctx.sessionId, // Background Session 父链接:子聊天面板经 /background 持久列出
           });
           // 向父 run 流宣告一个「子聊天」(讨论);前端据此在子聊天区建条目并订阅该讨论 run 的事件流。
           if (ctx.runId) void publish(ctx.runId, 'subchat', { kind: 'discussion', id: discId, runId: discId, title: topic.slice(0, 80) });

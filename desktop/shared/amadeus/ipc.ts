@@ -1,5 +1,6 @@
 // The IPC contract shared by main (handlers), preload (bridge), and renderer (consumer).
 import type { LoadedPage, PageManifest } from './compiler/types'
+import type { DbFile } from './db/schema'
 
 export const IPC = {
   openVault: 'vault:open',
@@ -33,6 +34,8 @@ export const IPC = {
   openPluginsFolder: 'plugins:open-folder',
   scaffoldPlugin: 'plugins:scaffold',
   revealInFileManager: 'shell:reveal',
+  dbRead: 'db:read',
+  dbWrite: 'db:write',
 } as const
 
 /** A user plugin discovered under the vault's .amadeus/plugins/ folder. */
@@ -81,6 +84,12 @@ export interface EmbedResolved {
   /** the block's registered type (default "markdown") */
   type: string
 }
+
+/** `db:read` 的结果:错误是数据不是异常(前端按 status 分支渲染,不用 try/catch 猜原因)。 */
+export type DbReadResult =
+  | { status: 'ok'; path: string; data: DbFile } // path = 解析后的 vault 相对路径,后续写回用它
+  | { status: 'missing' }
+  | { status: 'corrupt'; path: string; message: string }
 
 /** A tag and how many notes use it. */
 export interface TagCount {
@@ -173,6 +182,10 @@ export interface AmadeusApi {
   scaffoldSamplePlugin(): Promise<void>
   /** Reveal a vault-relative file/folder in the OS file manager (Finder/Explorer), selecting it. */
   revealInFileManager(targetPath: string): Promise<void>
+  /** 解析 `![[xxx.db]]` 目标(basename 或页相对路径,与附件同一解析语义)并读取数据库。 */
+  readDatabase(pagePath: string, ref: string): Promise<DbReadResult>
+  /** 按 `db:read` 返回的确切 vault 相对路径原子写回(主进程 schema 校验,坏数据拒写)。 */
+  writeDatabase(dbPath: string, data: DbFile): Promise<void>
 }
 
 declare global {

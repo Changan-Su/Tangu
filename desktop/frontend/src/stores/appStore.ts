@@ -193,6 +193,8 @@ export interface AppState {
   refreshSessions(c: TanguDesktopConfig): Promise<SessionRecord[]>
   connect(c: TanguDesktopConfig): Promise<void>
   refreshSpecialEnabled(c: TanguDesktopConfig): Promise<void>
+  /** 把 Background Session(@讨论/Historian 辅助讨论等,经 /background 端点轮询)合并进该会话的子聊天列表。 */
+  mergeBackgroundSubChats(sessionId: string, items: Array<{ runId: string; title: string; status: string }>): void
   boot(): Promise<void>
   refreshAgents(): void
   loadSessionHistory(sessionId: string): Promise<void>
@@ -654,6 +656,27 @@ export const useApp = create<AppState>((set, get) => ({
     } catch {
       set({ specialEnabled: { historian: false, muse: false } })
     }
+  },
+
+  mergeBackgroundSubChats: (sessionId, items) => {
+    if (!items.length) return
+    set((s) => {
+      const list = s.subChatsBySession[sessionId] || []
+      let changed = false
+      const next = [...list]
+      for (const it of items) {
+        const streaming = it.status === 'running' || it.status === 'queued'
+        const idx = next.findIndex((x) => x.id === it.runId)
+        if (idx < 0) {
+          next.push({ id: it.runId, kind: 'discussion', title: it.title, runId: it.runId, streaming, segs: [] })
+          changed = true
+        } else if (next[idx].streaming !== streaming) {
+          next[idx] = { ...next[idx], streaming }
+          changed = true
+        }
+      }
+      return changed ? { subChatsBySession: { ...s.subChatsBySession, [sessionId]: next } } : {}
+    })
   },
 
   refreshAgents: () => {

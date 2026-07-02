@@ -53,6 +53,8 @@ const api: AmadeusApi = {
   openPluginsFolder: () => ipcRenderer.invoke(IPC.openPluginsFolder),
   scaffoldSamplePlugin: () => ipcRenderer.invoke(IPC.scaffoldPlugin),
   revealInFileManager: (targetPath) => ipcRenderer.invoke(IPC.revealInFileManager, targetPath),
+  readDatabase: (pagePath, ref) => ipcRenderer.invoke(IPC.dbRead, pagePath, ref),
+  writeDatabase: (dbPath, data) => ipcRenderer.invoke(IPC.dbWrite, dbPath, data),
 }
 
 contextBridge.exposeInMainWorld('amadeus', api)

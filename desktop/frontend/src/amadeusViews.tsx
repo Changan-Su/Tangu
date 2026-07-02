@@ -5,8 +5,8 @@
 import { type ReactNode, type DragEvent as RDragEvent, type MouseEvent as RMouseEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { create } from 'zustand'
 import {
-  SquarePen, FolderOpen, Folder, FolderPlus, Plus, MoreHorizontal, Pencil, Trash2, FolderInput,
-  FolderSymlink, ChevronDown, ChevronRight, Search, Code2, Eye, CalendarDays, Star, History,
+  SquarePen, FolderOpen, Folder, FolderPlus, Plus, MoreHorizontal, Pencil, Trash2,
+  ChevronDown, ChevronRight, Search, Code2, Eye, CalendarDays, Star, History,
 } from 'lucide-react'
 import { useTheme } from './stores/themeStore'
 import { usePageStore } from '@amadeus/store/pageStore'
@@ -113,7 +113,9 @@ export function AmadeusPagesView() {
   const vaultRoot = usePageStore((s) => s.vaultRoot)
 
   const [query, setQuery] = useState('')
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [expanded, setExpanded] = useState<Set<string>>(new Set()) // 文件夹默认全折叠
+  const [dragPath, setDragPath] = useState<string | null>(null) // 正在拖动的笔记
+  const [dragOver, setDragOver] = useState<string | null>(null) // 悬停的目标文件夹('' = 根)
   const [menu, setMenu] = useState<Ctx | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
@@ -141,7 +143,7 @@ export function AmadeusPagesView() {
   useEffect(() => {
     if (!nav) return
     const open = folders.includes(nav.path) ? nav.path : parentOf(nav.path)
-    if (open) setCollapsed((prev) => { if (!prev.has(open)) return prev; const n = new Set(prev); n.delete(open); return n })
+    if (open) setExpanded((prev) => { if (prev.has(open)) return prev; const n = new Set(prev); n.add(open); return n })
     setFlash(nav.path)
     const t = setTimeout(() => setFlash(null), 1200)
     return () => clearTimeout(t)
@@ -156,9 +158,15 @@ export function AmadeusPagesView() {
   )
   const matches = useMemo(() => (q ? pages.filter((p) => baseName(p).toLowerCase().includes(q)) : []), [q, pages])
 
-  const toggle = (f: string): void => setCollapsed((prev) => {
+  const toggle = (f: string): void => setExpanded((prev) => {
     const n = new Set(prev); n.has(f) ? n.delete(f) : n.add(f); return n
   })
+  /** 拖笔记进文件夹 / 拖回根目录(复用会话列表的 HTML5 drag 模式)。 */
+  const dropTo = (folder: string): void => {
+    if (dragPath && parentOf(dragPath) !== folder) void ps().movePage(dragPath, folder)
+    setDragPath(null)
+    setDragOver(null)
+  }
   const commitRename = (): void => {
     const path = renaming
     setRenaming(null)
@@ -175,9 +183,18 @@ export function AmadeusPagesView() {
     <button
       key={path}
       ref={(el) => { if (path === flash) flashRef.current = el }}
-      className={`t2s-srow${path === activePage ? ' active' : ''}${path === flash ? ' amx-flash' : ''}`}
+      className={`t2s-srow${path === activePage ? ' active' : ''}${path === flash ? ' amx-flash' : ''}${path === dragPath ? ' dragging' : ''}`}
       onClick={(e) => void openNote(path, { newTab: e.metaKey || e.ctrlKey })}
       onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'page', path, x: e.clientX, y: e.clientY }) }}
+      draggable={renaming !== path}
+      onDragStart={(e) => {
+        // 用元素自身作拖影并按抓取点对齐光标(同会话列表:默认拖影/setState 重渲会让内容与光标错位)。
+        const r = e.currentTarget.getBoundingClientRect()
+        e.dataTransfer.setDragImage(e.currentTarget, e.clientX - r.left, e.clientY - r.top)
+        e.dataTransfer.effectAllowed = 'move'
+        setDragPath(path)
+      }}
+      onDragEnd={() => { setDragPath(null); setDragOver(null) }}
       title={path}
     >
       {renaming === path ? (
@@ -207,7 +224,23 @@ export function AmadeusPagesView() {
           <input value={query} placeholder="搜索笔记" onChange={(e) => setQuery(e.target.value)} />
         </div>
 
-        <div className="t2s-scroll">
+        <div
+          className={`t2s-scroll${dragPath && dragOver === '' ? ' amx-drop-root' : ''}`}
+          onDragOver={(e) => {
+            // 根目录落点 = 真空白区。行/组/分区上不 preventDefault → 松手即取消,绝不静默搬到根。
+            if (!dragPath || parentOf(dragPath) === '' || q) return
+            if ((e.target as HTMLElement).closest('.t2s-srow, .t2s-group, .t2s-group-sessions, .t2s-special-group')) return
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+            if (dragOver !== '') setDragOver('')
+          }}
+          onDragLeave={() => { if (dragOver === '') setDragOver(null) }}
+          onDrop={(e) => {
+            if ((e.target as HTMLElement).closest('.t2s-srow, .t2s-group, .t2s-group-sessions, .t2s-special-group')) return
+            e.preventDefault()
+            dropTo('')
+          }}
+        >
           {q ? (
             matches.length ? matches.map(row) : <div className="t2s-hint">没有匹配的笔记</div>
           ) : (
@@ -234,10 +267,22 @@ export function AmadeusPagesView() {
               {rootPages.map(row)}
 
               {groups.map(({ folder, items }) => {
-                const isCol = collapsed.has(folder)
+                const isCol = !expanded.has(folder)
                 return (
                   <div key={folder}>
-                    <div ref={(el) => { if (folder === flash) flashRef.current = el }} className={`t2s-group${folder === flash ? ' amx-flash' : ''}`}>
+                    <div
+                      ref={(el) => { if (folder === flash) flashRef.current = el }}
+                      className={`t2s-group${folder === flash ? ' amx-flash' : ''}${dragPath && dragOver === folder ? ' amx-drop-into' : ''}`}
+                      onDragOver={(e) => {
+                        if (!dragPath || parentOf(dragPath) === folder) return
+                        e.preventDefault()
+                        e.stopPropagation()
+                        e.dataTransfer.dropEffect = 'move'
+                        if (dragOver !== folder) setDragOver(folder)
+                      }}
+                      onDragLeave={() => { if (dragOver === folder) setDragOver(null) }}
+                      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); dropTo(folder) }}
+                    >
                       <button className="t2s-group-toggle" onClick={() => toggle(folder)}>
                         <span className="t2s-chev">{isCol ? <ChevronRight size={12} /> : <ChevronDown size={12} />}</span>
                         <span className="t2s-group-name"><Folder size={12} /><span className="t2s-group-label">{folderName(folder)}</span><span className="t2s-count">{items.length}</span></span>
@@ -245,7 +290,23 @@ export function AmadeusPagesView() {
                       <button className="t2s-group-add" title="在此文件夹新建笔记" onClick={() => void ps().createPageInFolder(folder)}><Plus size={14} /></button>
                       <button className="t2s-group-add" title="文件夹操作" onClick={(e) => { e.stopPropagation(); setMenu({ kind: 'folder', path: folder, x: e.clientX, y: e.clientY }) }}><MoreHorizontal size={14} /></button>
                     </div>
-                    {!isCol && <div className="t2s-group-sessions">{items.map(row)}</div>}
+                    {/* 展开的文件夹内部(含其中的笔记行)也是该文件夹的落点——与文件管理器语义一致。 */}
+                    {!isCol && (
+                      <div
+                        className={`t2s-group-sessions${dragPath && dragOver === folder ? ' amx-drop-into' : ''}`}
+                        onDragOver={(e) => {
+                          if (!dragPath || parentOf(dragPath) === folder) return
+                          e.preventDefault()
+                          e.stopPropagation()
+                          e.dataTransfer.dropEffect = 'move'
+                          if (dragOver !== folder) setDragOver(folder)
+                        }}
+                        onDragLeave={() => { if (dragOver === folder) setDragOver(null) }}
+                        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); dropTo(folder) }}
+                      >
+                        {items.map(row)}
+                      </div>
+                    )}
                   </div>
                 )
               })}
@@ -263,12 +324,6 @@ export function AmadeusPagesView() {
           <button onClick={() => { useAmadeusPrefs.getState().toggleStar(menu.path); setMenu(null) }}>
             <Star size={13} /> {useAmadeusPrefs.getState().starred.includes(menu.path) ? '取消收藏' : '收藏'}
           </button>
-          {parentOf(menu.path) !== '' && (
-            <button onClick={() => { void ps().movePage(menu.path, ''); setMenu(null) }}><FolderInput size={13} /> 移到根目录</button>
-          )}
-          {folders.filter((f) => f !== parentOf(menu.path)).map((f) => (
-            <button key={f} onClick={() => { void ps().movePage(menu.path, f); setMenu(null) }}><FolderSymlink size={13} /> 移到「{folderName(f)}」</button>
-          ))}
           <button onClick={() => { void amadeus.revealInFileManager(menu.path); setMenu(null) }}><FolderOpen size={13} /> 在文件管理器中显示</button>
           <button className="danger" onClick={() => { const p = menu.path; setMenu(null); if (window.confirm(`删除笔记「${baseName(p)}」?此操作不可撤销。`)) void ps().deletePage(p) }}><Trash2 size={13} /> 删除</button>
         </div>

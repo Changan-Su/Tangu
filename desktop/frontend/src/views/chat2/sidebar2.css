@@ -19,6 +19,9 @@
 .t2s-side button,
 .t2s-side input,
 .t2s-side [draggable='true'] { -webkit-app-region: no-drag; }
+/* 滚动视口整块 no-drag:拖窗区会吞滚轮/hover,行间空隙、组头落在 drag 区时列表滚不动。
+ * 拖窗保留在侧栏头部(品牌/tab 条)空白。 */
+.t2s-side .t2s-scroll { -webkit-app-region: no-drag; }
 
 /* 品牌 */
 .t2s-brand {

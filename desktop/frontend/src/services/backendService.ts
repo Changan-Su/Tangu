@@ -85,6 +85,20 @@ export const branchSession = (cfg: TanguDesktopConfig, sessionId: string, messag
     { method: 'POST', body: JSON.stringify({ message_id: messageId, ...(title ? { title } : {}) }) },
   ).then((r) => r.session)
 
+/** 某会话名下的 Background Session(@讨论 / Historian 辅助讨论等隐藏子会话,含最新 run 供回放)。 */
+export interface BackgroundSessionInfo {
+  sessionId: string
+  kind: string
+  title: string | null
+  createdAt: string
+  runId: string | null
+  runStatus: string | null
+}
+export const getBackgroundSessions = (cfg: TanguDesktopConfig, sessionId: string) =>
+  request<{ background: BackgroundSessionInfo[] }>(
+    cfg, `/agent/sessions/${encodeURIComponent(sessionId)}/background`,
+  ).then((r) => r.background)
+
 export const listMessages = (cfg: TanguDesktopConfig, sessionId: string, limit = 200) =>
   request<{ messages: MessageRecord[] }>(
     cfg, `/agent/sessions/${encodeURIComponent(sessionId)}/messages?limit=${limit}`,
@@ -381,6 +395,7 @@ export const saveSpecialConfig = (cfg: TanguDesktopConfig, patch: Partial<Specia
 
 export const getHistorianActivity = (cfg: TanguDesktopConfig, limit = 50) =>
   request<{ activity: HistorianActivityItem[] }>(cfg, `/agent/special/historian/activity?limit=${limit}`).then((r) => r.activity)
+
 
 export const getMuseTodos = (cfg: TanguDesktopConfig, status?: string) =>
   request<{ todos: MuseTodo[] }>(cfg, `/agent/special/muse/todos${status ? `?status=${encodeURIComponent(status)}` : ''}`).then((r) => r.todos)

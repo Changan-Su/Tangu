@@ -38,6 +38,8 @@ export interface StartDiscussionParams {
   context?: string;
   /** 讨论深度(轮数;默认 7,封顶 30,投票可提前结束)。 */
   maxRounds?: number;
+  /** Background Session 父链接:发起讨论的主会话 id(右栏「子聊天」经 /background 端点持久列出)。 */
+  parentSessionId?: string;
 }
 
 function isTerminal(status: string): boolean {
@@ -71,11 +73,12 @@ export async function startDiscussion(p: StartDiscussionParams): Promise<string>
   if (peerSlug === selfSlug) throw new Error('cannot start a discussion with yourself');
 
   // 独立讨论 session(kind='discussion' → 不进用户会话列表;独立 → 不排主 run 的队)。
+  // parent_session_id 指回主会话 → 子聊天面板经 /background 端点持久可见(reload 后仍能列出/回放)。
   const sessionId = uuidv4();
   const title = `讨论:${p.topic.slice(0, 60)}`;
   await query(
-    `INSERT INTO chat_sessions (id, user_id, app_id, title, model_id, kind) VALUES (?, ?, ?, ?, ?, 'discussion')`,
-    [sessionId, p.userId, p.appId, title, p.modelId],
+    `INSERT INTO chat_sessions (id, user_id, app_id, title, model_id, kind, parent_session_id) VALUES (?, ?, ?, ?, ?, 'discussion', ?)`,
+    [sessionId, p.userId, p.appId, title, p.modelId, p.parentSessionId || null],
   );
 
   const runId = uuidv4();

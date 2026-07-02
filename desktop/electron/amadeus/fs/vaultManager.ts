@@ -86,6 +86,11 @@ export class VaultManager {
     this.lastWritten.set(abs, data)
   }
 
+  /** Write a UTF-8 text file at a vault-relative path (clamped + atomic;供 .db 等非页面文件写回)。 */
+  async writeTextFile(rel: string, text: string): Promise<void> {
+    await this.atomicWrite(this.resolveInVault(rel), text)
+  }
+
   /** Write a binary asset under the page's .amadeus/ folder; returns its page-relative path. */
   async writeAsset(pagePath: string, fileName: string, bytes: Uint8Array): Promise<string> {
     const root = this.requireRoot()

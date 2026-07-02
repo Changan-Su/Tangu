@@ -340,6 +340,7 @@ async function startAssistDiscussion(opts: {
       title: `记忆维护:${String(sk.title || '').slice(0, 40) || sessionId.slice(0, 8)}`,
       kind: 'discussion',
       lastN: 30,
+      parentSessionId: sessionId, // Background Session 父链接:子聊天面板经 /background 端点持久列出
     });
     if (!branch) return null;
 

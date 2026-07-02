@@ -13,19 +13,21 @@ interface Props {
   getPageNames: () => string[]
   onPick: (name: string) => void
   onClose: () => void
+  /** false = 不提供「新建链接」行(@ 提及场景:无匹配即整体消失,不劫持 Enter)。 */
+  allowCreate?: boolean
 }
 
 function baseName(p: string): string {
   return (p.split(/[\\/]/).pop() ?? p).replace(/\.md$/i, '')
 }
 
-export function WikiSuggest({ query, left, top, getPageNames, onPick, onClose }: Props) {
+export function WikiSuggest({ query, left, top, getPageNames, onPick, onClose, allowCreate = true }: Props) {
   const [active, setActive] = useState(0)
 
   const names = Array.from(new Set(getPageNames().map(baseName)))
   const results = fuzzyRank(query, names, (n) => n).slice(0, 8)
   const q = query.trim()
-  const showCreate = q.length > 0 && !names.some((n) => pageKey(n) === pageKey(q))
+  const showCreate = allowCreate && q.length > 0 && !names.some((n) => pageKey(n) === pageKey(q))
   const total = results.length + (showCreate ? 1 : 0)
 
   useEffect(() => {

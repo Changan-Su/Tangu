@@ -26,6 +26,8 @@ export interface BranchSessionInput {
   kind?: string;
   /** 只继承分支点前最近 N 条消息(缺省全量);后台讨论用轻量窗口,避免长会话整表复制。 */
   lastN?: number;
+  /** Background Session 父链接:指回来源会话(右栏「子聊天」经 /background 端点持久列出)。缺省 null。 */
+  parentSessionId?: string;
 }
 
 /**
@@ -33,7 +35,7 @@ export interface BranchSessionInput {
  * 返回 { id, copied } 或 null(源会话不存在/非本人本 app,或 messageId 不属于该会话)。
  */
 export async function branchSession(input: BranchSessionInput): Promise<{ id: string; copied: number } | null> {
-  const { sourceSessionId, userId, appId, messageId, title, kind, lastN } = input;
+  const { sourceSessionId, userId, appId, messageId, title, kind, lastN, parentSessionId } = input;
 
   // 1) 源会话 + owner/app 校验
   const srcRows = await query<any[]>(
@@ -56,10 +58,10 @@ export async function branchSession(input: BranchSessionInput): Promise<{ id: st
   const newId = uuidv4();
   const newTitle = (typeof title === 'string' && title.trim() ? title.trim() : (src.title || 'New Chat')).slice(0, 200);
   await query(
-    `INSERT INTO chat_sessions (id, user_id, app_id, title, model_id, emoji, agent_config, project_path, project_name, kind)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO chat_sessions (id, user_id, app_id, title, model_id, emoji, agent_config, project_path, project_name, kind, parent_session_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [newId, userId, appId, newTitle, src.model_id, src.emoji,
-     asJsonText(src.agent_config), src.project_path, src.project_name, kind || 'user'],
+     asJsonText(src.agent_config), src.project_path, src.project_name, kind || 'user', parentSessionId || null],
   );
 
   // 4) 复制 timestamp <= 分支点 的消息:新 uuid,保留原 timestamp 与全部字段(lastN → 只取最近 N 条)

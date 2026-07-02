@@ -1,7 +1,8 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { ipcMain, shell, type BrowserWindow } from 'electron'
-import { IPC, type ExternalPluginSource } from '@amadeus-shared/ipc'
+import { IPC, type DbReadResult, type ExternalPluginSource } from '@amadeus-shared/ipc'
+import { dbFileSchema, parseDb, serializeDb } from '@amadeus-shared/db/schema'
 import { loadPage, newPage, pageFileName, savePage } from '@amadeus-shared/compiler'
 import type { PageManifest } from '@amadeus-shared/compiler'
 import { VaultManager } from './fs/vaultManager'
@@ -186,6 +187,30 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
   ipcMain.handle(IPC.openAttachment, async (_e, pagePath: string, ref: string) => {
     const abs = await vault.resolveAttachment(pagePath, ref)
     if (abs) await shell.openPath(abs)
+  })
+
+  // Database(.db JSON):read 按 ref 解析(与附件同一 basename 语义),write 按 read 返回的精确相对路径。
+  ipcMain.handle(IPC.dbRead, async (_e, pagePath: string, ref: string): Promise<DbReadResult> => {
+    const abs = await vault.resolveAttachment(pagePath, ref)
+    if (!abs) return { status: 'missing' }
+    const root = vault.getRoot()
+    if (!root) return { status: 'missing' }
+    const rel = path.relative(root, abs)
+    let text: string
+    try {
+      text = await fs.readFile(abs, 'utf8')
+    } catch {
+      return { status: 'missing' }
+    }
+    const r = parseDb(text)
+    return r.ok
+      ? { status: 'ok', path: rel, data: r.data }
+      : { status: 'corrupt', path: rel, message: r.error }
+  })
+
+  ipcMain.handle(IPC.dbWrite, async (_e, dbPath: string, data: unknown) => {
+    const parsed = dbFileSchema.parse(data) // 防御性校验:坏数据拒写,绝不落半截文件
+    await vault.writeTextFile(dbPath, serializeDb(parsed))
   })
 
   ipcMain.handle(IPC.search, (_e, query: string) => index.search(query))

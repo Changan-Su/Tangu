@@ -165,10 +165,14 @@ export async function runMigration(): Promise<void> {
       `ALTER TABLE chat_messages ADD COLUMN attachments JSONB`,
       `ALTER TABLE chat_messages ADD COLUMN display_files JSONB`,
       `ALTER TABLE chat_messages ADD COLUMN agent_slug VARCHAR(64)`,
+      // Background Session 父链接:@讨论 / Historian 辅助讨论等隐藏子会话指回其来源会话,
+      // 供 GET /agent/sessions/:id/background(右栏「子聊天」)持久列出。
+      `ALTER TABLE chat_sessions ADD COLUMN parent_session_id VARCHAR(36)`,
     ]) {
       try { await query(sql); }
       catch { /* 列已存在 */ }
     }
+    await query(`CREATE INDEX IF NOT EXISTS idx_chat_sessions_parent ON chat_sessions(parent_session_id)`);
     console.log('✅ [agent-core] migrations done (sqlite：base schema 已含全部列)');
     return;
   }
@@ -207,6 +211,14 @@ export async function runMigration(): Promise<void> {
     await query(`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS kind VARCHAR(16) NOT NULL DEFAULT 'user'`);
   } catch (e: any) {
     console.warn('[agent-core] chat_sessions.kind 列迁移失败：', e?.message || e);
+  }
+
+  // Background Session 父链接(@讨论/Historian 辅助讨论等指回来源会话)。幂等。
+  try {
+    await query(`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS parent_session_id VARCHAR(36)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_chat_sessions_parent ON chat_sessions(parent_session_id)`);
+  } catch (e: any) {
+    console.warn('[agent-core] chat_sessions.parent_session_id 列迁移失败：', e?.message || e);
   }
 
   // 会话级 agent 配置 + emoji（桌面端会话设置;幂等,云端已有同名列时为 no-op）。

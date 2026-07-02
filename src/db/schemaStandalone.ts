@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
   project_name VARCHAR(255),
   historian_last_summary_at TIMESTAMP,
   kind VARCHAR(16) NOT NULL DEFAULT 'user',
+  parent_session_id VARCHAR(36),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

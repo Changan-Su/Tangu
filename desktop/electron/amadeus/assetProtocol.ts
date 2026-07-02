@@ -1,4 +1,5 @@
-// Serves vault image files to the renderer over a custom, vault-clamped protocol:
+// Serves vault asset files (images / pdf / audio / video) to the renderer over a custom,
+// vault-clamped protocol:
 //   amadeus-asset://v/<encoded vault-relative path>
 
 import { promises as fs } from 'node:fs'
@@ -15,6 +16,17 @@ const MIME: Record<string, string> = {
   svg: 'image/svg+xml',
   avif: 'image/avif',
   bmp: 'image/bmp',
+  // 内联预览:PDF 必须给真 MIME(octet-stream 会触发下载而非 Chromium 内置阅读器)。
+  pdf: 'application/pdf',
+  mp4: 'video/mp4',
+  m4v: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  m4a: 'audio/mp4',
+  flac: 'audio/flac',
 }
 
 /** Must run BEFORE app 'ready'. */
@@ -87,8 +99,31 @@ export function registerAssetProtocol(getVaultRoot: () => string | null): void {
       }
     }
     const ext = path.extname(abs).slice(1).toLowerCase()
+    const mime = MIME[ext] ?? 'application/octet-stream'
+
+    // 音视频拖进度条 / PDF 阅读器分页都靠 Range;Chromium 只发单区间,支持 bytes=a-b / a- / -n 三形。
+    // ponytail: 整文件已读进内存再切片,vault 级文件够用;超大视频卡顿再改 fd 区间读。
+    const range = request.headers.get('range')
+    const m = range ? /^bytes=(\d*)-(\d*)$/.exec(range.trim()) : null
+    if (m && (m[1] !== '' || m[2] !== '')) {
+      const size = data.byteLength
+      let start = m[1] === '' ? size - Number(m[2]) : Number(m[1])
+      const end = Math.min(m[1] !== '' && m[2] !== '' ? Number(m[2]) : size - 1, size - 1)
+      start = Math.max(0, start)
+      if (start > end || start >= size) {
+        return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } })
+      }
+      return new Response(new Uint8Array(data.subarray(start, end + 1)), {
+        status: 206,
+        headers: {
+          'Content-Type': mime,
+          'Content-Range': `bytes ${start}-${end}/${size}`,
+          'Accept-Ranges': 'bytes',
+        },
+      })
+    }
     return new Response(new Uint8Array(data), {
-      headers: { 'Content-Type': MIME[ext] ?? 'application/octet-stream' },
+      headers: { 'Content-Type': mime, 'Accept-Ranges': 'bytes' },
     })
   })
 }

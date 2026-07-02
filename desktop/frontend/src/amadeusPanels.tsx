@@ -1,5 +1,5 @@
 /** Amadeus 侧栏面板(Tangu 原生 amx- 外观,只复用 vendored 组件的逻辑):全文搜索 / 标签 / 局部关系图。 */
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { Search } from 'lucide-react'
 import { usePageStore } from '@amadeus/store/pageStore'
 import { amadeus } from '@amadeus/api'
@@ -141,47 +141,47 @@ export function AmadeusTagsView() {
 
 // ─────────────────────────────── 局部关系图(右栏 tab;当前笔记的出/入链) ───────────────────────────────
 
-interface GNode { path: string; label: string; center: boolean; x: number; y: number; vx: number; vy: number }
+interface GNode { path: string; label: string; center: boolean; x: number; y: number; vx: number; vy: number; pinned: boolean }
 interface GEdge { a: number; b: number }
 
 const W = 320
 const H = 280
+const clampN = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v))
 
-/** 手写微型力导向(斥力 + 弹簧 + 向心,~300 tick 收敛后停):节点少(局部图),无需依赖。 */
-function simulate(nodes: GNode[], edges: GEdge[], ticks: number): void {
+/** 单帧力仿真(斥力 + 弹簧 + 向心;力随 alpha 降温):rAF 逐帧驱动,拖拽/换页时升温。
+ *  力常数沿用旧一次性版;alpha≈0.5 时与旧版单 tick 等效。pinned 节点(中心/被拖)位置外部控制。 */
+function step(nodes: GNode[], edges: GEdge[], alpha: number): void {
   const cx = W / 2
   const cy = H / 2
-  for (let t = 0; t < ticks; t++) {
-    for (let i = 0; i < nodes.length; i++) {
-      const n = nodes[i]
-      if (n.center) continue
-      let fx = (cx - n.x) * 0.005 // 向心
-      let fy = (cy - n.y) * 0.005
-      for (let j = 0; j < nodes.length; j++) {
-        if (i === j) continue
-        const o = nodes[j]
-        const dx = n.x - o.x
-        const dy = n.y - o.y
-        const d2 = Math.max(64, dx * dx + dy * dy)
-        const f = 1400 / d2 // 斥力
-        fx += (dx / Math.sqrt(d2)) * f
-        fy += (dy / Math.sqrt(d2)) * f
-      }
-      for (const e of edges) {
-        if (e.a !== i && e.b !== i) continue
-        const o = nodes[e.a === i ? e.b : e.a]
-        const dx = o.x - n.x
-        const dy = o.y - n.y
-        const d = Math.max(1, Math.hypot(dx, dy))
-        const f = (d - 86) * 0.02 // 弹簧,静止长 86
-        fx += (dx / d) * f
-        fy += (dy / d) * f
-      }
-      n.vx = (n.vx + fx) * 0.82 // 阻尼
-      n.vy = (n.vy + fy) * 0.82
-      n.x = Math.min(W - 16, Math.max(16, n.x + n.vx))
-      n.y = Math.min(H - 16, Math.max(16, n.y + n.vy))
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i]
+    if (n.pinned) continue
+    let fx = (cx - n.x) * 0.005 // 向心
+    let fy = (cy - n.y) * 0.005
+    for (let j = 0; j < nodes.length; j++) {
+      if (i === j) continue
+      const o = nodes[j]
+      const dx = n.x - o.x
+      const dy = n.y - o.y
+      const d2 = Math.max(64, dx * dx + dy * dy)
+      const f = 1400 / d2 // 斥力
+      fx += (dx / Math.sqrt(d2)) * f
+      fy += (dy / Math.sqrt(d2)) * f
     }
+    for (const e of edges) {
+      if (e.a !== i && e.b !== i) continue
+      const o = nodes[e.a === i ? e.b : e.a]
+      const dx = o.x - n.x
+      const dy = o.y - n.y
+      const d = Math.max(1, Math.hypot(dx, dy))
+      const f = (d - 86) * 0.02 // 弹簧,静止长 86
+      fx += (dx / d) * f
+      fy += (dy / d) * f
+    }
+    n.vx = (n.vx + fx * alpha * 2) * 0.82 // 阻尼
+    n.vy = (n.vy + fy * alpha * 2) * 0.82
+    n.x = clampN(n.x + n.vx, 16, W - 16)
+    n.y = clampN(n.y + n.vy, 16, H - 16)
   }
 }
 
@@ -189,10 +189,51 @@ export function AmadeusLocalGraphView() {
   const activePage = usePageStore((s) => s.activePage)
   const version = usePageStore((s) => s.linkGraphVersion)
   const [graph, setGraph] = useState<{ nodes: GNode[]; edges: GEdge[] } | null>(null)
+  const [, setFrame] = useState(0) // 仿真帧计数:节点位置就地突变,靠它触发重渲
+  const [hover, setHover] = useState<number | null>(null)
+  const [view, setView] = useState({ x: 0, y: 0, k: 1 }) // pan/zoom(viewBox 坐标系)
+  const svgRef = useRef<SVGSVGElement | null>(null)
+  const graphRef = useRef(graph)
+  graphRef.current = graph
+  const viewRef = useRef(view)
+  viewRef.current = view
+  const simRef = useRef({ alpha: 0, raf: 0, dragging: false })
+  const movedRef = useRef(false) // 拖过就抑制 click 跳转
+
+  const ensureLoop = (): void => {
+    if (simRef.current.raf) return
+    const loop = (): void => {
+      const g = graphRef.current
+      const s = simRef.current
+      if (!g) { s.raf = 0; return }
+      step(g.nodes, g.edges, s.alpha)
+      if (!s.dragging) s.alpha -= 0.006 // 冷却 ~2.5s;静止后停帧省电
+      setFrame((f) => f + 1)
+      if (s.alpha > 0.02 || s.dragging) s.raf = requestAnimationFrame(loop)
+      else s.raf = 0
+    }
+    simRef.current.raf = requestAnimationFrame(loop)
+  }
+  useEffect(() => () => { if (simRef.current.raf) cancelAnimationFrame(simRef.current.raf) }, [])
+
+  /** 屏幕坐标 → svg viewBox 坐标(未去 pan/zoom)。 */
+  const toLocal = (clientX: number, clientY: number): { x: number; y: number } | null => {
+    const ctm = svgRef.current?.getScreenCTM()
+    if (!ctm) return null
+    const p = new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse())
+    return { x: p.x, y: p.y }
+  }
+  /** 屏幕坐标 → 世界坐标(去掉 pan/zoom,即节点坐标系)。 */
+  const toWorld = (clientX: number, clientY: number): { x: number; y: number } | null => {
+    const p = toLocal(clientX, clientY)
+    if (!p) return null
+    const v = viewRef.current
+    return { x: (p.x - v.x) / v.k, y: (p.y - v.y) / v.k }
+  }
 
   useEffect(() => {
     let live = true
-    if (!activePage) { setGraph(null); return }
+    if (!activePage) { setGraph(null); graphRef.current = null; return }
     void (async () => {
       const incoming = await amadeus.backlinks(activePage).catch(() => [])
       if (!live) return
@@ -205,10 +246,10 @@ export function AmadeusLocalGraphView() {
       )]
       const others = [...new Set([...outs, ...incoming.map((r) => r.path).filter((p) => p !== activePage)])]
       const nodes: GNode[] = [
-        { path: activePage, label: baseName(activePage), center: true, x: W / 2, y: H / 2, vx: 0, vy: 0 },
+        { path: activePage, label: baseName(activePage), center: true, x: W / 2, y: H / 2, vx: 0, vy: 0, pinned: true },
         ...others.map((p, i) => {
           const ang = (i / Math.max(1, others.length)) * Math.PI * 2
-          return { path: p, label: baseName(p), center: false, x: W / 2 + Math.cos(ang) * 90, y: H / 2 + Math.sin(ang) * 90, vx: 0, vy: 0 }
+          return { path: p, label: baseName(p), center: false, x: W / 2 + Math.cos(ang) * 90, y: H / 2 + Math.sin(ang) * 90, vx: 0, vy: 0, pinned: false }
         }),
       ]
       const idx = new Map(nodes.map((n, i) => [n.path, i]))
@@ -220,35 +261,131 @@ export function AmadeusLocalGraphView() {
         seen.add(p)
         edges.push({ a: 0, b })
       }
-      simulate(nodes, edges, 300)
-      if (live) setGraph({ nodes, edges })
+      if (!live) return
+      const g = { nodes, edges }
+      graphRef.current = g
+      setGraph(g)
+      setHover(null)
+      simRef.current.alpha = 1 // 从初始圆环动画展开
+      ensureLoop()
     })()
     return () => { live = false }
   }, [activePage, version])
+
+  /** 节点拖拽:pin 住跟随指针 + 升温(斥力推开邻居);松手叶子解 pin 回弹,中心留在原地。 */
+  const onNodePointerDown = (i: number) => (e: ReactPointerEvent): void => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    const g = graphRef.current
+    if (!g) return
+    const n = g.nodes[i]
+    const wasPinned = n.pinned
+    n.pinned = true
+    movedRef.current = false
+    simRef.current.dragging = true
+    simRef.current.alpha = Math.max(simRef.current.alpha, 0.6)
+    ensureLoop()
+    const move = (ev: PointerEvent): void => {
+      const p = toWorld(ev.clientX, ev.clientY)
+      if (!p) return
+      movedRef.current = true
+      n.x = clampN(p.x, 16, W - 16)
+      n.y = clampN(p.y, 16, H - 16)
+      n.vx = 0
+      n.vy = 0
+      simRef.current.alpha = Math.max(simRef.current.alpha, 0.6)
+    }
+    const up = (): void => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      n.pinned = wasPinned
+      simRef.current.dragging = false
+      simRef.current.alpha = Math.max(simRef.current.alpha, 0.5)
+      ensureLoop()
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
+  /** 拖空白处平移画布。 */
+  const onBgPointerDown = (e: ReactPointerEvent<SVGSVGElement>): void => {
+    if (e.button !== 0 || e.target !== e.currentTarget) return
+    const start = toLocal(e.clientX, e.clientY)
+    if (!start) return
+    const v0 = viewRef.current
+    const move = (ev: PointerEvent): void => {
+      const p = toLocal(ev.clientX, ev.clientY)
+      if (p) setView({ k: v0.k, x: v0.x + (p.x - start.x), y: v0.y + (p.y - start.y) })
+    }
+    const up = (): void => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
+  // 滚轮缩放(以指针为焦点)。原生监听:React 的 onWheel 走 passive,preventDefault 不生效。
+  const hasGraph = !!graph && graph.nodes.length > 1
+  useEffect(() => {
+    const svg = svgRef.current
+    if (!svg || !hasGraph) return
+    const onWheel = (e: WheelEvent): void => {
+      e.preventDefault()
+      const p = toLocal(e.clientX, e.clientY)
+      if (!p) return
+      const v = viewRef.current
+      const k = clampN(v.k * Math.exp(-e.deltaY * 0.0022), 0.4, 3)
+      const wx = (p.x - v.x) / v.k
+      const wy = (p.y - v.y) / v.k
+      setView({ k, x: p.x - wx * k, y: p.y - wy * k })
+    }
+    svg.addEventListener('wheel', onWheel, { passive: false })
+    return () => svg.removeEventListener('wheel', onWheel)
+  }, [hasGraph])
 
   return (
     <div className="amx-panel">
       <div className="amx-panel-head">关系图 · 当前笔记</div>
       {!activePage ? (
         <div className="amx-panel-empty">未打开笔记</div>
-      ) : !graph || graph.nodes.length <= 1 ? (
+      ) : !graph || !hasGraph ? (
         <div className="amx-panel-empty">这篇笔记还没有链接(出链 [[…]] 或反链)。</div>
       ) : (
-        <svg className="amx-graph" viewBox={`0 0 ${W} ${H}`}>
-          {graph.edges.map((e, i) => (
-            <line
-              key={i}
-              x1={graph.nodes[e.a].x} y1={graph.nodes[e.a].y}
-              x2={graph.nodes[e.b].x} y2={graph.nodes[e.b].y}
-              className="amx-graph-edge"
-            />
-          ))}
-          {graph.nodes.map((n) => (
-            <g key={n.path} className={`amx-graph-node${n.center ? ' center' : ''}`} onClick={() => { if (!n.center) void openNote(n.path) }}>
-              <circle cx={n.x} cy={n.y} r={n.center ? 8 : 5.5} />
-              <text x={n.x} y={n.y + (n.center ? 20 : 16)} textAnchor="middle">{n.label.length > 12 ? `${n.label.slice(0, 12)}…` : n.label}</text>
-            </g>
-          ))}
+        <svg
+          ref={svgRef}
+          className="amx-graph"
+          viewBox={`0 0 ${W} ${H}`}
+          onPointerDown={onBgPointerDown}
+          onDoubleClick={() => setView({ x: 0, y: 0, k: 1 })}
+        >
+          <g transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
+            {graph.edges.map((e, i) => (
+              <line
+                key={i}
+                x1={graph.nodes[e.a].x} y1={graph.nodes[e.a].y}
+                x2={graph.nodes[e.b].x} y2={graph.nodes[e.b].y}
+                className={`amx-graph-edge${hover !== null ? (e.a === hover || e.b === hover ? ' hl' : ' dim') : ''}`}
+              />
+            ))}
+            {graph.nodes.map((n, i) => {
+              const lit = hover === null || i === hover
+                || graph.edges.some((e) => (e.a === hover && e.b === i) || (e.b === hover && e.a === i))
+              return (
+                <g
+                  key={n.path}
+                  className={`amx-graph-node${n.center ? ' center' : ''}${hover !== null ? (lit ? ' hl' : ' dim') : ''}`}
+                  onPointerDown={onNodePointerDown(i)}
+                  onPointerEnter={() => setHover(i)}
+                  onPointerLeave={() => setHover(null)}
+                  onClick={() => { if (!movedRef.current && !n.center) void openNote(n.path) }}
+                >
+                  <circle cx={n.x} cy={n.y} r={n.center ? 8 : 5.5} />
+                  <text x={n.x} y={n.y + (n.center ? 20 : 16)} textAnchor="middle">{n.label.length > 12 ? `${n.label.slice(0, 12)}…` : n.label}</text>
+                </g>
+              )
+            })}
+          </g>
         </svg>
       )}
     </div>

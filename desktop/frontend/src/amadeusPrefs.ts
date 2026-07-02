@@ -2,6 +2,7 @@
  *  ponytail: 重命名/移动不做路径重映射(条目失效即自动隐藏),需要时再补 remap。 */
 import { create } from 'zustand'
 import { usePageStore } from '@amadeus/store/pageStore'
+import { setRecentsProvider } from '@amadeus/lib/recents'
 
 interface Prefs { starred: string[]; recents: string[] }
 interface PrefsState extends Prefs {
@@ -53,3 +54,6 @@ usePageStore.subscribe((s, p) => {
   if (s.vaultRoot !== p.vaultRoot) useAmadeusPrefs.setState(load())
   if (s.activePage && s.activePage !== p.activePage) useAmadeusPrefs.getState().pushRecent(s.activePage)
 })
+
+// 供 vendored 层(@ 提及的候选排序)取「最近打开」,不倒转依赖方向。
+setRecentsProvider(() => useAmadeusPrefs.getState().recents)

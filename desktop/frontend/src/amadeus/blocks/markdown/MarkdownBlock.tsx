@@ -33,13 +33,15 @@ import { Plugin, Selection } from '@milkdown/kit/prose/state'
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view'
 import { Milkdown, MilkdownProvider, useEditor, useInstance } from '@milkdown/react'
 import { joinRel, toAssetUrl, toDisplayMarkdown, toStoredMarkdown } from '@amadeus-shared/assets'
+import { emptyDb, serializeDb } from '@amadeus-shared/db/schema'
 import { amadeus } from '../../api'
 import { getAttachmentPrefs } from '../../lib/attachments'
 import { usePageStore } from '../../store/pageStore'
 import { registerBlockType, type BlockEditorProps, type FocusPlace } from '../registry'
 import { usePluginStore } from '../../plugins/pluginStore'
 import { wikilinkPlugin } from './wikilink'
-import { wikiSuggestPlugin, type WikiQuery } from './wikiAutocomplete'
+import { mentionSuggestPlugin, wikiSuggestPlugin, type WikiQuery } from './wikiAutocomplete'
+import { getRecentPages } from '../../lib/recents'
 import { WikiSuggest } from './WikiSuggest'
 import { taskCheckboxPlugin } from './taskList'
 import { calloutPlugin } from './callout'
@@ -53,6 +55,7 @@ const EMBED_SENTINEL = '\u0000__amadeus_embed__'
 const TEMPLATE_SENTINEL = '\u0000__amadeus_template__'
 const IMAGE_SENTINEL = '\u0000__amadeus_image__'
 const COLUMN_SENTINEL = '\u0000__amadeus_column__'
+const DATABASE_SENTINEL = '\u0000__amadeus_database__'
 
 interface BlockKeys {
   insertAfter(content?: string): void
@@ -93,6 +96,7 @@ function MilkdownInner({
   onChange,
   keys,
   saveImage,
+  saveFiles,
   onOpenWiki,
   getPageNames,
   focusPlace,
@@ -103,6 +107,7 @@ function MilkdownInner({
   onChange: (md: string) => void
   keys: BlockKeys
   saveImage: (file: File) => Promise<string | null>
+  saveFiles: (files: File[]) => Promise<void>
   onOpenWiki: (name: string) => void
   getPageNames: () => string[]
   focusPlace: FocusPlace | null
@@ -114,9 +119,17 @@ function MilkdownInner({
   keysRef.current = keys
   const saveImageRef = useRef(saveImage)
   saveImageRef.current = saveImage
+  const saveFilesRef = useRef(saveFiles)
+  saveFilesRef.current = saveFiles
   const wikiRef = useRef(onOpenWiki)
   wikiRef.current = onOpenWiki
   const [wiki, setWiki] = useState<WikiQuery | null>(null)
+  const [mention, setMention] = useState<WikiQuery | null>(null) // "@" 提及页面
+  // Esc 闩锁:记住被关掉的那个 '@' 锚点,同锚点不再弹(否则下一击键 plugin 又 report → 关不掉)。
+  const mentionDismissedFrom = useRef<number | null>(null)
+  // handleKeyDown 闭包只建一次读不到 state → 用 ref 镜像弹窗开启态,供 '/' 分支避让。
+  const wikiOpenRef = useRef(false)
+  const mentionOpenRef = useRef(false)
   const [loading, getInstance] = useInstance()
 
   useEditor((root) => {
@@ -161,6 +174,8 @@ function MilkdownInner({
         return false
       }
       if (event.key === '/' && sel.empty) {
+        // [[ / @ 弹窗开着时 '/' 是查询字符,不叠开 SlashMenu(否则一次 Enter 触发两个菜单)。
+        if (wikiOpenRef.current || mentionOpenRef.current) return false
         const before = state.doc.textBetween(Math.max(0, sel.from - 1), sel.from)
         if (state.doc.textContent === '' || before === '' || before === ' ' || before === ' ') {
           keysRef.current.slash()
@@ -179,9 +194,16 @@ function MilkdownInner({
     }
     const handlePaste = (view: EditorView, event: ClipboardEvent): boolean => {
       const file = imageFromTransfer(event.clipboardData)
-      if (!file) return false
+      if (file) {
+        event.preventDefault()
+        void insertImage(view, file)
+        return true
+      }
+      // 非图片文件(PDF/压缩包/音视频…):存为附件 → 独立 ![[base]] 嵌入块(与拖入同形态)。
+      const files = Array.from(event.clipboardData?.files ?? [])
+      if (!files.length) return false
       event.preventDefault()
-      void insertImage(view, file)
+      void saveFilesRef.current(files)
       return true
     }
     // 文件拖入(含图片)统一交给编辑器级附件处理(AmadeusEditorView.onDrop),按笔记设置存放 → 不在块内内联,
@@ -209,7 +231,18 @@ function MilkdownInner({
       .use(listener)
       .use(placeholderPlugin(PLACEHOLDER))
       .use(wikilinkPlugin((name) => wikiRef.current(name)))
-      .use(wikiSuggestPlugin((q) => setWiki(q)))
+      .use(wikiSuggestPlugin((q) => { wikiOpenRef.current = !!q; setWiki(q) }))
+      .use(mentionSuggestPlugin((q) => {
+        if (!q) {
+          mentionDismissedFrom.current = null
+          mentionOpenRef.current = false
+          setMention(null)
+          return
+        }
+        if (mentionDismissedFrom.current === q.from) { mentionOpenRef.current = false; return }
+        mentionOpenRef.current = true
+        setMention(q)
+      }))
       .use(taskCheckboxPlugin())
       .use(calloutPlugin())
   })
@@ -248,10 +281,33 @@ function MilkdownInner({
     setWiki(null)
   }
 
+  // @ 提及:把 "@query"(含 @ 本身)整体替换成 [[name]] 双链。
+  const pickMention = (name: string): void => {
+    const m = mention
+    if (m) {
+      const editor = getInstance()
+      editor?.action((ctx) => {
+        const view = ctx.get(editorViewCtx)
+        view.dispatch(view.state.tr.insertText(`[[${name}]]`, m.from - 1, m.to))
+        view.focus()
+      })
+    }
+    setMention(null)
+  }
+
+  // @ 候选:最近打开的页面排最前(宿主经 setRecentsProvider 注入),其余页面跟后;空查询即按此序展示。
+  const mentionPageNames = (): string[] => {
+    const all = getPageNames()
+    const inVault = new Set(all)
+    const rec = getRecentPages().filter((p) => inVault.has(p))
+    const recSet = new Set(rec)
+    return [...rec, ...all.filter((p) => !recSet.has(p))]
+  }
+
   return (
     <>
       <Milkdown />
-      {wiki && (
+      {wiki && !readOnly && (
         <WikiSuggest
           query={wiki.query}
           left={wiki.left}
@@ -259,6 +315,21 @@ function MilkdownInner({
           getPageNames={getPageNames}
           onPick={pickWiki}
           onClose={() => setWiki(null)}
+        />
+      )}
+      {!wiki && mention && !readOnly && (
+        <WikiSuggest
+          query={mention.query}
+          left={mention.left}
+          top={mention.top}
+          getPageNames={mentionPageNames}
+          onPick={pickMention}
+          allowCreate={false}
+          onClose={() => {
+            mentionDismissedFrom.current = mention.from // Esc:同一 '@' 不再弹
+            mentionOpenRef.current = false
+            setMention(null)
+          }}
         />
       )}
     </>
@@ -315,6 +386,27 @@ export function MarkdownBlock({
     }
   }
 
+  /** 粘贴的非图片文件:逐个存附件,成一串 ![[base]] 嵌入块(保持粘贴顺序)。 */
+  const saveFiles = async (files: File[]): Promise<void> => {
+    if (!pagePath) return
+    const mds: string[] = []
+    for (const f of files) {
+      try {
+        const bytes = new Uint8Array(await f.arrayBuffer())
+        const { opts } = await getAttachmentPrefs()
+        const { base } = await amadeus.saveAttachment(pagePath, f.name || 'file', bytes, opts)
+        mds.push(`![[${base}]]`)
+      } catch { /* 保存失败静默跳过 */ }
+    }
+    if (!mds.length) return
+    if (content.trim() === '') {
+      onChange(mds[0])
+      if (mds.length > 1) usePageStore.getState().insertBlocksAfter(blockId, mds.slice(1))
+    } else {
+      usePageStore.getState().insertBlocksAfter(blockId, mds)
+    }
+  }
+
   const keys: BlockKeys = {
     insertAfter: onInsertAfter,
     deleteEmpty: onDeleteEmpty,
@@ -354,6 +446,19 @@ export function MarkdownBlock({
       input.click()
       return
     }
+    if (scaffold === DATABASE_SENTINEL) {
+      // 新建独立 .db 文件(笔记同目录,uniqueName 撞名 -1/-2)→ 插入 ![[base]] 嵌入块。
+      void (async () => {
+        try {
+          const bytes = new TextEncoder().encode(serializeDb(emptyDb('未命名数据库')))
+          const { base } = await amadeus.saveAttachment(pagePath, '未命名数据库.db', bytes, { mode: 'same', folder: '' })
+          const md = `![[${base}]]`
+          if (content.trim() === '') onChange(md)
+          else onInsertAfter(md)
+        } catch { /* 创建失败静默跳过 */ }
+      })()
+      return
+    }
     if (scaffold === COLUMN_SENTINEL) {
       const st = usePageStore.getState()
       const nid = st.insertBlockAfter(blockId, undefined, '')
@@ -390,6 +495,7 @@ export function MarkdownBlock({
           onChange={handleChange}
           keys={keys}
           saveImage={saveImage}
+          saveFiles={saveFiles}
           onOpenWiki={onOpenWiki}
           getPageNames={getPageNames}
           focusPlace={focusPlace}
@@ -428,6 +534,7 @@ const SLASH_ITEMS: SlashItem[] = [
   { key: 'wikilink', label: '链接笔记', hint: '[[', icon: '⧉', group: '高级', scaffold: '[[', kw: 'link wiki note 链接 笔记 双链 lianjie shuanglian' },
   { key: 'image', label: '图片', hint: '', icon: '🖼', group: '高级', scaffold: IMAGE_SENTINEL, kw: 'image picture photo 图片 tupian 插图' },
   { key: 'columns', label: '分栏', hint: '⫿', icon: '⫿', group: '高级', scaffold: COLUMN_SENTINEL, kw: 'column split 分栏 分列 fenlan 并排' },
+  { key: 'database', label: '数据库', hint: '.db', icon: '𝄜', group: '高级', scaffold: DATABASE_SENTINEL, kw: 'database db 数据库 shujuku 表格 base notion' },
   { key: 'template', label: '模板', hint: 'templates/', icon: '⧫', group: '高级', scaffold: TEMPLATE_SENTINEL, kw: 'template 模板 muban 套用' },
   { key: 'embed', label: '嵌入块引用', hint: '![[ ]]', icon: '↪', group: '高级', scaffold: EMBED_SENTINEL, kw: 'embed 嵌入 引用 transclude block 块 qianru yinyong 复用' },
 ]

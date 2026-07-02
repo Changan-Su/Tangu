@@ -36,10 +36,12 @@
 .am-app .page-view { padding-left: 48px; padding-right: 48px; }
 .am-app .edge-zone { flex-basis: 0; }
 .am-app .column { padding-left: 0; padding-right: 0; }
-.am-app .block-host { grid-template-columns: 1fr 22px; }
+.am-app .block-host { grid-template-columns: 1fr; }
 .am-app .block-gutter { position: absolute; left: -26px; top: 0; }
 .am-app .block-body { padding-left: 2px; }
-.am-app .drop-line { left: 0; }
+.am-app .drop-line { left: 0; right: 0; }
+/* Notion 式块菜单开启时,块整体高亮(菜单 = 点 ⠿ 或块上右键;右侧小图标列已移除)。 */
+.am-app .block-host[data-menu] { background: var(--accent-soft, var(--surface, rgba(127, 127, 127, 0.08))); }
 
 /* 顶部工具条(sticky,随滚动常驻顶部):左 前进后退 + 路径面包屑 / 右 模式切换钮。 */
 .amx-toolbar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 6px 10px 2px; background: var(--bg); }
@@ -81,6 +83,16 @@
   transition: background var(--duration-fast, 0.15s), color var(--duration-fast, 0.15s);
 }
 .amx-stale-btn:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.08)); color: var(--text); }
+
+/* 收藏/最近分区容器(内部复用 t2s-group 系列):只负责与下方文件树的间隔。 */
+.amx-prefs-group { margin-bottom: 2px; }
+
+/* 笔记拖进文件夹:目标文件夹(头/展开区)描边(区别于会话列表 drag-over 的「插入线」——这里是「放进去」语义)。 */
+.t2s-group.amx-drop-into,
+.t2s-group-sessions.amx-drop-into { box-shadow: inset 0 0 0 1.5px var(--accent, #6c5ce7); border-radius: 8px; }
+/* 拖到真空白处 = 移到根目录:整个滚动区内描边提示。 */
+.t2s-scroll.amx-drop-root { box-shadow: inset 0 0 0 1.5px var(--accent, #6c5ce7); border-radius: 8px; }
+.t2s-srow.dragging { opacity: 0.4; }
 
 /* ── 右栏面板(原生 Tangu token,不在 .am-app 内) ── */
 .amx-panel { height: 100%; overflow: auto; background: var(--bg); color: var(--text); padding: 4px 6px 12px; }
@@ -138,12 +150,18 @@
 .amx-tag-count { flex: 0 0 auto; font-size: 11px; color: var(--text-faint, var(--text-muted)); }
 .amx-tag-page { padding-left: 24px; }
 
-/* ── 局部关系图(右栏 tab) ── */
-.amx-graph { display: block; width: 100%; height: auto; }
-.amx-graph-edge { stroke: var(--border); stroke-width: 1.2; }
-.amx-graph-node circle { fill: var(--text-faint, var(--text-muted)); cursor: pointer; transition: fill var(--duration-fast, 0.15s); }
-.amx-graph-node:hover circle { fill: var(--accent, #6c5ce7); }
-.amx-graph-node.center circle { fill: var(--accent, #6c5ce7); cursor: default; }
+/* ── 局部关系图(右栏 tab;可拖节点/平移/缩放,hover 高亮相邻) ── */
+.amx-graph { display: block; width: 100%; height: auto; touch-action: none; cursor: grab; }
+.amx-graph:active { cursor: grabbing; }
+.amx-graph-edge { stroke: var(--border); stroke-width: 1.2; transition: opacity var(--duration-fast, 0.15s), stroke var(--duration-fast, 0.15s); }
+.amx-graph-edge.hl { stroke: var(--accent, #6c5ce7); opacity: 0.85; }
+.amx-graph-edge.dim { opacity: 0.15; }
+.amx-graph-node { transition: opacity var(--duration-fast, 0.15s); }
+.amx-graph-node.dim { opacity: 0.25; }
+.amx-graph-node circle { fill: var(--text-faint, var(--text-muted)); cursor: grab; transition: fill var(--duration-fast, 0.15s); }
+.amx-graph-node circle:active { cursor: grabbing; }
+.amx-graph-node:hover circle, .amx-graph-node.hl circle { fill: var(--accent, #6c5ce7); }
+.amx-graph-node.center circle { fill: var(--accent, #6c5ce7); }
 .amx-graph-node text { fill: var(--text-muted); font-size: 10px; cursor: pointer; user-select: none; }
 .amx-graph-node.center text { fill: var(--text); font-weight: 600; }
 
@@ -235,3 +253,74 @@
 .am-app .stack[data-dnd] .edge-zone { position: absolute; top: 0; bottom: 0; width: 40px; z-index: 4; border-radius: 8px; }
 .am-app .stack[data-dnd] .edge-zone[data-side='left'] { left: -46px; }
 .am-app .stack[data-dnd] .edge-zone[data-side='right'] { right: -46px; }
+
+/* ── PDF / 音视频内联预览(![[…]];文件卡片/图片样式在上方既有块) ── */
+.am-app .embed-media { border: 1px solid var(--border); border-radius: var(--radius-md, 10px); overflow: hidden; }
+.am-app .embed-media-head {
+  display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+  background: var(--overlay-light, rgba(127, 127, 127, 0.05)); font-size: 12.5px;
+}
+.am-app .embed-media-head .embed-file-name { flex: 1 1 auto; }
+.am-app .embed-media-btn {
+  flex: 0 0 auto; border: none; background: transparent; color: var(--text-muted); cursor: pointer;
+  font: inherit; font-size: 12px; padding: 3px 7px; border-radius: 6px;
+}
+.am-app .embed-media-btn:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.1)); color: var(--text); }
+.am-app .embed-pdf { display: block; width: 100%; height: 420px; border: none; background: var(--bg); }
+.am-app .embed-video { display: block; width: 100%; max-height: 420px; background: #000; }
+.am-app .embed-audio { display: block; width: 100%; padding: 8px 10px; }
+
+/* ── Database 嵌入(![[xxx.db]]):Notion 式表格 ── */
+.amx-db { border: 1px solid var(--border); border-radius: var(--radius-md, 10px); overflow: hidden; font-size: 13px; }
+.amx-db-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: var(--overlay-light, rgba(127, 127, 127, 0.05)); }
+.amx-db-name { flex: 1; min-width: 0; border: none; outline: none; background: transparent; color: var(--text); font: inherit; font-weight: 600; font-size: 13.5px; padding: 2px 4px; border-radius: 6px; }
+.amx-db-name:hover, .amx-db-name:focus { background: var(--overlay-light, rgba(127, 127, 127, 0.08)); }
+.amx-db-count { flex: 0 0 auto; color: var(--text-muted); font-size: 11.5px; }
+.amx-db-scroll { overflow-x: auto; }
+.amx-db-row { display: grid; align-items: stretch; border-top: 1px solid var(--border); min-width: max-content; }
+.amx-db-hrow { border-top: none; background: var(--overlay-light, rgba(127, 127, 127, 0.03)); }
+.amx-db-th { display: flex; align-items: center; min-width: 0; border-right: 1px solid var(--border); }
+.amx-db-thbtn { flex: 1; min-width: 0; display: flex; align-items: center; gap: 5px; border: none; background: transparent; color: var(--text-muted); font: inherit; font-size: 12px; font-weight: 600; padding: 6px 8px; cursor: pointer; text-align: left; }
+.amx-db-thbtn:hover { color: var(--text); }
+.amx-db-th-icon { flex: 0 0 auto; opacity: 0.75; }
+.amx-db-th-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.amx-db-th-sort { flex: 0 0 auto; color: var(--accent, #6c5ce7); }
+.amx-db-cell { display: flex; align-items: center; min-width: 0; border-right: 1px solid var(--border); }
+.amx-db-input { width: 100%; min-width: 0; border: none; outline: none; background: transparent; color: var(--text); font: inherit; font-size: 13px; padding: 6px 8px; }
+.amx-db-input:focus { box-shadow: inset 0 0 0 1.5px var(--accent, #6c5ce7); border-radius: 4px; }
+.amx-db-checkbox { margin: 6px 8px; accent-color: var(--accent, #6c5ce7); }
+.amx-db-cellbtn { width: 100%; min-height: 30px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; border: none; background: transparent; font: inherit; cursor: pointer; padding: 4px 8px; text-align: left; }
+.amx-db-cellbtn:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.05)); }
+.amx-db-chip { display: inline-flex; align-items: center; font-size: 11.5px; line-height: 1; background: var(--accent-light, rgba(108, 92, 231, 0.14)); color: var(--text); border-radius: 999px; padding: 4px 8px; }
+.amx-db-blank { color: var(--text-faint, var(--text-muted)); font-size: 12px; }
+.amx-db-urlcell { display: flex; align-items: center; gap: 4px; min-width: 0; width: 100%; padding: 4px 8px; cursor: text; }
+.amx-db-richtext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.amx-db-wikilink { border: none; background: transparent; padding: 0; font: inherit; cursor: pointer; color: #6c5ce7; text-decoration: underline; text-decoration-color: color-mix(in srgb, #6c5ce7 45%, transparent); text-underline-offset: 2px; }
+.am-app[data-mode='dark'] .amx-db-wikilink { color: #a89bf5; }
+.amx-db-url { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent, #6c5ce7); text-decoration: underline; text-underline-offset: 2px; }
+.amx-db-urltext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.amx-db-edit { flex: 0 0 auto; margin-left: auto; border: none; background: transparent; color: var(--text-faint, var(--text-muted)); cursor: pointer; padding: 2px 4px; border-radius: 4px; opacity: 0; }
+.amx-db-urlcell:hover .amx-db-edit { opacity: 1; }
+.amx-db-rowdel { border: none; border-right: 1px solid var(--border); background: transparent; color: var(--text-faint, var(--text-muted)); cursor: pointer; font-size: 11px; opacity: 0; }
+.amx-db-row:hover .amx-db-rowdel { opacity: 1; }
+.amx-db-rowdel:hover { color: var(--danger, #e5484d); }
+.amx-db-addcol { border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 14px; }
+.amx-db-addcol:hover { color: var(--text); background: var(--overlay-light, rgba(127, 127, 127, 0.08)); }
+.amx-db-addrow { display: block; width: 100%; border: none; border-top: 1px solid var(--border); background: transparent; color: var(--text-muted); font: inherit; font-size: 12.5px; padding: 7px 10px; cursor: pointer; text-align: left; }
+.amx-db-addrow:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.05)); color: var(--text); }
+.amx-db-state { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 12px 12px; color: var(--text-muted); font-size: 13px; }
+.amx-db-linkbtn { border: none; background: transparent; color: var(--accent, #6c5ce7); font: inherit; font-size: 12.5px; cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+.amx-db-linkbtn:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.08)); }
+/* 弹层(选项池 / 列菜单):fixed,免被 amx-db-scroll 裁剪 */
+.amx-db-popwrap { position: fixed; inset: 0; z-index: 80; -webkit-app-region: no-drag; }
+.amx-db-pop { position: fixed; width: 230px; max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; background: var(--bg-card, var(--bg)); border: 1px solid var(--border); border-radius: var(--radius-md, 10px); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18); padding: 6px; }
+.amx-db-pop-sec { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint, var(--text-muted)); padding: 4px 6px 2px; }
+.amx-db-pop-list { display: flex; flex-direction: column; gap: 1px; }
+.amx-db-opt { display: flex; align-items: center; gap: 7px; border: none; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; padding: 5px 7px; border-radius: 6px; cursor: pointer; text-align: left; }
+.amx-db-opt:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.08)); }
+.amx-db-opt input[type='checkbox'] { accent-color: var(--accent, #6c5ce7); }
+.amx-db-opt-check { margin-left: auto; color: var(--accent, #6c5ce7); }
+.amx-db-opt-clear { color: var(--text-muted); }
+.amx-db-opt-danger { color: var(--danger, #e5484d); }
+.amx-db-pop-input { border: 1px solid var(--border); border-radius: 6px; outline: none; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; padding: 5px 7px; margin: 4px 2px 2px; }
+.amx-db-pop-input:focus { border-color: var(--accent, #6c5ce7); }

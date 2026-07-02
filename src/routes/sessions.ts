@@ -105,6 +105,36 @@ router.post('/agent/sessions/:id/branch', authMiddleware, async (req: AuthReques
   }
 });
 
+// 某会话名下的 Background Session(@讨论 / Historian 辅助讨论等 kind≠'user' 的隐藏子会话,
+// 经 parent_session_id 指回来源会话)。右栏「子聊天」轮询;各自带最新 run(id+status)供面板
+// 订阅/回放——已结束的 run 由面板 SSE 重放全程。后台会话在主 run 结束后才出现是常态
+//(Historian 辅助讨论),无法靠主 run 的实时 'subchat' 事件,故此持久端点是统一事实来源。
+router.get('/agent/sessions/:id/background', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.user!.userId;
+    const rows = await query<any[]>(
+      `SELECT id, kind, title, created_at FROM chat_sessions
+       WHERE parent_session_id = ? AND user_id = ? AND kind != 'user'
+       ORDER BY created_at DESC LIMIT 10`,
+      [req.params.id, userId],
+    );
+    const background: any[] = [];
+    for (const s of rows) {
+      const r = await query<any[]>(
+        `SELECT id, status FROM agent_runs WHERE session_id = ? ORDER BY created_at DESC LIMIT 1`,
+        [s.id],
+      );
+      background.push({
+        sessionId: s.id, kind: s.kind, title: s.title, createdAt: s.created_at,
+        runId: r[0]?.id || null, runStatus: r[0]?.status || null,
+      });
+    }
+    res.json({ background });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'list background sessions failed' });
+  }
+});
+
 router.patch('/agent/sessions/:id', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.userId;
