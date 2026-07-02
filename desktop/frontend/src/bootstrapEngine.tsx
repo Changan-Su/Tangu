@@ -1,6 +1,7 @@
 /** 真实引擎装配:注册视图(会话/对话)+ ribbon + 命令 + 默认布局。替代 demoBootstrap。 */
-import { MessageCircle, MessagesSquare, Plus, Command as CommandIcon, Moon, Languages, MessageSquare, FolderOpen, List, BookOpen, Bot, Smartphone, Store, Settings, NotebookText, FileText, ListTree, Link2, Search, Hash, Waypoints } from 'lucide-react'
+import { MessageCircle, MessagesSquare, Plus, Command as CommandIcon, Moon, Languages, MessageSquare, FolderOpen, List, BookOpen, Bot, Smartphone, Store, Settings, NotebookText, FileText, ListTree, Link2, Search, Hash, Waypoints, Inbox, Mail } from 'lucide-react'
 import { registerView, addCommand, addRibbonIcon, openCommandPalette, useWorkspace, getActiveSpace, recordNav } from './engine'
+import { useRecentViews } from './recentViews'
 import { registerSpaces } from './spaces'
 import { AccountCard } from './components/AccountCard'
 import { useApp } from './stores/appStore'
@@ -13,6 +14,8 @@ import { NewTabView } from './views/NewTabView'
 import { WeChatSpecialView, AgentsDetailSpecialView, WorkspaceDetailSpecialView } from './views/SpecialViews'
 import { AmadeusPagesView, AmadeusEditorView, AmadeusOutlineView, AmadeusBacklinksView } from './amadeusViews'
 import { AmadeusSearchView, AmadeusTagsView, AmadeusLocalGraphView } from './amadeusPanels'
+import { InboxListView } from './views/inbox/InboxListView'
+import { InboxReaderView } from './views/inbox/InboxReaderView'
 
 const ws = () => useWorkspace.getState()
 const app = () => useApp.getState()
@@ -66,17 +69,27 @@ export function installEngine(): void {
     registerView({ type: 'amadeus-graph', displayName: () => app().tr('amadeus.graph'), icon: Waypoints, factory: () => <AmadeusLocalGraphView />, singleton: true })
   }
 
+  // Inbox Space:收件箱(左 邮件列表 / 主 阅读面板)。数据来自本地后端 /agent/inbox。
+  // gate = window.tangu?.backendStatus(桌面壳语义,含 external 模式;webShim 无 → Tangu Web 不注册,
+  // 旧布局引用未注册视图由 workspaceStore.layoutViewsAllRegistered 整份回退,不崩)。
+  if (window.tangu?.backendStatus) {
+    registerView({ type: 'inbox-list', displayName: () => app().tr('inbox.list'), icon: Inbox, factory: () => <InboxListView />, singleton: true, closable: false })
+    registerView({ type: 'inbox-reader', displayName: () => app().tr('inbox.reader'), icon: Mail, factory: () => <InboxReaderView />, singleton: true })
+  }
+
   // Space:注册(注册序 = ribbon 顶部默认序,排在商店等功能图标之上;每个 Space 贡献一个可拖动的 ribbon 顶部图标)。
   // 同时按当前活动 Space 设侧栏默认,使恢复的非 Tangu Space 在首次 toggle 前即正确。
   registerSpaces()
   const activeSpace = getActiveSpace()
   if (activeSpace) ws().setSidebarDefaults(activeSpace.sidebarDefaults)
 
-  // 对话会话切换 → 喂主面板导航历史(Workbench 级前进/后退,箭头在引擎主区左上角常驻)。
+  // 对话会话切换 → 喂主面板导航历史(Workbench 级前进/后退,箭头在引擎主区左上角常驻)+ 启动器「最近使用」。
   useApp.subscribe((s, p) => {
     const id = s.activeId
     if (!id || id === p.activeId) return
     recordNav(`chat:${id}`, () => { app().setActiveId(id); ws().openView('chat', { followActive: true, reuseKey: 'primary' }, 'main') })
+    const title = s.sessions.find((x) => x.id === id)?.title
+    useRecentViews.getState().record({ key: `chat:${id}`, kind: 'chat', id, title: title || app().tr('workbench.chat') })
   })
 
   // ribbon = 左侧功能条:顶部 = Space 图标组 + 商店;明暗/语言/反馈/命令面板与设置/账号移到底部常驻(在设置之上)。

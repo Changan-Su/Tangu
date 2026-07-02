@@ -25,6 +25,14 @@ const api = {
     ipcRenderer.on('backend:status', listener)
     return () => ipcRenderer.removeListener('backend:status', listener)
   },
+  // ── 收件箱:系统通知 + dock 角标(仅 mac)+ 通知点击回跳订阅 ──
+  notifyInbox: (title: string, body: string): Promise<void> => ipcRenderer.invoke('inbox:notify', title, body),
+  setInboxBadge: (count: number): Promise<void> => ipcRenderer.invoke('inbox:badge', count),
+  onInboxOpen: (cb: () => void): (() => void) => {
+    const listener = (): void => cb()
+    ipcRenderer.on('inbox:open', listener)
+    return () => ipcRenderer.removeListener('inbox:open', listener)
+  },
   // ── Forsion 账号 / provider OAuth 登录(与 `tangu login` 同一份凭证)──
   authStatus: (): Promise<any> => ipcRenderer.invoke('auth:status'),
   forsionLogin: (cloudUrl?: string): Promise<any> => ipcRenderer.invoke('auth:forsionLogin', cloudUrl),

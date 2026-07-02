@@ -2165,6 +2165,33 @@
           ]
         }
       }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "inbox_send",
+        "description": "Send a message to the user's inbox (the app's notification center). Use it for results, reminders, reports, or follow-ups the user should notice outside this conversation — not as a substitute for replying here. Optionally set deliver_at to schedule a one-time future delivery; there is no recurring schedule.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "Concise message title shown in the inbox list"
+            },
+            "body": {
+              "type": "string",
+              "description": "Optional message body (plain text or simple markdown)"
+            },
+            "deliver_at": {
+              "type": "string",
+              "description": "Optional one-time delivery time: ISO 8601 (e.g. \"2026-07-02T18:30:00+08:00\") or \"YYYY-MM-DD HH:mm\" interpreted in the user's local timezone. Omit to deliver immediately."
+            }
+          },
+          "required": [
+            "title"
+          ]
+        }
+      }
     }
   ],
   "tangu-docker:sandbox+skills": [
@@ -2711,6 +2738,33 @@
           },
           "required": [
             "prompt"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "inbox_send",
+        "description": "Send a message to the user's inbox (the app's notification center). Use it for results, reminders, reports, or follow-ups the user should notice outside this conversation — not as a substitute for replying here. Optionally set deliver_at to schedule a one-time future delivery; there is no recurring schedule.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "Concise message title shown in the inbox list"
+            },
+            "body": {
+              "type": "string",
+              "description": "Optional message body (plain text or simple markdown)"
+            },
+            "deliver_at": {
+              "type": "string",
+              "description": "Optional one-time delivery time: ISO 8601 (e.g. \"2026-07-02T18:30:00+08:00\") or \"YYYY-MM-DD HH:mm\" interpreted in the user's local timezone. Omit to deliver immediately."
+            }
+          },
+          "required": [
+            "title"
           ]
         }
       }
@@ -3759,6 +3813,33 @@
           },
           "required": [
             "prompt"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "inbox_send",
+        "description": "Send a message to the user's inbox (the app's notification center). Use it for results, reminders, reports, or follow-ups the user should notice outside this conversation — not as a substitute for replying here. Optionally set deliver_at to schedule a one-time future delivery; there is no recurring schedule.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "Concise message title shown in the inbox list"
+            },
+            "body": {
+              "type": "string",
+              "description": "Optional message body (plain text or simple markdown)"
+            },
+            "deliver_at": {
+              "type": "string",
+              "description": "Optional one-time delivery time: ISO 8601 (e.g. \"2026-07-02T18:30:00+08:00\") or \"YYYY-MM-DD HH:mm\" interpreted in the user's local timezone. Omit to deliver immediately."
+            }
+          },
+          "required": [
+            "title"
           ]
         }
       }
@@ -4829,6 +4910,33 @@
           ]
         }
       }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "inbox_send",
+        "description": "Send a message to the user's inbox (the app's notification center). Use it for results, reminders, reports, or follow-ups the user should notice outside this conversation — not as a substitute for replying here. Optionally set deliver_at to schedule a one-time future delivery; there is no recurring schedule.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "Concise message title shown in the inbox list"
+            },
+            "body": {
+              "type": "string",
+              "description": "Optional message body (plain text or simple markdown)"
+            },
+            "deliver_at": {
+              "type": "string",
+              "description": "Optional one-time delivery time: ISO 8601 (e.g. \"2026-07-02T18:30:00+08:00\") or \"YYYY-MM-DD HH:mm\" interpreted in the user's local timezone. Omit to deliver immediately."
+            }
+          },
+          "required": [
+            "title"
+          ]
+        }
+      }
     }
   ],
   "tangu-none:sandbox": [
@@ -5315,6 +5423,33 @@
           },
           "required": [
             "prompt"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "inbox_send",
+        "description": "Send a message to the user's inbox (the app's notification center). Use it for results, reminders, reports, or follow-ups the user should notice outside this conversation — not as a substitute for replying here. Optionally set deliver_at to schedule a one-time future delivery; there is no recurring schedule.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "Concise message title shown in the inbox list"
+            },
+            "body": {
+              "type": "string",
+              "description": "Optional message body (plain text or simple markdown)"
+            },
+            "deliver_at": {
+              "type": "string",
+              "description": "Optional one-time delivery time: ISO 8601 (e.g. \"2026-07-02T18:30:00+08:00\") or \"YYYY-MM-DD HH:mm\" interpreted in the user's local timezone. Omit to deliver immediately."
+            }
+          },
+          "required": [
+            "title"
           ]
         }
       }
@@ -5823,6 +5958,33 @@
           },
           "required": [
             "prompt"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "inbox_send",
+        "description": "Send a message to the user's inbox (the app's notification center). Use it for results, reminders, reports, or follow-ups the user should notice outside this conversation — not as a substitute for replying here. Optionally set deliver_at to schedule a one-time future delivery; there is no recurring schedule.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "Concise message title shown in the inbox list"
+            },
+            "body": {
+              "type": "string",
+              "description": "Optional message body (plain text or simple markdown)"
+            },
+            "deliver_at": {
+              "type": "string",
+              "description": "Optional one-time delivery time: ISO 8601 (e.g. \"2026-07-02T18:30:00+08:00\") or \"YYYY-MM-DD HH:mm\" interpreted in the user's local timezone. Omit to deliver immediately."
+            }
+          },
+          "required": [
+            "title"
           ]
         }
       }
@@ -6871,6 +7033,33 @@
           },
           "required": [
             "prompt"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "inbox_send",
+        "description": "Send a message to the user's inbox (the app's notification center). Use it for results, reminders, reports, or follow-ups the user should notice outside this conversation — not as a substitute for replying here. Optionally set deliver_at to schedule a one-time future delivery; there is no recurring schedule.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "Concise message title shown in the inbox list"
+            },
+            "body": {
+              "type": "string",
+              "description": "Optional message body (plain text or simple markdown)"
+            },
+            "deliver_at": {
+              "type": "string",
+              "description": "Optional one-time delivery time: ISO 8601 (e.g. \"2026-07-02T18:30:00+08:00\") or \"YYYY-MM-DD HH:mm\" interpreted in the user's local timezone. Omit to deliver immediately."
+            }
+          },
+          "required": [
+            "title"
           ]
         }
       }
@@ -7938,6 +8127,33 @@
           },
           "required": [
             "prompt"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "inbox_send",
+        "description": "Send a message to the user's inbox (the app's notification center). Use it for results, reminders, reports, or follow-ups the user should notice outside this conversation — not as a substitute for replying here. Optionally set deliver_at to schedule a one-time future delivery; there is no recurring schedule.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "Concise message title shown in the inbox list"
+            },
+            "body": {
+              "type": "string",
+              "description": "Optional message body (plain text or simple markdown)"
+            },
+            "deliver_at": {
+              "type": "string",
+              "description": "Optional one-time delivery time: ISO 8601 (e.g. \"2026-07-02T18:30:00+08:00\") or \"YYYY-MM-DD HH:mm\" interpreted in the user's local timezone. Omit to deliver immediately."
+            }
+          },
+          "required": [
+            "title"
           ]
         }
       }

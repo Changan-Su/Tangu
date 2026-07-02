@@ -3,7 +3,7 @@
  * 负责:建窗 + 配置持久化(IPC)+ 托管内置 tangu-server(managed 模式,backendManager)。
  * agent 调用由 renderer 直连 HTTP/SSE(localhost),不经主进程代理。
  */
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell, nativeImage } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, nativeImage, Notification } from 'electron'
 import { basename, dirname, join } from 'path'
 import { pathToFileURL } from 'url'
 import { readFile, writeFile, mkdir, chmod, readdir, stat, rename, cp } from 'fs/promises'
@@ -524,6 +524,8 @@ if (process.env.TANGU_DISABLE_GPU === '1') app.disableHardwareAcceleration()
 registerAmadeusAssetSchemes()
 
 app.whenReady().then(async () => {
+  // Windows 系统通知前提(无 AppUserModelId 时 Notification 可能不弹);mac/linux 无副作用。
+  app.setAppUserModelId('com.forsion.tangu')
   await loadTanguEnvFile() // 先于一切 loadConfig(其 env 兜底读 TANGU_CLOUD_URL/TANGU_BACKEND_URL)
   await seedDefaultThemes(themesDir()) // 首次运行种入 soft 示例主题(themes/ 已存在则跳过;内部吞错不阻塞启动)
 
@@ -541,6 +543,24 @@ app.whenReady().then(async () => {
       void ensureBackend()
     }
     return effectiveConfig()
+  })
+
+  // 收件箱:系统通知(点击 → 聚焦窗口 + 回跳 Inbox Space)与 dock 角标。
+  ipcMain.handle('inbox:notify', (_e, title: string, body: string) => {
+    if (!Notification.isSupported()) return
+    const n = new Notification({ title: String(title || '').slice(0, 200), body: String(body || '').slice(0, 200) })
+    n.on('click', () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+      mainWindow.webContents.send('inbox:open')
+    })
+    n.show()
+  })
+  ipcMain.handle('inbox:badge', (_e, count: number) => {
+    // setBadgeCount:mac dock 原生;Linux 仅 Unity;Windows 无角标概念(需 setOverlayIcon 自绘,v1 no-op)。
+    if (process.platform === 'darwin') app.setBadgeCount(Math.max(0, Math.floor(Number(count) || 0)))
   })
   // 本机模式的工作目录选择(host-exec 的 cwd)。
   ipcMain.handle('dialog:pickDirectory', async () => {

@@ -1470,6 +1470,9 @@ registerMessages({
   "newtab.title": { "zh": "新建标签页", "en": "New Tab" },
   "newtab.mainSection": { "zh": "主区视图", "en": "Main Area" },
   "newtab.sideSection": { "zh": "侧栏视图", "en": "Side Panel" },
+  "newtab.recentSection": { "zh": "最近使用", "en": "Recent" },
+  "newtab.newNote": { "zh": "新建笔记", "en": "New Note" },
+  "newtab.today": { "zh": "今天", "en": "Today" },
 })
 
 // ── 引导欢迎页 + 更新日志抽屉 + Forsion 登录权益(2026-06-28)──

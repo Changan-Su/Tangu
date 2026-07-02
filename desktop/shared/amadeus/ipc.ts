@@ -16,6 +16,8 @@ export const IPC = {
   saveAsset: 'asset:save',
   saveAttachment: 'attachment:save',
   openAttachment: 'attachment:open',
+  openVaultFile: 'vault:open-file',
+  exportPdf: 'page:export-pdf',
   externalChange: 'page:external-change',
   search: 'vault:search',
   backlinks: 'vault:backlinks',
@@ -147,6 +149,11 @@ export interface AmadeusApi {
   ): Promise<{ pageRel: string; base: string }>
   /** Open an attachment (ref = page-relative path or bare basename) with the OS default app. */
   openAttachment(pagePath: string, ref: string): Promise<void>
+  /** Open an EXACT vault-relative path with the OS default app(树/侧栏用:不做 URL 解码、不做 basename 兜底搜索). */
+  openVaultFile(vaultRel: string): Promise<void>
+  /** 把当前窗口按 @media print 样式打成 PDF(渲染端先挂好 #amx-print-root 克隆);
+   *  弹保存对话框,成功返回保存路径并在文件管理器中显示,取消返回 null。 */
+  exportPdf(defaultName: string): Promise<string | null>
   /** Subscribe to external main.md changes. Returns an unsubscribe function. */
   onExternalChange(cb: (pagePath: string) => void): () => void
   /** Full-text search across the vault (main-process index). */

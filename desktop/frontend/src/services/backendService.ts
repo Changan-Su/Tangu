@@ -465,3 +465,37 @@ export const deleteWorkspaceFile = (cfg: TanguDesktopConfig, sessionId: string, 
     method: 'POST',
     body: JSON.stringify({ sessionId, path }),
   })
+
+// ── Inbox(收件箱)──
+// 时间字段为 UTC 'YYYY-MM-DD HH:MM:SS' 无时区后缀,前端解析统一 new Date(s.replace(' ','T')+'Z')。
+export interface InboxMessage {
+  id: string
+  title: string
+  body: string
+  sender_kind: 'agent' | 'server' | 'system'
+  sender_id: string | null
+  origin_broadcast_id: string | null
+  deliver_at: string | null
+  read_at: string | null
+  archived_at: string | null
+  created_at: string | null
+}
+export type InboxFilter = 'all' | 'unread' | 'archived' | 'scheduled'
+
+export const listInbox = (cfg: TanguDesktopConfig, filter: InboxFilter = 'all') =>
+  request<{ messages: InboxMessage[] }>(cfg, `/agent/inbox?filter=${filter}&limit=200`).then((r) => r.messages)
+
+export const getInboxUnreadCount = (cfg: TanguDesktopConfig) =>
+  request<{ count: number; latestId: string | null }>(cfg, '/agent/inbox/unread-count')
+
+export const patchInboxMessage = (cfg: TanguDesktopConfig, id: string, patch: { read?: boolean; archived?: boolean }) =>
+  request<{ ok: boolean }>(cfg, `/agent/inbox/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) })
+
+export const readAllInbox = (cfg: TanguDesktopConfig) =>
+  request<{ ok: boolean }>(cfg, '/agent/inbox/read-all', { method: 'POST' })
+
+export const deleteInboxMessage = (cfg: TanguDesktopConfig, id: string) =>
+  request<{ ok: boolean }>(cfg, `/agent/inbox/${encodeURIComponent(id)}`, { method: 'DELETE' })
+
+export const pullInbox = (cfg: TanguDesktopConfig) =>
+  request<{ pulled: boolean; added: number; detail?: string }>(cfg, '/agent/inbox/pull', { method: 'POST' })

@@ -324,3 +324,70 @@
 .amx-db-opt-danger { color: var(--danger, #e5484d); }
 .amx-db-pop-input { border: 1px solid var(--border); border-radius: 6px; outline: none; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; padding: 5px 7px; margin: 4px 2px 2px; }
 .amx-db-pop-input:focus { border-color: var(--accent, #6c5ce7); }
+
+/* ── 微动效:笔记库树(箭头旋转 + 展开子树滑入;跟随 base.css 动效 token) ── */
+.amx-tree .t2s-chev { transition: transform var(--duration-fast, 0.15s) var(--ease-out, ease); }
+.amx-tree .t2s-chev.open { transform: rotate(90deg); }
+.amx-tree .t2s-group-sessions { animation: amx-slide-in 0.16s var(--ease-out, ease); }
+@keyframes amx-slide-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .amx-tree .t2s-chev { transition: none; }
+  .amx-tree .t2s-group-sessions { animation: none; }
+}
+
+/* ── 导出 PDF:打印时只呈现 #amx-print-root(编辑器克隆,恒浅色纸面),隐藏整个应用壳。
+      printToPDF 走 print 媒体查询;克隆在同文档内 → amadeus-asset:// 图片与 KaTeX 字体照常加载。 ── */
+#amx-print-root { display: none; }
+@media print {
+  /* body 背景(暗色 #1c1a16 / 米黄)会传播成每页画布色,必须压成白纸。 */
+  html, body { background: #fff !important; }
+  body > *:not(#amx-print-root) { display: none !important; }
+  /* 恒浅色:克隆上的 data-mode='light' 只换得动 Amadeus 契约 token;bridge 把不少契约 token
+     间接映射到 :root 级的 --text-light/--bg-card/--accent 等,暗色下克隆仍继承暗色值
+     (引用块白字、代码块黑底)。在打印根上显式给一套中性亮色,截断这条间接链。 */
+  #amx-print-root {
+    display: block;
+    background: #fff;
+    --bg: #ffffff;
+    --bg-card: #fafaf8;
+    --bg-glass: #ffffff;
+    --sidebar-bg: #f5f5f3;
+    --text: #1c1c1c;
+    --text-light: rgba(28, 28, 28, 0.82);
+    --text-muted: #5f5f5d;
+    --text-faint: rgba(28, 28, 28, 0.4);
+    --text-ghost: rgba(28, 28, 28, 0.28);
+    --border: #e6e3db;
+    --shadow: rgba(0, 0, 0, 0.05);
+    --accent: #1c1c1c;
+    --accent-hover: #000000;
+    --accent-light: rgba(28, 28, 28, 0.05);
+    --danger: #a3503f;
+    --danger-light: rgba(163, 80, 63, 0.08);
+    --overlay-subtle: rgba(28, 28, 28, 0.03);
+    --overlay-light: rgba(28, 28, 28, 0.04);
+    --overlay-medium: rgba(28, 28, 28, 0.07);
+    --overlay-strong: rgba(28, 28, 28, 0.14);
+  }
+  #amx-print-root .amx-editor {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+    padding: 0 8px;
+  }
+  #amx-print-root .amx-toolbar,
+  #amx-print-root .ctx-menu,
+  #amx-print-root .block-gutter,
+  #amx-print-root .drag-handle { display: none !important; }
+  /* iframe(PDF 预览)打印不出内容、克隆的 video 无帧 → 隐去预览体,只留文件名头(文件卡片语义)。 */
+  #amx-print-root .embed-pdf,
+  #amx-print-root .embed-video,
+  #amx-print-root .embed-audio,
+  #amx-print-root .embed-media-btn { display: none !important; }
+  #amx-print-root * { box-shadow: none !important; }
+}

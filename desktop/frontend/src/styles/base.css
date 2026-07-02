@@ -388,10 +388,18 @@ a:hover { color: var(--accent-hover); }
 .newtab-sec + .newtab-sec { margin-top: 22px; }
 .newtab-sec-title { color: var(--text-muted); font-size: 12px; font-weight: 600; letter-spacing: .04em; margin-bottom: 10px; }
 .newtab-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
-.newtab-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 18px 10px; background: var(--bg-card); border: var(--border-width) solid var(--border); border-radius: var(--radius-md); color: var(--text); cursor: pointer; transition: border-color var(--duration-fast, .15s), background var(--duration-fast, .15s), transform var(--duration-fast, .15s); }
+.newtab-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 18px 10px; background: var(--bg-card); border: var(--border-width) solid var(--border); border-radius: var(--radius-md); color: var(--text); cursor: pointer; transition: border-color var(--duration-fast, .15s), background var(--duration-fast, .15s), transform var(--duration-fast, .15s); animation: fade-up .18s var(--ease-out) backwards; }
 .newtab-card:hover { border-color: var(--accent); background: var(--overlay-light); transform: translateY(-1px); }
+.newtab-card:active { transform: translateY(0) scale(.98); }
+/* 卡片入场错峰(微动效;第 7 张起与首张同步,避免长队感) */
+.newtab-grid .newtab-card:nth-child(2) { animation-delay: .025s; }
+.newtab-grid .newtab-card:nth-child(3) { animation-delay: .05s; }
+.newtab-grid .newtab-card:nth-child(4) { animation-delay: .075s; }
+.newtab-grid .newtab-card:nth-child(5) { animation-delay: .1s; }
+.newtab-grid .newtab-card:nth-child(6) { animation-delay: .125s; }
+@media (prefers-reduced-motion: reduce) { .newtab-card { animation: none; } }
 .newtab-card-ic { color: var(--accent); }
-.newtab-card-label { font-size: 12.5px; }
+.newtab-card-label { font-size: 12.5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .memv-modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: var(--overlay-scrim); }
 .memv-modal-box { width: min(560px, 90vw); max-height: 70vh; display: flex; flex-direction: column; background: var(--bg-card); border: var(--border-width) solid var(--border); border-radius: var(--radius-md); box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4); }

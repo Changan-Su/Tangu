@@ -2,6 +2,8 @@
 import { useEffect } from 'react'
 import { useI18n } from '../i18n'
 import { useApp } from './appStore'
+import { useInbox } from './inboxStore'
+import { setActiveSpace } from '../engine'
 import { setUnauthorizedHandler } from '../services/http'
 
 // 任意请求(含轮询/SSE)返回 401 → 集中触发登录过期处理(在 React 外注册一次)。
@@ -37,6 +39,19 @@ export function useBootstrap(): void {
       if (st.activeId && st.connState === 'ok') void st.pollSession(st.activeId)
     }, 4000)
     return () => window.clearInterval(timer)
+  }, [])
+
+  // 收件箱:全局常驻未读轮询(ribbon/dock 角标在任何 Space 下更新)。桌面壳 gate,Tangu Web 不跑。
+  useEffect(() => {
+    if (!window.tangu?.backendStatus) return
+    useInbox.getState().startPolling()
+    return () => useInbox.getState().stopPolling()
+  }, [])
+
+  // 系统通知点击 → 聚焦窗口后回跳 Inbox Space(main 进程 webContents.send('inbox:open'))。
+  useEffect(() => {
+    const off = window.tangu?.onInboxOpen?.(() => setActiveSpace('inbox'))
+    return () => off?.()
   }, [])
 
   // 快捷键:全部由引擎 installHotkeys 统一分发(命令 new-chat=mod+n、命令面板=mod+k 等),

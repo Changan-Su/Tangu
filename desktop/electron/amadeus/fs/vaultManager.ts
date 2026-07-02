@@ -145,10 +145,15 @@ export class VaultManager {
   async resolveAttachment(pagePath: string, ref: string): Promise<string | null> {
     const root = this.requireRoot()
     const r = ref.replace(/^<|>$/g, '').trim()
+    // 文件名可含裸 '%'(如 "100% done.png"),decodeURIComponent 会抛 → 原样回退。
+    const safeDecode = (s: string): string => { try { return decodeURIComponent(s) } catch { return s } }
     let abs: string
-    if (r.includes('/')) {
+    // Windows 的 vault 相对路径以 '\' 分隔(listFiles/listPages 原样输出),同样按路径解析;
+    // mac/linux 上 '\' 是合法文件名字符,不当分隔符。
+    const looksLikePath = r.includes('/') || (process.platform === 'win32' && r.includes('\\'))
+    if (looksLikePath) {
       const pageDirAbs = path.resolve(root, path.dirname(pagePath))
-      abs = path.resolve(pageDirAbs, decodeURIComponent(r))
+      abs = path.resolve(pageDirAbs, safeDecode(r))
     } else {
       const found = await this.findByBasename(root, r)
       if (!found) return null

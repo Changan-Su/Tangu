@@ -24,6 +24,7 @@ import agentsRouter from './routes/agents.js';
 import pluginsRouter from './routes/plugins.js';
 import specialRouter from './routes/special.js';
 import wechatRouter from './routes/wechat.js';
+import inboxRouter from './routes/inbox.js';
 import adminRouter from './routes/admin.js';
 import { runMigration } from './db/migrate.js';
 import { failStaleRuns } from './services/runStore.js';
@@ -34,6 +35,7 @@ import { startSessionReaper, stopSessionReaper, reapOrphanSessions } from './san
 import { loadHistorianConfig } from './services/historianConfig.js';
 import { startHistorian, stopHistorian } from './services/historian.js';
 import { startMuseSupervisor, stopMuseSupervisor } from './services/muse.js';
+import { startInboxPull, stopInboxPull } from './services/inboxPull.js';
 import { startWechatRemote, stopWechatRemote } from './services/wechatRemote.js';
 import { disposeAllProcesses } from './tools/processRegistry.js';
 
@@ -82,6 +84,7 @@ export function createTanguModule(d: TanguDeps): TanguModule {
   dataRouter.use(pluginsRouter);
   dataRouter.use(specialRouter);
   dataRouter.use(wechatRouter);
+  dataRouter.use(inboxRouter);
 
   const startBackgroundTasks = (opts?: { recoverRuns?: boolean; historian?: boolean; sandbox?: boolean; profilePolling?: boolean }): void => {
     // 进程重启自愈:遗留 running 标 failed → 重新入队仍在飞的 run(顺序不可颠倒)。
@@ -117,6 +120,8 @@ export function createTanguModule(d: TanguDeps): TanguModule {
     // Muse(本地后台常驻 Special Agent):supervisor 自带 isLocal 闸门——仅 host-exec profile
     //（standalone/desktop/TUI）生效,云端/worker(hostExec=false)为 no-op。不受 opts 控制。
     startMuseSupervisor();
+    // 收件箱广播拉取:自带 isLocal + brain.inbox seam 双闸——仅配置了云端连接的本地形态生效,其余 no-op。
+    startInboxPull();
     void startWechatRemote().catch((e: any) => console.warn('[tangu] WeChat Remote 启动失败:', e?.message || e));
 
     // 配置驱动 profile:启动 app_profile_overrides 轮询(admin panel 改 → 本进程 ≤刷新窗口收敛)。
@@ -129,6 +134,7 @@ export function createTanguModule(d: TanguDeps): TanguModule {
     stopSessionReaper();
     stopHistorian();
     stopMuseSupervisor();
+    stopInboxPull();
     stopWechatRemote();
     deps().profileStore.dispose();
     abortAllRuns();

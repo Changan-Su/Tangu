@@ -212,4 +212,11 @@ export interface CloudBrainServices {
   agentFiles?: AgentFilesBrain;
   /** 每-agent 人格(Phase 2 云端运行水合);可选:未注入 → agentLoop 回落本地 getAgent。 */
   agents?: AgentsBrain;
+  /** 收件箱广播拉取(桌面 standalone 定期拉服务端公告);可选:旧云端/微服务进程/纯本地未注入 → inboxPull 调度器不启动。 */
+  inbox?: InboxBrain;
+}
+
+/** 服务端收件箱广播(对端 GET /api/brain/inbox/broadcasts;created_at 为服务端微秒原文,原样回传做游标)。 */
+export interface InboxBrain {
+  listBroadcasts(since?: string): Promise<Array<{ id: string; title: string; body: string | null; created_at: string }>>;
 }

@@ -151,6 +151,30 @@ export async function runMigration(): Promise<void> {
   await query(`CREATE INDEX IF NOT EXISTS idx_tangu_wechat_bindings_user ON tangu_wechat_bindings(user_id, is_active)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_tangu_wechat_bindings_account_peer ON tangu_wechat_bindings(account_id, peer_id, is_active)`);
 
+  // 用户收件箱(Inbox Space;本地特性,云端建空表零写入,同 muse_todos 纪律)。不进 StateStore,全程直连 query()。
+  // 到期投递无定时器:读端过滤 deliver_at IS NULL OR deliver_at <= now 即「已投递」。
+  // DELETE=软删(deleted_at):广播行硬删会破坏去重锚(唯一索引)与 MAX(created_at) 拉取游标 → 消息复活。
+  // 广播行 created_at 存服务端 to_char 微秒原文(拉取游标原料);本地行走 DEFAULT CURRENT_TIMESTAMP。
+  await query(ddl(`
+    CREATE TABLE IF NOT EXISTS inbox_messages (
+      id VARCHAR(36) PRIMARY KEY,
+      user_id VARCHAR(36) NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT,
+      sender_kind VARCHAR(16) NOT NULL DEFAULT 'agent',
+      sender_id VARCHAR(64),
+      origin_broadcast_id VARCHAR(36),
+      deliver_at TIMESTAMP,
+      read_at TIMESTAMP,
+      archived_at TIMESTAMP,
+      deleted_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `));
+  await query(`CREATE INDEX IF NOT EXISTS idx_inbox_messages_user ON inbox_messages(user_id, archived_at, created_at)`);
+  await query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_messages_broadcast
+    ON inbox_messages(user_id, origin_broadcast_id) WHERE origin_broadcast_id IS NOT NULL`);
+
   // 以下迁移仅对共享云库 / 外部 Postgres 生效：standalone(SQLite) 的 base schema(STANDALONE_SCHEMA)
   // 已完整建好 chat_sessions/chat_messages 的全部列，且 SQLite 的 ALTER ADD COLUMN 不支持
   // IF NOT EXISTS、也无 pg_constraint 目录，故 sqlite 形态在此提前返回，跳过整段 PG-only 迁移。

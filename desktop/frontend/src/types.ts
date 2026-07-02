@@ -454,6 +454,8 @@ export interface StoredDesktopConfig extends TanguDesktopConfig {
   notesImportPreview?: boolean
   /** 日记(每日笔记)所在 vault 相对文件夹;'' = vault 根。 */
   notesDailyFolder?: string
+  /** 收件箱新消息系统通知(undefined 视为 true=默认开;ribbon/dock 角标不受此控)。 */
+  inboxNotifyEnabled?: boolean
   backendState?: BackendStatusInfo
   /** 主进程附带的用户主目录(本机模式 cwd 兜底)。 */
   homeDir?: string
@@ -540,6 +542,10 @@ declare global {
       marketDetail?(id: string): Promise<MarketDetail>
       marketInstall?(id: string): Promise<{ ok: boolean; path: string; files: number; type: string; slug: string }>
       marketInstalled?(): Promise<Record<string, Array<{ slug: string; version: string | null }>>>
+      /** 收件箱:系统通知(点击回跳 Inbox Space)/ dock 角标(仅 mac 生效)/ 通知点击订阅。 */
+      notifyInbox?(title: string, body: string): Promise<void>
+      setInboxBadge?(count: number): Promise<void>
+      onInboxOpen?(cb: () => void): () => void
     }
   }
 }

@@ -1,11 +1,11 @@
 /** 具体的 Space 定义 + 注册入口。Space = 取代「App」的功能组合(见 engine/types.SpaceDefinition)。
  *  每个 Space 贡献一个 ribbon 顶部图标(可拖动改序,默认排在折叠钮之下、商店之上),点击切换。
  *  Tangu Space = 现有助手界面(会话/对话/文件/目录/记忆/子聊天)。Amadeus Space 见 Milestone 2。 */
-import { Bot, NotebookText } from 'lucide-react'
+import { Bot, Inbox, NotebookText } from 'lucide-react'
 import { registerSpace, addRibbonIcon, useSpaceStore, setActiveSpace, useWorkspace, deleteNamedLayout, clearLayout, label } from './engine'
 import type { SpaceDefinition, PersistedPanel } from './engine'
 import { useApp } from './stores/appStore'
-import { usePageStore } from '@amadeus/store/pageStore'
+import { useInbox } from './stores/inboxStore'
 import { installAmadeusCommands } from './amadeusCommands'
 
 const ws = () => useWorkspace.getState()
@@ -14,6 +14,8 @@ const app = () => useApp.getState()
 /** Space 的 ribbon 顶部图标:复用 .rb-btn,当前空间加 .on 高亮(订阅 activeSpaceId 自动刷新)。 */
 function SpaceButton({ space, expanded }: { space: SpaceDefinition; expanded: boolean }) {
   const active = useSpaceStore((s) => s.activeSpaceId === space.id)
+  // hook 无条件调用(React 规则),选择器按 space.id 归零:只有收件箱图标显示未读角标。
+  const unread = useInbox((s) => (space.id === 'inbox' ? s.unreadCount : 0))
   const Icon = space.icon
   const name = label(space.name)
   return (
@@ -24,6 +26,7 @@ function SpaceButton({ space, expanded }: { space: SpaceDefinition; expanded: bo
     >
       {Icon && <Icon size={18} />}
       {expanded && <span className="rb-label">{name}</span>}
+      {unread > 0 && <span className="rb-badge">{unread > 99 ? '99+' : unread}</span>}
     </button>
   )
 }
@@ -60,6 +63,27 @@ const tanguSpace: SpaceDefinition = {
   },
 }
 
+/** Inbox Space:左=邮件列表;右栏无内容默认收起。主区 = 阅读面板。 */
+const INBOX_SIDE_VIEWS: Record<'left' | 'right', PersistedPanel[]> = {
+  left: [{ type: 'inbox-list', params: {} }],
+  right: [],
+}
+
+const inboxSpace: SpaceDefinition = {
+  id: 'inbox',
+  name: () => app().tr('space.inbox'),
+  icon: Inbox,
+  sidebarDefaults: INBOX_SIDE_VIEWS,
+  build() {
+    ws().setSidebarDefaults(INBOX_SIDE_VIEWS)
+    ws().openView('inbox-reader', {}, 'main')
+    ws().openView('inbox-list', {}, 'left')
+    ws().initializeSidebar('right', false)
+  },
+  // 关掉最后一个主区 view → 回阅读面板空态(Gmail 语义),不落 launcher。
+  newPage: () => { ws().openView('inbox-reader', {}, 'main') },
+}
+
 /** Amadeus Space 的侧栏默认:左=笔记/搜索/标签 同组 tab;右=大纲/反链/关系图 同组 tab。 */
 const AMADEUS_SIDE_VIEWS: Record<'left' | 'right', PersistedPanel[]> = {
   left: [
@@ -79,12 +103,8 @@ const amadeusSpace: SpaceDefinition = {
   name: () => app().tr('space.amadeus'),
   icon: NotebookText,
   sidebarDefaults: AMADEUS_SIDE_VIEWS,
-  // 关掉主区最后一个 view → 重开编辑器(Amadeus 无启动器;× 主要用于关分屏的编辑器副本,关到最后则复位)。
-  newPage() {
-    ws().openView('amadeus-editor', {}, 'main')
-    const p = usePageStore.getState()
-    if (p.vaultRoot) void p.createPage() // 有 vault → 新建一篇空笔记并在编辑器打开(＋新建标签页语义)
-  },
+  // 不定义 newPage:＋ 与「关掉最后一个主区 view」统一落到 launcher 启动器(与 Tangu Space 一致),
+  // 启动器按当前 Space 列出可用视图 + 最近使用;「新建笔记」成为启动器里的一项。
   /** 编辑器(主)→ 左栏(笔记 + 搜索/标签 同组 tab)→ 右栏(大纲 + 反链 同组 tab)。
    *  openView 会把新面板设为活动 tab,故最后把「笔记」「大纲」拉回活动态。 */
   build() {
@@ -108,7 +128,12 @@ const amadeusSpace: SpaceDefinition = {
 const AMADEUS_ENABLED = (() => {
   try { return localStorage.getItem('forsion_tangu_dev_mode') === '1' } catch { return false }
 })()
-const SPACES: SpaceDefinition[] = window.amadeus && AMADEUS_ENABLED ? [tanguSpace, amadeusSpace] : [tanguSpace]
+const SPACES: SpaceDefinition[] = [
+  tanguSpace,
+  // Inbox 与视图注册同门控(桌面壳;Tangu Web 的 webShim 无 backendStatus → 不注册)。
+  ...(window.tangu?.backendStatus ? [inboxSpace] : []),
+  ...(window.amadeus && AMADEUS_ENABLED ? [amadeusSpace] : []),
+]
 
 export function registerSpaces(): void {
   for (const sp of SPACES) {

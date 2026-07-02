@@ -272,8 +272,9 @@ export const usePageStore = create<PageState>((set, get) => {
       try {
         const info = await amadeus.openVault()
         if (!info) return
-        set({ vaultRoot: info.root, pages: info.pages, folders: info.folders ?? [], error: null })
-        void amadeus.listFiles?.().then((files) => set({ files })).catch(() => {})
+        // files 先清空再异步补齐;迟到的结果只在 vault 未再切换时落盘(防旧库文件列表污染新库的树)。
+        set({ vaultRoot: info.root, pages: info.pages, folders: info.folders ?? [], files: [], error: null })
+        void amadeus.listFiles?.().then((files) => { if (get().vaultRoot === info.root) set({ files }) }).catch(() => {})
         if (info.pages.length > 0) await get().loadPage(info.pages[0])
       } catch (e) {
         set({ error: String(e) })
@@ -284,8 +285,8 @@ export const usePageStore = create<PageState>((set, get) => {
       try {
         const info = await amadeus.restoreVault()
         if (!info) return
-        set({ vaultRoot: info.root, pages: info.pages, folders: info.folders ?? [], error: null })
-        void amadeus.listFiles?.().then((files) => set({ files })).catch(() => {})
+        set({ vaultRoot: info.root, pages: info.pages, folders: info.folders ?? [], files: [], error: null })
+        void amadeus.listFiles?.().then((files) => { if (get().vaultRoot === info.root) set({ files }) }).catch(() => {})
         const target =
           info.lastPage && info.pages.includes(info.lastPage) ? info.lastPage : info.pages[0]
         if (target) await get().loadPage(target)

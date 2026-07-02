@@ -22,18 +22,18 @@ export class VaultWatcher {
       depth: 12,
       ignored: (p: string) => {
         const base = path.basename(p)
-        return base.startsWith('.') || base === 'node_modules'
+        // `.tmp-<pid>-<ts>-<n>` = vaultManager.atomicWrite 的自写临时文件:add/unlink 对非 .md 也发
+        // structureChange 后,不滤掉它会让每次自动保存都触发全库重索引+左栏刷新(Linux/Win 实测)。
+        return base.startsWith('.') || base === 'node_modules' || /\.tmp-\d+-\d+-\d+$/.test(base)
       },
     })
     this.watcher.on('change', (abs) => {
       void this.handle(abs, root)
     })
-    // Pages/folders added or removed externally → let the app refresh its tree + index.
+    // Files/folders added or removed (pages AND attachments — the vault tree shows all files)
+    // → let the app refresh its tree + index. Debounced by the caller.
     for (const ev of ['add', 'unlink', 'addDir', 'unlinkDir'] as const) {
-      this.watcher.on(ev, (abs) => {
-        if ((ev === 'add' || ev === 'unlink') && !abs.endsWith('.md')) return
-        this.onStructureChange()
-      })
+      this.watcher.on(ev, () => this.onStructureChange())
     }
   }
 

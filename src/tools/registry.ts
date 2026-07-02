@@ -28,6 +28,7 @@ import { applyPatchProvider } from './builtin/applyPatch.js';
 import { discussProvider } from './builtin/discuss.js';
 import { displayFileProvider } from './builtin/displayTools.js';
 import { imageGenProvider } from './builtin/imageTools.js';
+import { inboxSendProvider } from './builtin/inboxSend.js';
 import type { ToolContext, ToolResult, ToolImpl, ToolCapabilities } from './toolTypes.js';
 
 // 类型 re-export:保持既有 `from './registry.js'` 的 import 路径不变。
@@ -121,6 +122,7 @@ registerToolProvider(applyPatchProvider); // both:结构化补丁编辑(云端+h
 registerToolProvider(discussProvider); // host-only:start_discussion/wait_discussion(分身进后台群聊讨论;append 末尾,保前缀缓存)
 registerToolProvider(displayFileProvider); // both:display_file 在桌面对话区展示文件给用户(append 末尾,保前缀缓存)
 registerToolProvider(imageGenProvider); // both:generate_image 文生图→落盘+对话区展示(append 末尾,保前缀缓存)
+registerToolProvider(inboxSendProvider); // 本地限定:inbox_send 发消息进用户收件箱、可定时(append 末尾,保前缀缓存)
 // 插件(表情包/分段等)现为文件夹插件(plugins/),经 activateAllPlugins→ctx.registerPlugin 注册其工具,不在此处。
 
 /** ctx 自带 profile(loop 按 run.app_id 解析)优先;缺省回退本进程装配的 profile。 */

@@ -62,6 +62,27 @@
 /* Space 图标 = 顶部 ribbon 项(可拖动改序,排在折叠钮之下、商店之上):当前空间高亮。 */
 .rb-space.on { background: var(--accent-light, var(--overlay-light, rgba(127, 127, 127, 0.12))); color: var(--accent, var(--text)); }
 .rb-space.on:hover { color: var(--accent, var(--text)); }
+/* 收件箱未读角标(数字胶囊;模板源自 base.css .ribbon-account.expired 红点)。 */
+.rb-space { position: relative; }
+.rb-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--danger, #e5484d);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  border: 1.5px solid var(--sidebar-bg);
+  pointer-events: none;
+  box-sizing: border-box;
+}
+.rb-expanded .rb-space .rb-badge { top: 50%; right: 8px; transform: translateY(-50%); }
 .rb-btn {
   -webkit-app-region: no-drag;
   width: 32px;
@@ -288,8 +309,8 @@
 }
 .wb-tab-ic { flex-shrink: 0; opacity: 0.85; }
 .wb-tab-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* 主区(命名)tab 固定宽度 → 标题超出截断为「…」;侧栏图标 tab(.wb-tab--icon)不受影响。 */
-.dockview-theme-lcl .dv-tab:not(:has(.wb-tab--icon)) { width: 170px; flex-shrink: 0; }
+/* 主区(命名)tab 宽度随标题自适应,上限 170px(超出截断为「…」);侧栏图标 tab(.wb-tab--icon)不受影响。 */
+.dockview-theme-lcl .dv-tab:not(:has(.wb-tab--icon)) { max-width: 170px; flex-shrink: 0; }
 .dockview-theme-lcl .dv-tab:not(:has(.wb-tab--icon)) .wb-tab { width: 100%; }
 /* 浏览器式 × 关闭钮:默认隐藏且不可点(避免误关),hover tab / 激活 tab 时显形可点。 */
 .wb-tab-close {

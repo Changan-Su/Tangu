@@ -6,8 +6,9 @@ import { type ReactNode, type DragEvent as RDragEvent, type MouseEvent as RMouse
 import { create } from 'zustand'
 import {
   SquarePen, FolderOpen, Folder, FolderPlus, Plus, MoreHorizontal, Pencil, Trash2,
-  ChevronDown, ChevronRight, Search, Code2, Eye, CalendarDays, Star, History, Paperclip,
+  ChevronRight, Search, Code2, Eye, CalendarDays, Star, History, Paperclip, FileDown,
 } from 'lucide-react'
+import { useApp } from './stores/appStore'
 import { useTheme } from './stores/themeStore'
 import { usePageStore } from '@amadeus/store/pageStore'
 import { useUiOverlay } from './amadeusOverlayStore'
@@ -19,6 +20,7 @@ import { AmadeusPropertiesPanel } from './amadeusProperties'
 import { openDailyNote } from './amadeusTemplates'
 import { useAmadeusPrefs } from './amadeusPrefs'
 import { openNote } from './amadeusNav'
+import { useRecentViews } from './recentViews'
 import { buildTree, type TreeNode } from '@amadeus/lib/pageTree'
 import { compile, parsePageSource } from '@amadeus-shared/compiler'
 import { recordNav, useWorkspace } from './engine'
@@ -59,6 +61,7 @@ usePageStore.subscribe((state, prev) => {
   const p = state.activePage
   if (!p || p === prev.activePage) return
   recordNav(`amadeus:${p}`, () => usePageStore.getState().loadPage(p))
+  useRecentViews.getState().record({ key: `note:${p}`, kind: 'note', id: p, title: baseName(p) })
 })
 
 /** 编辑器顶部面包屑:笔记路径(文件夹 / 文件),点任意段在左栏定位高亮。 */
@@ -103,7 +106,7 @@ function PrefsSections({ row, pages }: { row: (path: string) => ReactNode; pages
     items.length > 0 && (
       <div className="amx-prefs-group">
         <button className="t2s-group-toggle" onClick={toggle}>
-          <span className="t2s-chev">{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
+          <span className={`t2s-chev${open ? ' open' : ''}`}><ChevronRight size={12} /></span>
           <span className="t2s-group-name">{icon}<span className="t2s-group-label">{label}</span><span className="t2s-count">{items.length}</span></span>
         </button>
         {open && <div className="t2s-group-sessions">{items.map((p) => row(p))}</div>}
@@ -205,7 +208,7 @@ export function AmadeusPagesView() {
       ref={(el) => { if (path === flash) flashRef.current = el }}
       className={`t2s-srow${path === activePage ? ' active' : ''}${path === flash ? ' amx-flash' : ''}${path === dragPath ? ' dragging' : ''}`}
       style={depth > 0 ? { paddingLeft: 18 + depth * 14 } : undefined}
-      onClick={(e) => { isNote ? void openNote(path, { newTab: e.metaKey || e.ctrlKey }) : void amadeus.openAttachment('', path) }}
+      onClick={(e) => { isNote ? void openNote(path, { newTab: e.metaKey || e.ctrlKey }) : void amadeus.openVaultFile(path).catch(() => {}) }}
       onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: ctxKind, path, x: e.clientX, y: e.clientY }) }}
       draggable={renaming !== path}
       onDragStart={(e) => {
@@ -267,7 +270,7 @@ export function AmadeusPagesView() {
           onDrop={(e) => { e.preventDefault(); e.stopPropagation(); dropTo(folder) }}
         >
           <button className="t2s-group-toggle" onClick={() => toggle(folder)}>
-            <span className="t2s-chev">{isCol ? <ChevronRight size={12} /> : <ChevronDown size={12} />}</span>
+            <span className={`t2s-chev${isCol ? '' : ' open'}`}><ChevronRight size={12} /></span>
             <span className="t2s-group-name"><Folder size={12} /><span className="t2s-group-label">{folderName(folder)}</span><span className="t2s-count">{fileCount}</span></span>
           </button>
           <button className="t2s-group-add" title="在此文件夹新建笔记" onClick={() => { setExpanded((prev) => new Set([...prev, ...prefixesOf(folder)])); void ps().createPageInFolder(folder) }}><Plus size={14} /></button>
@@ -290,7 +293,7 @@ export function AmadeusPagesView() {
 
   return (
     <div style={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0 }}>
-      <aside className="t2s-side">
+      <aside className="t2s-side amx-tree">
         <div className="t2s-search">
           <Search size={13} className="t2s-dim" />
           <input value={query} placeholder="搜索笔记" onChange={(e) => setQuery(e.target.value)} />
@@ -352,12 +355,12 @@ export function AmadeusPagesView() {
             <Star size={13} /> {useAmadeusPrefs.getState().starred.includes(menu.path) ? '取消收藏' : '收藏'}
           </button>
           <button onClick={() => { void amadeus.revealInFileManager(menu.path); setMenu(null) }}><FolderOpen size={13} /> 在文件管理器中显示</button>
-          <button className="danger" onClick={() => { const p = menu.path; setMenu(null); if (window.confirm(`删除笔记「${baseName(p)}」?此操作不可撤销。`)) void ps().deletePage(p) }}><Trash2 size={13} /> 删除</button>
+          <button className="danger" onClick={() => { const p = menu.path; setMenu(null); if (window.confirm(`删除笔记「${baseName(p)}」?此操作不可撤销。`)) { useRecentViews.getState().remove(`note:${p}`); void ps().deletePage(p) } }}><Trash2 size={13} /> 删除</button>
         </div>
       )}
       {menu?.kind === 'asset' && (
         <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
-          <button onClick={() => { void amadeus.openAttachment('', menu.path); setMenu(null) }}><Eye size={13} /> 打开</button>
+          <button onClick={() => { void amadeus.openVaultFile(menu.path).catch(() => {}); setMenu(null) }}><Eye size={13} /> 打开</button>
           <button onClick={() => { void amadeus.revealInFileManager(menu.path); setMenu(null) }}><FolderOpen size={13} /> 在文件管理器中显示</button>
           <button className="danger" onClick={() => { const p = menu.path; setMenu(null); if (window.confirm(`删除文件「${p.split(/[\\/]/).pop()}」?此操作不可撤销。`)) void ps().deletePage(p) }}><Trash2 size={13} /> 删除</button>
         </div>
@@ -497,6 +500,39 @@ export function AmadeusEditorView({ leaf }: ViewProps) {
   // 模式在 uiOverlayStore(供命令面板「切换 源码/可视」),不再是组件内 state。
   const mode = useUiOverlay((s) => s.editorMode)
   const [dragging, setDragging] = useState(false)
+  // 笔记多功能菜单(Obsidian 式右上角 ⋮):导出/收藏/定位/删除。
+  const [noteMenu, setNoteMenu] = useState<{ x: number; y: number } | null>(null)
+  const printHostRef = useRef<HTMLElement | null>(null) // 本编辑器实例的 EditorScope 根(分屏下导出各自的)
+  const starred = useAmadeusPrefs((s) => !!activePage && s.starred.includes(activePage))
+  useEffect(() => {
+    if (!noteMenu) return
+    const close = (): void => setNoteMenu(null)
+    window.addEventListener('click', close)
+    window.addEventListener('contextmenu', close)
+    return () => { window.removeEventListener('click', close); window.removeEventListener('contextmenu', close) }
+  }, [noteMenu])
+
+  /** 导出 PDF:把本编辑器 DOM 克隆进 #amx-print-root(同文档 → amadeus-asset/KaTeX 字体照常可用),
+   *  @media print 只呈现克隆并隐藏应用壳(见 amadeus-host.css),主进程 printToPDF 收尾。导出恒浅色。 */
+  const exportPdf = async (): Promise<void> => {
+    const page = ps().activePage
+    const host = printHostRef.current
+    if (!page || !host) return
+    const wrap = document.createElement('div')
+    wrap.id = 'amx-print-root'
+    const clone = host.cloneNode(true) as HTMLElement
+    clone.setAttribute('data-mode', 'light')
+    wrap.appendChild(clone)
+    document.body.appendChild(wrap)
+    try {
+      const saved = await amadeus.exportPdf(baseName(page))
+      if (saved) useApp.getState().toast(`已导出 PDF:${saved}`)
+    } catch (err) {
+      useApp.getState().toast(`导出 PDF 失败:${String(err)}`, true)
+    } finally {
+      wrap.remove()
+    }
+  }
   const isActiveLeaf = useWorkspace((s) => s.mainTabs.find((t) => t.id === leaf.id)?.active ?? false)
   const notePath = typeof leaf.params.notePath === 'string' ? leaf.params.notePath : null
   const prevActiveRef = useRef(false)
@@ -592,6 +628,30 @@ export function AmadeusEditorView({ leaf }: ViewProps) {
             title={mode === 'source' ? '切换到可视编辑(所见即所得)' : '切换到源码 Markdown'}
           >
             {mode === 'source' ? <><Eye size={14} /> 可视</> : <><Code2 size={14} /> 源码</>}
+          </button>
+          <button
+            className="amx-mode-btn amx-more-btn"
+            title="更多操作"
+            onClick={(e) => {
+              e.stopPropagation()
+              printHostRef.current = (e.currentTarget as HTMLElement).closest('.amx-editor')
+              const r = e.currentTarget.getBoundingClientRect()
+              setNoteMenu({ x: Math.max(8, Math.min(r.right - 180, window.innerWidth - 196)), y: r.bottom + 4 })
+            }}
+          >
+            <MoreHorizontal size={14} />
+          </button>
+        </div>
+      )}
+      {noteMenu && activePage && (
+        <div className="ctx-menu" style={{ left: noteMenu.x, top: noteMenu.y }} onClick={(e) => e.stopPropagation()}>
+          <button onClick={() => { setNoteMenu(null); void exportPdf() }}><FileDown size={13} /> 导出为 PDF</button>
+          <button onClick={() => { useAmadeusPrefs.getState().toggleStar(activePage); setNoteMenu(null) }}>
+            <Star size={13} /> {starred ? '取消收藏' : '收藏'}
+          </button>
+          <button onClick={() => { void amadeus.revealInFileManager(activePage); setNoteMenu(null) }}><FolderOpen size={13} /> 在文件管理器中显示</button>
+          <button className="danger" onClick={() => { const p = activePage; setNoteMenu(null); if (window.confirm(`删除笔记「${baseName(p)}」?此操作不可撤销。`)) { useRecentViews.getState().remove(`note:${p}`); void ps().deletePage(p) } }}>
+            <Trash2 size={13} /> 删除笔记
           </button>
         </div>
       )}

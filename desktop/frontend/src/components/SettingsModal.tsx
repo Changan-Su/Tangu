@@ -924,6 +924,24 @@ export const SettingsModal: React.FC<{
                   </>
                 )}
 
+                {/* 收件箱(Inbox Space):系统通知开关。非 managedKeys,保存即生效不重启后端。 */}
+                {tab === 'general' && isDesktop && stored && (
+                  <>
+                    <div className="settings-sec settings-sec--gap">{t('settings.inbox.title')}</div>
+                    <div className="field">
+                      <label className="inline-check" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={stored.inboxNotifyEnabled !== false}
+                          onChange={(e) => void window.tangu!.setConfig({ inboxNotifyEnabled: e.target.checked }).then(setStored)}
+                        />
+                        {t('settings.inbox.notifyLabel')}
+                      </label>
+                      <div className="hint">{t('settings.inbox.notifyHint')}</div>
+                    </div>
+                  </>
+                )}
+
                 {tab === 'notes' && stored && (
                   <>
                     <div className="field">

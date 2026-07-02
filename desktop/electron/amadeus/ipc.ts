@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { ipcMain, shell, type BrowserWindow } from 'electron'
+import { dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import { IPC, type DbReadResult, type ExternalPluginSource } from '@amadeus-shared/ipc'
 import { dbFileSchema, parseDb, serializeDb } from '@amadeus-shared/db/schema'
 import { loadPage, newPage, pageFileName, savePage } from '@amadeus-shared/compiler'
@@ -190,6 +190,30 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
     if (abs) await shell.openPath(abs)
   })
 
+  // 树/侧栏点开:路径已知且精确 → 直接钳制解析,不走 markdown ref 的 decode/basename 兜底
+  // (否则根级同名文件会开错、含字面 %xx 的文件名会被解码到不存在的路径)。
+  ipcMain.handle(IPC.openVaultFile, async (_e, vaultRel: string) => {
+    const err = await shell.openPath(vault.absPath(vaultRel))
+    if (err) throw new Error(err)
+  })
+
+  // 导出 PDF:渲染端已把编辑器克隆挂到 #amx-print-root,@media print 只呈现它(见 amadeus-host.css);
+  // printToPDF 走打印媒体查询,同文档内 amadeus-asset://、KaTeX 字体全部可用,无需隐藏窗口二次渲染。
+  ipcMain.handle(IPC.exportPdf, async (_e, defaultName: string) => {
+    const win = getWindow()
+    if (!win) return null
+    const safe = (defaultName || 'note').replace(/[\\/:*?"<>|]/g, ' ').trim() || 'note'
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      defaultPath: `${safe}.pdf`,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    })
+    if (canceled || !filePath) return null
+    const data = await win.webContents.printToPDF({ printBackground: true, pageSize: 'A4' })
+    await fs.writeFile(filePath, data)
+    shell.showItemInFolder(filePath)
+    return filePath
+  })
+
   // Database(.db JSON):read 按 ref 解析(与附件同一 basename 语义),write 按 read 返回的精确相对路径。
   ipcMain.handle(IPC.dbRead, async (_e, pagePath: string, ref: string): Promise<DbReadResult> => {
     const abs = await vault.resolveAttachment(pagePath, ref)
@@ -240,11 +264,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
     const dstRel = destFolder.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
     const newPath = dstRel ? `${dstRel}/${fileName}` : fileName
     if (newPath === pagePath) return pagePath
-    if (await vault.pathExists(newPath)) throw new Error('目标位置已存在同名页面')
+    if (await vault.pathExists(newPath)) throw new Error('目标位置已存在同名文件')
     await vault.moveEntry(pagePath, newPath)
-    index.remove(pagePath)
-    await index.update(newPath)
-    await rememberPage(newPath)
+    // 树里的附件(非 .md)也走本通道移动:不进索引(index.update 会把二进制按 utf8 读成巨串)、不记 lastPage。
+    if (newPath.endsWith('.md')) {
+      index.remove(pagePath)
+      await index.update(newPath)
+      await rememberPage(newPath)
+    }
     return newPath
   })
 
