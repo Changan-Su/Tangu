@@ -284,8 +284,11 @@ export async function onUserRunDone(sessionId: string, userId: string, memScopeS
       }
     }
 
-    if (assistMode && (logDue || memoryDue)) {
-      const discRunId = await startAssistDiscussion({ sessionId, userId, cfg, sk, wantLog: logDue, wantMemory: memoryDue });
+    // 辅助讨论只跟「记忆」周期(设置里的 每 Y 轮):此前挂在 logDue||memoryDue 上,而 logDue 跟随
+    // 标题的高频周期(如 标题每2轮+记忆每3轮 → 讨论在 2,3,4,6,8,9… 轮触发),用户观感即「忽隔一轮
+    // 忽隔两轮」。改为仅 memoryDue 拉起讨论,LOG 在辅助模式下随记忆周期一并商议,节奏可预期。
+    if (assistMode && memoryDue) {
+      const discRunId = await startAssistDiscussion({ sessionId, userId, cfg, sk, wantLog: true, wantMemory: true });
       if (discRunId) {
         await logActivity(userId, 'assist_discussion', `与主 Agent 商议${memoryDue ? '日志+记忆' : '日志'}更新(run ${discRunId.slice(0, 8)})`, sessionId);
         log(`辅助讨论已发起 run=${discRunId}`);

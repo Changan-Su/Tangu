@@ -26,10 +26,10 @@ const USER = 'u1';
 let home: string;
 let appendedLogs: string[];
 
-function writeConfig(mode: 'independent' | 'assist'): void {
+function writeConfig(mode: 'independent' | 'assist', everyMemoryRounds = 9): void {
   writeFileSync(join(home, 'config.json'), JSON.stringify({
     specialAgents: {
-      historian: { enabled: true, modelId: 'm1', everyTitleRounds: 3, everyMemoryRounds: 9, firstRoundTrigger: true, mode },
+      historian: { enabled: true, modelId: 'm1', everyTitleRounds: 3, everyMemoryRounds, firstRoundTrigger: true, mode },
     },
   }), 'utf8');
 }
@@ -102,10 +102,10 @@ async function seedMessages(sessionId: string): Promise<void> {
 
 describe('Historian assist 模式', () => {
   it('第 3 轮触发:branch 讨论会话 + 群聊 run 落库(旗标齐)+ 活动流/登记;标题独立更新,LOG 不由 Historian 写', async () => {
-    writeConfig('assist');
+    writeConfig('assist', 3); // 讨论跟「记忆」周期:memory 每 3 轮 → roundN=3 时 memoryDue 拉起讨论
     await seedSession('S');
     await seedMessages('S');
-    await seedDoneRuns('S', 3); // roundN=3 → titleDue(=logDue),memoryDue 否
+    await seedDoneRuns('S', 3);
 
     await onUserRunDone('S', USER);
 
@@ -155,6 +155,22 @@ describe('Historian assist 模式', () => {
     const bgRun = await query<any[]>(`SELECT id, status FROM agent_runs WHERE session_id = ? ORDER BY created_at DESC LIMIT 1`, [bg[0].id]);
     expect(bgRun[0].id).toBe(runs[0].id);
     expect(bgRun[0].status).toBe('queued'); // enqueueRun 被 mock,run 停在落库初态
+  });
+
+  it('标题轮(titleDue 但 memory 未到期)不再拉起讨论:节奏只跟记忆周期', async () => {
+    writeConfig('assist'); // title 每 3 轮、memory 每 9 轮 → roundN=3 只有 titleDue
+    await seedSession('S2');
+    await seedMessages('S2');
+    await seedDoneRuns('S2', 3);
+
+    await onUserRunDone('S2', USER);
+
+    // 标题照常独立维护;但不起讨论、也不独立写 LOG(LOG 在辅助模式下随记忆周期一并商议)
+    const s = await query<any[]>(`SELECT title FROM chat_sessions WHERE id = 'S2'`);
+    expect(s[0].title).toBe('新标题');
+    expect(appendedLogs).toEqual([]);
+    const disc = await query<any[]>(`SELECT id FROM chat_sessions WHERE kind = 'discussion'`);
+    expect(disc.length).toBe(0);
   });
 
   it('首轮(roundN=1)在 assist 配置下仍走独立模式:写 LOG、不起讨论', async () => {
