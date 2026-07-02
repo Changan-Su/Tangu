@@ -189,6 +189,9 @@ async function externalEngineLoop(runId: string, ac: AbortController, run: any, 
     await drain(runId);
     await publish(runId, 'done', { content: finalContent });
     await updateRunStatus(runId, 'done', { result: { content: finalContent } });
+    // 外部引擎 run 完成同样触发 Historian。此路径没做 agent 激活 → 不传 slug,
+    // 由 onUserRunDone 从会话 agent_config 兜底解析并折叠记忆域。
+    void onUserRunDone(sessionId, userId);
   } catch (err: any) {
     const aborted = err?.name === 'AbortError' || ac.signal.aborted;
     const status = aborted ? 'aborted' : 'failed';
@@ -420,6 +423,9 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
         attachments,
         signal: ac.signal,
       });
+      // 群聊 run 也按轮触发 Historian(标题/LOG 维护)——原先此分支提前 return,群聊会话永远没有标题维护。
+      // Historian 内部只数 done run 且有实质增量地板,失败/中止场景自然无害。
+      void onUserRunDone(sessionId, userId, memScopeSlug);
       return;
     }
 
@@ -449,11 +455,12 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
 
     // user 消息在此（run 真正开始时）才落库——而非 POST 时——保证排队 run 的 user 消息时间戳
     // 排在上一个 run 的 assistant 之后，hydrate/显示顺序才正确。幂等（ON CONFLICT DO NOTHING）。
-    if (input.userMessageId && input.message) {
+    // 纯附件消息（文本为空,如微信发图）也必须落库——否则附件随消息一起蒸发,模型永远看不到图。
+    if (input.userMessageId && (input.message || attachments.length)) {
       await deps().state.insertUserMessage({
         id: input.userMessageId,
         sessionId,
-        content: String(input.message),
+        content: String(input.message || ''),
         modelId,
         attachments: Array.isArray(attachments) && attachments.length ? attachments : null,
       });
@@ -1073,7 +1080,9 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
     await updateRunStatus(runId, 'done', { result: { content: finalContent }, tokensTotal });
     // 本地 Historian（Special Agent）：本「轮」完成 → 按 X/Y 轮触发标题/记忆维护。
     // fire-and-forget，绝不阻断/影响 run；非本地形态或未启用时内部 no-op。
-    void onUserRunDone(sessionId, userId, activeAgentSlug);
+    // 传 memScopeSlug(记忆域,shareDefaultMemory 已折叠)而非 activeAgentSlug:Historian 读写的
+    // MEMORY/LOG 必须与 run 内 remember/log_event 落同一文件夹,否则共用默认记忆的 agent 会被写歪。
+    void onUserRunDone(sessionId, userId, memScopeSlug);
   } catch (err: any) {
     const aborted = err?.name === 'AbortError' || err instanceof AbortLikeError;
     const status = aborted ? 'aborted' : 'failed';

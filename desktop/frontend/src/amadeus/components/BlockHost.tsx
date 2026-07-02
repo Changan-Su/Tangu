@@ -30,6 +30,7 @@ export const BlockHost = memo(function BlockHost({
   const setBlockContent = usePageStore((s) => s.setBlockContent)
   const insertBlockAfter = usePageStore((s) => s.insertBlockAfter)
   const duplicateBlock = usePageStore((s) => s.duplicateBlock)
+  const splitToColumn = usePageStore((s) => s.splitToColumn)
   const deleteBlock = usePageStore((s) => s.deleteBlock)
   const deleteBlockFocusPrev = usePageStore((s) => s.deleteBlockFocusPrev)
   const mergeWithPrev = usePageStore((s) => s.mergeWithPrev)
@@ -308,6 +309,14 @@ export const BlockHost = memo(function BlockHost({
           aria-label="duplicate block"
         >
           ⎘
+        </button>
+        <button
+          className="block-act"
+          onClick={() => splitToColumn(blockId, 'right')}
+          title="移到右侧新列 / Move to new column"
+          aria-label="move to new column"
+        >
+          ⫿
         </button>
         <button
           className="block-act block-del"

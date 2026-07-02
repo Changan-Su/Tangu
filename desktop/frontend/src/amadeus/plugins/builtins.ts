@@ -5,7 +5,7 @@ import type { AmadeusPlugin } from './types'
 import { OutlinePanel } from './components/OutlinePanel'
 import { WordCountStatus } from './components/WordCountStatus'
 
-const coreCommands: AmadeusPlugin = {
+export const coreCommands: AmadeusPlugin = {
   id: 'core-commands',
   name: '核心命令',
   version: '1.0.0',
@@ -39,7 +39,7 @@ const coreCommands: AmadeusPlugin = {
   },
 }
 
-const wordCount: AmadeusPlugin = {
+export const wordCount: AmadeusPlugin = {
   id: 'word-count',
   name: '字数统计',
   version: '1.0.0',
@@ -61,7 +61,7 @@ const wordCount: AmadeusPlugin = {
   },
 }
 
-const outline: AmadeusPlugin = {
+export const outline: AmadeusPlugin = {
   id: 'outline',
   name: '大纲',
   version: '1.0.0',
@@ -72,7 +72,7 @@ const outline: AmadeusPlugin = {
   },
 }
 
-const calloutBlocks: AmadeusPlugin = {
+export const calloutBlocks: AmadeusPlugin = {
   id: 'callout-blocks',
   name: 'Callout 标注',
   version: '1.0.0',
@@ -106,7 +106,7 @@ const calloutBlocks: AmadeusPlugin = {
   },
 }
 
-const extraThemes: AmadeusPlugin = {
+export const extraThemes: AmadeusPlugin = {
   id: 'extra-themes',
   name: '主题扩展包',
   version: '1.0.0',

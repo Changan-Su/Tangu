@@ -2,7 +2,7 @@
  * 微信 iLink Bot API 精简客户端。基于 Echo 的已验证实现泛化到 Tangu：
  * QR 登录、长轮询取消息、文本回复。v1 只处理文本与语音转写文本。
  */
-import { createCipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
 
 export const ILINK_BASE_URL = 'https://ilinkai.weixin.qq.com';
 // 微信 c2c 媒体 CDN(发送图片/文件:先把密文 POST 到此处,拿 x-encrypted-param 再 sendmessage 引用)。
@@ -37,6 +37,9 @@ const TYPING_STOP = 2;
 const MEDIA_IMAGE = 1;
 const MEDIA_FILE = 3;
 const MEDIA_UPLOAD_TIMEOUT_MS = 120_000;
+// 入站媒体下载上限(解密前密文大小)。微信文件可到 100MB+,但 worker 内存有限。
+// ponytail: 超限直接拒收并提示,分块/流式解密等真有需求再做。
+const MEDIA_MAX_BYTES = 50 * 1024 * 1024;
 
 export type IlinkMediaKind = 'image' | 'file';
 
@@ -49,6 +52,56 @@ function aesEcbPaddedSize(plaintextSize: number): number {
 function encryptAesEcb(plaintext: Buffer, key: Buffer): Buffer {
   const cipher = createCipheriv('aes-128-ecb', key, null);
   return Buffer.concat([cipher.update(plaintext), cipher.final()]);
+}
+
+/** 图片魔数 → mime（解密后嗅探；下载的密文无 Content-Type 可信）。 */
+function sniffImageMime(buf: Buffer): string {
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+  if (buf.length >= 6 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return 'image/gif';
+  if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+  return '';
+}
+
+/** aes_key 字段的候选 16 字节 key：出站规范是 base64(32 字符 hex 串)，入站真机格式未定 → 三种解法都试。 */
+function candidateKeys(aesKeyField: string): Buffer[] {
+  const keys: Buffer[] = [];
+  const push = (b: Buffer): void => { if (b.length === 16 && !keys.some((k) => k.equals(b))) keys.push(b); };
+  const dec = Buffer.from(aesKeyField, 'base64');
+  const ascii = dec.toString('ascii');
+  if (/^[0-9a-fA-F]{32}$/.test(ascii)) push(Buffer.from(ascii, 'hex')); // base64(hex 串) —— 出站同款
+  push(dec); // base64(原始 16 字节)
+  if (/^[0-9a-fA-F]{32}$/.test(aesKeyField)) push(Buffer.from(aesKeyField, 'hex')); // 裸 hex 串
+  return keys;
+}
+
+/**
+ * 解码一条入站媒体密文：密钥格式 × 算法(ECB / CBC-零IV) × 明文直通 全组合尝试，
+ * 用内容验真挑出正确解 —— 图片看魔数，文件看解出长度 === expectedSize（PKCS7 撞对 key 的概率可忽略）。
+ * 入站加密由微信客户端产生、无文档，穷举 + 验真比信 encrypt_type 字段可靠。
+ */
+export function decodeMediaBuffer(
+  cipherBuf: Buffer,
+  aesKeyField: string,
+  expectedSize?: number,
+): { buffer: Buffer; mimeType: string } | null {
+  const candidates: Buffer[] = [cipherBuf]; // 直通:encrypt_type=0/未加密的情况
+  for (const algo of ['aes-128-ecb', 'aes-128-cbc'] as const) {
+    for (const key of candidateKeys(aesKeyField)) {
+      try {
+        const d = createDecipheriv(algo, key, algo === 'aes-128-cbc' ? Buffer.alloc(16) : null);
+        candidates.push(Buffer.concat([d.update(cipherBuf), d.final()]));
+      } catch { /* 坏 padding → 非此解 */ }
+    }
+  }
+  for (const c of candidates) {
+    const mimeType = sniffImageMime(c);
+    if (mimeType) return { buffer: c, mimeType };
+  }
+  if (expectedSize) {
+    for (const c of candidates) if (c.length === expectedSize) return { buffer: c, mimeType: 'application/octet-stream' };
+  }
+  return null;
 }
 
 export interface IlinkInboundMessage {
@@ -139,6 +192,59 @@ export function extractText(itemList: Array<Record<string, unknown>> | undefined
     }
   }
   return '';
+}
+
+export interface IlinkImageMedia { encrypt_query_param: string; aes_key: string; encrypt_type: number; download_url?: string }
+export interface IlinkFileMedia { media: IlinkImageMedia; fileName: string; size: number }
+
+function toMedia(media: any): IlinkImageMedia | null {
+  if (!media?.encrypt_query_param) return null;
+  return {
+    encrypt_query_param: String(media.encrypt_query_param),
+    aes_key: String(media.aes_key ?? ''),
+    encrypt_type: Number(media.encrypt_type ?? 0),
+    // 有些实现直接给完整下载 URL(真机实测字段叫 full_url);有就优先用,没有再按 /c2c/download 对称拼。
+    download_url: String(media.full_url ?? media.download_full_url ?? media.download_url ?? media.url ?? '') || undefined,
+  };
+}
+
+/** 抽出所有入站图片项的 media 描述（供 downloadMedia 下载解密）。结构与 sendMedia 出站对称。 */
+export function extractImageMedias(itemList: Array<Record<string, unknown>> | undefined): IlinkImageMedia[] {
+  const out: IlinkImageMedia[] = [];
+  for (const item of itemList ?? []) {
+    if (item?.type !== ITEM_IMAGE) continue;
+    const m = toMedia((item.image_item as any)?.media);
+    if (m) out.push(m);
+  }
+  return out;
+}
+
+/** 抽出所有入站文件项（file_item.media + 文件名/原始大小，与出站 sendMedia 的 file_item 对称）。 */
+export function extractFileMedias(itemList: Array<Record<string, unknown>> | undefined): IlinkFileMedia[] {
+  const out: IlinkFileMedia[] = [];
+  for (const item of itemList ?? []) {
+    if (item?.type !== ITEM_FILE) continue;
+    const fi = item.file_item as any;
+    const m = toMedia(fi?.media);
+    if (m) out.push({ media: m, fileName: String(fi?.file_name ?? '') || 'wechat-file', size: Number(fi?.len ?? 0) || 0 });
+  }
+  return out;
+}
+
+/**
+ * 诊断用:把 item_list 压成「type=2[media,mid_size]{media:encrypt_query_param,aes_key,…}」形状串。
+ * 只输出字段名不输出值(密钥/密文参数不落日志),供解析失败时看清真实入站结构。
+ */
+export function describeMediaItems(itemList: Array<Record<string, unknown>> | undefined): string {
+  return (itemList ?? [])
+    .map((it) => {
+      const t = Number(it?.type ?? -1);
+      const body = Object.entries(it ?? {}).find(([k]) => k.endsWith('_item'))?.[1] as Record<string, unknown> | undefined;
+      const keys = body ? Object.keys(body).join(',') : '';
+      const media = body?.media as Record<string, unknown> | undefined;
+      return `type=${t}[${keys}]${media ? `{media:${Object.keys(media).join(',')}}` : ''}`;
+    })
+    .join(' ');
 }
 
 export function isSessionExpired(u: { ret?: number; errcode?: number; errmsg?: string }): boolean {
@@ -280,6 +386,39 @@ export class IlinkClient {
     };
     if (contextToken) msg.context_token = contextToken;
     return (await this.post(EP_SEND_MESSAGE, { msg }, API_TIMEOUT_MS)) as IlinkSendResult;
+  }
+
+  /**
+   * 下载并解码一条入站媒体（图片/文件）。
+   *   GET CDN /c2c/download?encrypted_query_param=<param>（或 media 自带完整下载 URL）取密文，
+   *   再 decodeMediaBuffer 穷举解码。解不出/缺字段 → 抛带形状诊断的错误（不含密钥本体），
+   *   调用方记日志并给 agent 文字兜底，绝不静默丢整条消息。
+   */
+  async downloadMedia(media: IlinkImageMedia, opts?: { expectedSize?: number }): Promise<{ mimeType: string; buffer: Buffer }> {
+    if (!media.encrypt_query_param || !media.aes_key) {
+      throw new Error(`入站媒体缺字段(encrypt_type=${media.encrypt_type} has_param=${!!media.encrypt_query_param} has_key=${!!media.aes_key})`);
+    }
+    const url = media.download_url
+      || `${ILINK_CDN_BASE_URL}/download?encrypted_query_param=${encodeURIComponent(media.encrypt_query_param)}`;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), MEDIA_UPLOAD_TIMEOUT_MS);
+    try {
+      const resp = await fetch(url, { method: 'GET', headers: getHeaders, signal: ctrl.signal });
+      if (!resp.ok) throw new Error(`iLink CDN download HTTP ${resp.status}`);
+      const cipher = Buffer.from(await resp.arrayBuffer());
+      if (cipher.length > MEDIA_MAX_BYTES) throw new Error(`入站媒体过大(${cipher.length}B > ${MEDIA_MAX_BYTES}B)`);
+      const decoded = decodeMediaBuffer(cipher, media.aes_key, opts?.expectedSize);
+      if (!decoded) {
+        const keyDec = Buffer.from(media.aes_key, 'base64');
+        throw new Error(
+          `入站媒体解码失败(encrypt_type=${media.encrypt_type} key_len=${media.aes_key.length} key_declen=${keyDec.length} `
+          + `cipher_len=${cipher.length} expected=${opts?.expectedSize ?? '-'} head=${cipher.subarray(0, 8).toString('hex')})`,
+        );
+      }
+      return decoded;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   static async qrStart(baseUrl = ILINK_BASE_URL, botType = '3'): Promise<QrStart> {

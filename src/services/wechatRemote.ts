@@ -272,8 +272,9 @@ class WechatRemoteService {
     return null;
   }
 
-  private async handleInbound(msg: { accountId: string; openid: string; text: string; messageId?: string }): Promise<string> {
+  private async handleInbound(msg: { accountId: string; openid: string; text: string; messageId?: string; attachments?: Array<{ name: string; mimeType: string; data: string }>; files?: Array<{ name: string; mimeType: string; buffer: Buffer }> }): Promise<string> {
     const text = msg.text.trim();
+    const attachments = msg.attachments ?? [];
     const key = peerKey(msg.accountId, msg.openid);
     // 先校验绑定:stop / 批准拒绝 / slash / 普通任务 都要求该 peer 已绑定(防未绑定 openid 绕过执行)。
     const binding = await this.findBinding(msg.accountId, msg.openid);
@@ -331,6 +332,18 @@ class WechatRemoteService {
       // 接入 Normal Agent 机制：会话已选则用之，否则用用户设定的默认 agent（兼容无 agentSlug 的旧会话）。
       agentSlug: currentCfg.agentSlug || readAgentsMeta().defaultSlug,
     };
+    // 微信入站文件 → 落盘到会话工作区 wechat-inbox/，把相对路径写进消息（host 工具可直接读）。
+    const fileNotes: string[] = [];
+    for (const f of msg.files ?? []) {
+      try {
+        const saved = await this.saveInboundFile(agentConfig.cwd, f);
+        fileNotes.push(`[用户发来文件，已保存到 ${saved}]`);
+      } catch (e: any) {
+        fileNotes.push(`[用户发来文件 ${f.name}，但保存失败：${e?.message || e}]`);
+      }
+    }
+    // 纯图片消息给个占位文本:部分 provider(如 Anthropic)拒绝空文本块,聊天记录里也更可读。
+    const message = [text, ...fileNotes].filter(Boolean).join('\n') || (attachments.length ? '[图片]' : '');
     await createRun({
       id: runId,
       sessionId: binding.session_id,
@@ -339,9 +352,9 @@ class WechatRemoteService {
       modelId,
       assistantMessageId,
       input: {
-        message: text,
+        message,
         userMessageId,
-        attachments: [],
+        attachments, // 微信入站图片（下载解密后 {name,mimeType,data}）→ 与网页发图同一条多模态路径
         agentConfig,
         source: { channel: 'wechat', accountId: msg.accountId, openid: msg.openid, messageId: msg.messageId },
       },
@@ -349,6 +362,25 @@ class WechatRemoteService {
     activeRunsByPeer.set(key, runId);
     enqueueRun(binding.session_id, runId);
     return this.waitForRunReply(runId, key, msg.accountId, msg.openid, agentConfig.agentSlug);
+  }
+
+  /**
+   * 把一个微信入站文件写到会话工作区的 wechat-inbox/ 下，返回相对 cwd 的路径。
+   * 文件名做基本清洗（去路径分隔等），重名时追加 -1/-2… 不覆盖旧文件。
+   */
+  private async saveInboundFile(cwd: string, f: { name: string; buffer: Buffer }): Promise<string> {
+    const inbox = path.join(cwd, 'wechat-inbox');
+    await fsp.mkdir(inbox, { recursive: true });
+    const safe = path.basename(f.name).replace(/[\\/:*?"<>|]/g, '_').slice(0, 200) || 'wechat-file';
+    const ext = path.extname(safe);
+    const stem = path.basename(safe, ext);
+    let target = path.join(inbox, safe);
+    for (let i = 1; i <= 99; i++) {
+      try { await fsp.access(target); } catch { break; } // 不存在 → 用它
+      target = path.join(inbox, `${stem}-${i}${ext}`);
+    }
+    await fsp.writeFile(target, f.buffer);
+    return path.relative(cwd, target);
   }
 
   /**

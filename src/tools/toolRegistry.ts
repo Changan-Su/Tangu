@@ -72,7 +72,9 @@ export function resolveTools(profile: AppProfile, ctx: ToolContext): Map<string,
     const m = t.mode || 'both';
     if (host && m === 'sandbox') return;
     if (!host && m === 'host') return;
-    if (ctx.planMode && !PLAN_MODE_TOOLS.has(t.name)) return; // 计划模式:只读集中过滤
+    // 计划模式:只读集中过滤。Muse 例外:remember 只写它自己记忆域(agents/muse/MEMORY.md)的自我校准
+    // 洞察,不触达用户资产——「对用户的唯一写」仍是 add_muse_todo;普通 plan mode 行为零变化。
+    if (ctx.planMode && !PLAN_MODE_TOOLS.has(t.name) && !((ctx as any).muse && t.name === 'remember')) return;
     if (isBuiltin && builtins !== 'all' && !builtins.includes(t.name)) return;
     if (t.isEnabledFor && !t.isEnabledFor(profile, ctx)) return;
     out.set(t.name, t);

@@ -6,14 +6,22 @@ import { type ReactNode, type DragEvent as RDragEvent, type MouseEvent as RMouse
 import { create } from 'zustand'
 import {
   SquarePen, FolderOpen, Folder, FolderPlus, Plus, MoreHorizontal, Pencil, Trash2, FolderInput,
-  FolderSymlink, ChevronDown, ChevronRight, Search, Code2, Eye,
+  FolderSymlink, ChevronDown, ChevronRight, Search, Code2, Eye, CalendarDays, Star, History,
 } from 'lucide-react'
 import { useTheme } from './stores/themeStore'
 import { usePageStore } from '@amadeus/store/pageStore'
-import { useUiStore } from '@amadeus/store/uiStore'
+import { useUiOverlay } from './amadeusOverlayStore'
 import { amadeus } from '@amadeus/api'
+import { getAttachmentPrefs } from '@amadeus/lib/attachments'
+import { usePluginStore } from '@amadeus/plugins/pluginStore'
+import { installAmadeusPlugins } from './amadeusPlugins'
+import { AmadeusPropertiesPanel } from './amadeusProperties'
+import { openDailyNote } from './amadeusTemplates'
+import { useAmadeusPrefs } from './amadeusPrefs'
+import { openNote } from './amadeusNav'
 import { compile, parsePageSource } from '@amadeus-shared/compiler'
-import { recordNav } from './engine'
+import { recordNav, useWorkspace } from './engine'
+import type { ViewProps } from './engine'
 import { PageView } from '@amadeus/components/PageView'
 import '@amadeus/blocks' // 注册内置块类型(markdown→Milkdown);缺此 side-effect 导入则块显示「未知块类型」
 import './views/chat2/sidebar2.css' // t2s- 侧栏样式(通常已随 SessionsView 全局加载;显式引入以防独立挂载)
@@ -69,12 +77,40 @@ function Breadcrumb() {
 
 interface Ctx { kind: 'page' | 'folder'; path: string; x: number; y: number }
 
+/** 收藏⭐ / 最近🕘 分区(顶部,可折叠):渲染对 pages 过滤 → 已删除的自然消失。 */
+function PrefsSections({ row, pages }: { row: (path: string) => ReactNode; pages: string[] }) {
+  const starredAll = useAmadeusPrefs((s) => s.starred)
+  const recentsAll = useAmadeusPrefs((s) => s.recents)
+  const [openStar, setOpenStar] = useState(true)
+  const [openRecent, setOpenRecent] = useState(false)
+  const exists = new Set(pages)
+  const starred = starredAll.filter((p) => exists.has(p))
+  const recents = recentsAll.filter((p) => exists.has(p)).slice(0, 8)
+  if (!starred.length && !recents.length) return null
+  const section = (icon: ReactNode, label: string, items: string[], open: boolean, toggle: () => void): ReactNode => (
+    items.length > 0 && (
+      <div className="amx-prefs-group">
+        <button className="t2s-group-toggle" onClick={toggle}>
+          <span className="t2s-chev">{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
+          <span className="t2s-group-name">{icon}<span className="t2s-group-label">{label}</span><span className="t2s-count">{items.length}</span></span>
+        </button>
+        {open && <div className="t2s-group-sessions">{items.map(row)}</div>}
+      </div>
+    )
+  )
+  return (
+    <>
+      {section(<Star size={12} />, '收藏', starred, openStar, () => setOpenStar((o) => !o))}
+      {section(<History size={12} />, '最近', recents, openRecent, () => setOpenRecent((o) => !o))}
+    </>
+  )
+}
+
 export function AmadeusPagesView() {
   const pages = usePageStore((s) => s.pages)
   const folders = usePageStore((s) => s.folders)
   const activePage = usePageStore((s) => s.activePage)
   const vaultRoot = usePageStore((s) => s.vaultRoot)
-  const toast = useUiStore((s) => s.toast)
 
   const [query, setQuery] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -86,9 +122,9 @@ export function AmadeusPagesView() {
   const [flash, setFlash] = useState<string | null>(null)
   const flashRef = useRef<HTMLElement | null>(null)
 
-  // 首次挂载恢复上次 Vault(跨启动持久)+ 订阅外部文件变更(agent/其它进程改 .md → 实时重载/刷新结构)。
+  // 首次挂载装插件(builtins 子集 + 外部插件)+ 恢复上次 Vault + 订阅外部文件变更。
   useEffect(() => {
-    if (!restoreTried) { restoreTried = true; void ps().restoreVault() }
+    if (!restoreTried) { restoreTried = true; installAmadeusPlugins(); void ps().restoreVault() }
     const offExt = amadeus.onExternalChange?.((p) => void ps().reconcileExternal(p))
     const offStruct = amadeus.onStructureChange?.(() => void ps().refreshStructure())
     return () => { offExt?.(); offStruct?.() }
@@ -140,7 +176,7 @@ export function AmadeusPagesView() {
       key={path}
       ref={(el) => { if (path === flash) flashRef.current = el }}
       className={`t2s-srow${path === activePage ? ' active' : ''}${path === flash ? ' amx-flash' : ''}`}
-      onClick={() => void ps().loadPage(path)}
+      onClick={(e) => void openNote(path, { newTab: e.metaKey || e.ctrlKey })}
       onContextMenu={(e) => { e.preventDefault(); setMenu({ kind: 'page', path, x: e.clientX, y: e.clientY }) }}
       title={path}
     >
@@ -181,6 +217,12 @@ export function AmadeusPagesView() {
                   <span className="t2s-special-ic"><SquarePen size={15} /></span>
                   <span className="t2s-special-title">新建笔记</span>
                 </button>
+                {vaultRoot && (
+                  <button className="t2s-special" onClick={() => void openDailyNote()} title="打开(或创建)今天的日记">
+                    <span className="t2s-special-ic"><CalendarDays size={15} /></span>
+                    <span className="t2s-special-title">今天</span>
+                  </button>
+                )}
                 <button className="t2s-special" onClick={() => void ps().openVault()} title={vaultRoot || undefined}>
                   <span className="t2s-special-ic"><FolderOpen size={15} /></span>
                   <span className="t2s-special-title">{vaultRoot ? `Vault：${baseName(vaultRoot)}` : '打开 Vault'}</span>
@@ -188,6 +230,7 @@ export function AmadeusPagesView() {
               </div>
 
               {!vaultRoot && <div className="t2s-hint">打开一个 Vault 文件夹开始。</div>}
+              <PrefsSections row={row} pages={pages} />
               {rootPages.map(row)}
 
               {groups.map(({ folder, items }) => {
@@ -215,7 +258,11 @@ export function AmadeusPagesView() {
 
       {menu?.kind === 'page' && (
         <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
+          <button onClick={() => { void openNote(menu.path, { newTab: true }); setMenu(null) }}><Plus size={13} /> 在新标签页打开</button>
           <button onClick={() => startRename(menu.path)}><Pencil size={13} /> 重命名</button>
+          <button onClick={() => { useAmadeusPrefs.getState().toggleStar(menu.path); setMenu(null) }}>
+            <Star size={13} /> {useAmadeusPrefs.getState().starred.includes(menu.path) ? '取消收藏' : '收藏'}
+          </button>
           {parentOf(menu.path) !== '' && (
             <button onClick={() => { void ps().movePage(menu.path, ''); setMenu(null) }}><FolderInput size={13} /> 移到根目录</button>
           )}
@@ -236,7 +283,6 @@ export function AmadeusPagesView() {
         </div>
       )}
 
-      {toast && <div className="toast">{toast}</div>}
     </div>
   )
 }
@@ -340,10 +386,60 @@ function SourceEditor() {
   )
 }
 
-export function AmadeusEditorView() {
+/** 插件贡献的状态条项(如字数统计)→ 编辑器工具条(engine 无全局状态栏,就近呈现)。 */
+function PluginStatusItems() {
+  const items = usePluginStore((s) => s.statusItems)
+  if (!items.length) return null
+  return (
+    <span className="amx-status">
+      {items.map((o) => {
+        const C = o.item.component
+        return <C key={`${o.pluginId}:${o.item.id}`} />
+      })}
+    </span>
+  )
+}
+
+// 多编辑器 tab 间「最近活动的编辑器」:侧栏点笔记时(焦点可能在侧栏,无 main tab 处于 active)由它认领。
+let lastActiveEditorLeafId: string | null = null
+
+export function AmadeusEditorView({ leaf }: ViewProps) {
   const activePage = usePageStore((s) => s.activePage)
-  const [mode, setMode] = useState<'wysiwyg' | 'source'>('wysiwyg')
+  // 模式在 uiOverlayStore(供命令面板「切换 源码/可视」),不再是组件内 state。
+  const mode = useUiOverlay((s) => s.editorMode)
   const [dragging, setDragging] = useState(false)
+  const isActiveLeaf = useWorkspace((s) => s.mainTabs.find((t) => t.id === leaf.id)?.active ?? false)
+  const notePath = typeof leaf.params.notePath === 'string' ? leaf.params.notePath : null
+  const prevActiveRef = useRef(false)
+
+  // 恢复的 tab 一挂载就有笔记名(不必等激活)。
+  useEffect(() => { if (notePath) leaf.setTitle(baseName(notePath)) }, [notePath]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 认领 / 激活(stage 1:单活文档,全局 pageStore):
+  //  - 切回本 tab(becameActive)且它认领的笔记 ≠ 当前全局笔记 → 加载它的笔记;
+  //  - 本 tab 为当前编辑器(active,或焦点在侧栏时的「最近活动编辑器」)期间发生导航 → 认领新笔记(写 params+标题)。
+  useEffect(() => {
+    const becameActive = isActiveLeaf && !prevActiveRef.current
+    prevActiveRef.current = isActiveLeaf
+    if (isActiveLeaf) lastActiveEditorLeafId = leaf.id
+    // null 兜底只允许「唯一编辑器」的情形——多编辑器时会互相覆盖认领(恢复的分屏被同一笔记吞掉)。
+    const editorCount = ((useWorkspace.getState() as unknown as { api?: { panels: Array<{ params?: Record<string, unknown> }> } }).api?.panels
+      .filter((p) => p.params?.__type === 'amadeus-editor').length) ?? 1
+    const mine = isActiveLeaf || lastActiveEditorLeafId === leaf.id || (lastActiveEditorLeafId === null && editorCount <= 1)
+    if (!mine) return
+    const globalPage = ps().activePage
+    if (becameActive && notePath && notePath !== globalPage) {
+      void ps().loadPage(notePath)
+      return
+    }
+    if (globalPage) {
+      if (leaf.params.notePath !== globalPage) leaf.setParams({ ...leaf.params, notePath: globalPage })
+      leaf.setTitle(baseName(globalPage))
+    }
+  }, [isActiveLeaf, activePage]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // stage 1 局限:分屏同时可见的两个编辑器共享全局文档——认领了别的笔记的非活动编辑器渲染占位,不显示错误文档。
+  const stale = !!(notePath && activePage && notePath !== activePage)
 
   // 拖入文件 → 按 Tangu 笔记设置存放(attachments/同目录/固定夹)→ 预览开则插 ![[base]],否则插 [名](相对路径)。
   const onDrop = async (e: RDragEvent<HTMLDivElement>): Promise<void> => {
@@ -353,9 +449,7 @@ export function AmadeusEditorView() {
     setDragging(false)
     const page = ps().activePage
     if (!page) return
-    const cfg = await window.tangu?.getConfig?.().catch(() => null)
-    const opts = { mode: cfg?.notesAttachmentMode ?? 'attachments', folder: cfg?.notesAttachmentFolder ?? 'assets' }
-    const preview = cfg?.notesImportPreview !== false
+    const { opts, preview } = await getAttachmentPrefs()
     for (const f of files) {
       try {
         const bytes = new Uint8Array(await f.arrayBuffer())
@@ -384,14 +478,28 @@ export function AmadeusEditorView() {
     if (page) void amadeus.openAttachment(page, href)
   }
 
+  if (stale) {
+    return (
+      <EditorScope>
+        <div className="amx-empty">
+          <button className="amx-stale-btn" onClick={() => void ps().loadPage(notePath!)}>
+            点击加载「{baseName(notePath!)}」
+          </button>
+          <div className="hint" style={{ marginTop: 8 }}>另一个编辑器正在显示其它笔记(分屏下同一时刻只能编辑一篇)。</div>
+        </div>
+      </EditorScope>
+    )
+  }
+
   return (
     <EditorScope dragging={dragging} onDrop={(e) => void onDrop(e)} onDragOver={onDragOver} onDragLeave={onDragLeave} onClick={onClick}>
       {activePage && (
         <div className="amx-toolbar">
           <Breadcrumb />
+          <PluginStatusItems />
           <button
             className="amx-mode-btn"
-            onClick={() => setMode((m) => (m === 'source' ? 'wysiwyg' : 'source'))}
+            onClick={() => useUiOverlay.getState().toggleEditorMode()}
             title={mode === 'source' ? '切换到可视编辑(所见即所得)' : '切换到源码 Markdown'}
           >
             {mode === 'source' ? <><Eye size={14} /> 可视</> : <><Code2 size={14} /> 源码</>}
@@ -404,7 +512,7 @@ export function AmadeusEditorView() {
         <SourceEditor key={activePage} />
       ) : (
         <>
-          <div className="amx-doc"><NoteTitle /></div>
+          <div className="amx-doc"><NoteTitle /><AmadeusPropertiesPanel /></div>
           <PageView bare />
         </>
       )}
@@ -470,7 +578,7 @@ export function AmadeusBacklinksView() {
       ) : (
         <div className="amx-list">
           {refs.map((r) => (
-            <button key={r.path} className="amx-list-item" onClick={() => void ps().loadPage(r.path)} title={r.path}>
+            <button key={r.path} className="amx-list-item" onClick={() => void openNote(r.path)} title={r.path}>
               {r.title}
               {r.snippet && <span className="amx-backlink-snippet">{r.snippet}</span>}
             </button>

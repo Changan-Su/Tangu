@@ -106,3 +106,17 @@ describe('config.toml apps tag (per-app 标签)', () => {
     expect(parseAgentConfig('r', 'name = "R"\n', '').version).toBe('1.0.0'); // 缺省
   });
 });
+
+describe('created_by = system (系统 agent,如 Muse)', () => {
+  it('serialize → parse 保留 system;未知值回落 user', () => {
+    const def: NormalAgentDef = {
+      slug: 'muse', name: 'Muse', version: '1.0.0', description: '', model: '', tools: [],
+      thinkingLevel: '', maxIterations: null, approvalMode: '',
+      createdBy: 'system', createdAt: '2026-07-01T00:00:00.000Z', systemPrompt: 'p',
+    };
+    expect(parseAgentConfig('muse', serializeAgentConfig(def), '').createdBy).toBe('system');
+    expect(parseAgentConfig('x', 'created_by = "weird"\n', '').createdBy).toBe('user');
+    expect(parseAgentConfig('x', 'created_by = "agent"\n', '').createdBy).toBe('agent');
+    expect(parseAgentConfig('x', '', '').createdBy).toBe('user');
+  });
+});

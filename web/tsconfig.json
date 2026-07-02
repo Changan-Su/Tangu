@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "types": ["vite/client", "node"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["../desktop/frontend/src/*"],
+      "@amadeus/*": ["../desktop/frontend/src/amadeus/*"],
+      "@amadeus-shared/*": ["../desktop/shared/amadeus/*"],
+      "@web/*": ["./src/*"]
+    },
+    "noEmit": true
+  },
+  "include": ["src"]
+}

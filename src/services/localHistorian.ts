@@ -5,6 +5,13 @@
  *   - 每 everyTitleRounds 轮：总结并更新会话标题；
  *   - 每 everyMemoryRounds 轮：判断是否更新用户 LOG/memory（经 brain.memory），有则写入；
  *   - 首轮（roundN===1 且 firstRoundTrigger）必触发两者。
+ *
+ * 两种工作模式（cfg.mode）：
+ *   - independent（默认）：Historian 自己结构化判断并写 title/LOG/memory（memory=读-改-写整文覆盖）。
+ *   - assist（辅助）：标题仍独立维护；LOG/memory 到点时改为 branch 出隐藏讨论会话（kind='discussion'，
+ *     继承最近 30 条），与主 Agent 开一场无主持人的简短群聊（Historian 临时人格先评估，主 Agent 定夺并
+ *     自己调 log_event/remember 写入自己的记忆域）。首轮始终 independent。此模式下 memory 为追加式
+ *     （remember），整文修订仅 independent 模式做。
  * 配置见 special-agents.json（enabled 默认关、需选 modelId）。活动写 special_agent_log（隔离记录，
  * 驱动 Historian 工作视图），不进用户会话列表。本地特性：仅 host-exec profile 形态启用，云端 no-op。
  *
@@ -14,8 +21,12 @@ import { v4 as uuidv4 } from 'uuid';
 import { query } from '../core/db.js';
 import { deps } from '../seams/runtime.js';
 import type { ChatMessage } from '../core/types.js';
-import { loadSpecialAgentsConfig, DEFAULT_HISTORIAN_PROMPT } from './specialAgentsConfig.js';
+import { loadSpecialAgentsConfig, DEFAULT_HISTORIAN_PROMPT, type HistorianConfig } from './specialAgentsConfig.js';
 import { enterRunContext } from '../seams/runContext.js';
+import { getAgent, resolveMemorySlug } from '../agents/agentRegistry.js';
+import { branchSession } from './sessionBranch.js';
+import { createRun } from './runStore.js';
+import { DEFAULT_AGENT_SLUG } from '../core/tanguHome.js';
 
 const MAX_TRANSCRIPT_CHARS = 8000;
 const CHARGE_USER = false;
@@ -162,19 +173,25 @@ function isLocal(): boolean {
 /**
  * run 完成钩子：判断并执行标题/记忆更新。fire-and-forget（agentLoop void 调用），绝不抛。
  * 仅处理 kind='user' 的会话；Historian 自身不产生 run，无递归风险。
+ * memScopeSlug = 记忆域 slug（runLoop 已折叠 shareDefaultMemory），Historian 的 MEMORY/LOG
+ * 读写必须与 run 内 remember/log_event 落同一文件夹。
  */
-export async function onUserRunDone(sessionId: string, userId: string, agentSlug?: string): Promise<void> {
+export async function onUserRunDone(sessionId: string, userId: string, memScopeSlug?: string): Promise<void> {
   if (!isLocal()) return;
-  // 解析本 run 的 agent:优先传入的 agentSlug,否则从会话 agent_config.agentSlug 兜底读(任意入口/旧路径都落对 agent)。
+  // 解析本 run 的记忆域:优先传入的 memScopeSlug;否则(外部引擎等未做激活的路径)从会话 agent_config.agentSlug
+  // 兜底读——那存的是 active slug,须经 resolveMemorySlug 折叠 shareDefaultMemory 才与 run 内记忆读写同域。
   // 重注入 Historian 自己的异步上下文 → deps().brain.memory(动态本地库)读写落到该 agent 的文件夹(fire-and-forget
   // 不保证继承原 run 的 ALS,故显式重设;云端 isLocal=false 已 return)。
-  let effectiveSlug = agentSlug;
+  let effectiveSlug = memScopeSlug;
   if (!effectiveSlug) {
     try {
       const r = await query<any[]>(`SELECT agent_config FROM chat_sessions WHERE id = ? LIMIT 1`, [sessionId]);
       const raw = r[0]?.agent_config;
       const cfg0 = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : null;
-      if (cfg0?.agentSlug) effectiveSlug = String(cfg0.agentSlug);
+      if (cfg0?.agentSlug) {
+        const def = await getAgent(String(cfg0.agentSlug)).catch(() => null);
+        if (def) effectiveSlug = resolveMemorySlug(def);
+      }
     } catch { /* ignore */ }
   }
   if (effectiveSlug) enterRunContext(userId, undefined, effectiveSlug);
@@ -183,8 +200,11 @@ export async function onUserRunDone(sessionId: string, userId: string, agentSlug
   if (!cfg.enabled || !cfg.modelId) return;
 
   try {
-    // 仅用户会话；并发安全：roundN 由 done run 计数推出（幂等）。
-    const skRows = await query<any[]>(`SELECT kind, title FROM chat_sessions WHERE id = ? LIMIT 1`, [sessionId]);
+    // 仅用户会话；并发安全：roundN 由 done run 计数推出（幂等）。app_id/model_id/agent_config 供辅助模式讨论用。
+    const skRows = await query<any[]>(
+      `SELECT kind, title, app_id, model_id, agent_config FROM chat_sessions WHERE id = ? LIMIT 1`,
+      [sessionId],
+    );
     const sk = skRows[0];
     if (!sk || (sk.kind && sk.kind !== 'user')) return;
 
@@ -204,54 +224,183 @@ export async function onUserRunDone(sessionId: string, userId: string, agentSlug
 
     // 实质增量地板:自上次维护以来新增内容太少 → 跳过整次判断(避免琐碎轮重复总结 / 反复重写记忆侵蚀)。
     if (!(await enoughNewSinceLastAction(sessionId))) { log(`第 ${roundN} 轮到点但自上次维护无实质新增,跳过`); return; }
-    log(`第 ${roundN} 轮触发(标题:${titleDue} 记忆:${memoryDue},模型 ${cfg.modelId})`);
+
+    // 辅助模式(assist):LOG/memory 不由 Historian 写,分支(branch)出后台群聊讨论交主 Agent 定夺;
+    // 标题仍由 Historian 独立维护(主 Agent 没有改标题的工具,标题也非记忆资产)。
+    // 首轮(roundN===1)始终走独立模式:首轮要立即出标题+初始日志,也没有可供讨论的积累。
+    const assistMode = cfg.mode === 'assist' && roundN > 1;
+    const judgeLog = logDue && !assistMode;
+    const judgeMemory = memoryDue && !assistMode;
+    log(`第 ${roundN} 轮触发(标题:${titleDue} 记忆:${memoryDue}${assistMode ? ',辅助模式' : ''},模型 ${cfg.modelId})`);
 
     const transcript = await recentTranscript(sessionId);
     if (!transcript.trim()) { log('无可用对话内容,跳过'); return; }
 
-    // memory 是「读-改-写」:把现有记忆喂给模型,让它产出更新后的完整记忆(增量或修订)。
-    const curMem = memoryDue
-      ? String((await deps().brain.memory.getMemory(userId).catch(() => ({ content: '' })))?.content || '')
-      : '';
+    if (titleDue || judgeLog || judgeMemory) {
+      // memory 是「读-改-写」:把现有记忆喂给模型,让它产出更新后的完整记忆(增量或修订)。
+      const curMem = judgeMemory
+        ? String((await deps().brain.memory.getMemory(userId).catch(() => ({ content: '' })))?.content || '')
+        : '';
 
-    // 一次结构化判断:title / log / memory 各自独立(到期才要、不需要则空)。
-    const sys = buildJudgeSystem(cfg.prompt, titleDue, logDue, memoryDue, curMem);
-    const raw = await complete('判断', cfg.modelId, sys, transcript, userId, 1200);
-    const j = parseJudgement(raw);
-    if (!j) { log(`判断输出无法解析为 JSON: "${raw.slice(0, 80)}"`); return; }
-    const title = String(j.title || '').trim().replace(/^["'《「]+|["'》」]+$/g, '').slice(0, 60);
-    const logText = String(j.log || '').trim();
-    const memoryDoc = String(j.memory || '').trim();
-    const okShort = (s: string) => !!s && s.toUpperCase() !== 'NOTHING' && s.length >= 2 && s.length <= 400;
-    log(`判断: title="${title}" log="${logText.slice(0, 30)}" memoryΔ=${memoryDoc ? `${curMem.length}→${memoryDoc.length}` : '无'}`);
-
-    if (titleDue && okShort(title)) {
-      await query(`UPDATE chat_sessions SET title = ? WHERE id = ?`, [title, sessionId]).catch((e: any) => log(`更新标题失败: ${e?.message || e}`));
-      await logActivity(userId, 'title_updated', title, sessionId);
-      log(`已更新标题: ${title}`);
-    }
-    if (logDue && okShort(logText)) {
-      // LOG = 当天流水(append-only)。共享 LOG 经 brain(云端)。
-      await deps().brain.memory.appendLogEntry(userId, logText).then(() => log('已写入 LOG')).catch((e: any) => log(`写 LOG 失败: ${e?.message || e}`));
-      await logActivity(userId, 'log_appended', logText, sessionId);
-    }
-    if (memoryDue && memoryDoc && memoryDoc.toUpperCase() !== 'NOTHING' && memoryDoc !== curMem.trim()) {
-      // memory = 整体覆盖(读-改-写)。防异常缩水:旧记忆较多而新内容骤降 → 疑似截断,弃用。
-      const suspiciousShrink = curMem.trim().length > 200 && memoryDoc.length < curMem.trim().length * 0.4;
-      const setMem = deps().brain.memory.setMemory;
-      if (suspiciousShrink) {
-        log(`记忆疑似异常缩水(${curMem.trim().length}→${memoryDoc.length}),跳过覆盖`);
-      } else if (setMem) {
-        try {
-          await setMem(userId, memoryDoc.slice(0, 20000));
-          await logActivity(userId, 'memory_updated', memoryDoc.slice(0, 300), sessionId);
-          log('已更新 memory(整体覆盖)');
-        } catch (e: any) { log(`写 memory 失败(服务端可能未部署 PUT /brain/memory): ${e?.message || e}`); }
+      // 一次结构化判断:title / log / memory 各自独立(到期才要、不需要则空)。
+      const sys = buildJudgeSystem(cfg.prompt, titleDue, judgeLog, judgeMemory, curMem);
+      const raw = await complete('判断', cfg.modelId, sys, transcript, userId, 1200);
+      const j = parseJudgement(raw);
+      if (!j) {
+        log(`判断输出无法解析为 JSON: "${raw.slice(0, 80)}"`); // 不 return:辅助讨论仍应发起
       } else {
-        log('当前 brain 不支持 setMemory,跳过记忆覆盖(需更新服务端)');
+        const title = String(j.title || '').trim().replace(/^["'《「]+|["'》」]+$/g, '').slice(0, 60);
+        const logText = String(j.log || '').trim();
+        const memoryDoc = String(j.memory || '').trim();
+        const okShort = (s: string) => !!s && s.toUpperCase() !== 'NOTHING' && s.length >= 2 && s.length <= 400;
+        log(`判断: title="${title}" log="${logText.slice(0, 30)}" memoryΔ=${memoryDoc ? `${curMem.length}→${memoryDoc.length}` : '无'}`);
+
+        if (titleDue && okShort(title)) {
+          await query(`UPDATE chat_sessions SET title = ? WHERE id = ?`, [title, sessionId]).catch((e: any) => log(`更新标题失败: ${e?.message || e}`));
+          await logActivity(userId, 'title_updated', title, sessionId);
+          log(`已更新标题: ${title}`);
+        }
+        if (judgeLog && okShort(logText)) {
+          // LOG = 当天流水(append-only)。共享 LOG 经 brain(云端)。
+          await deps().brain.memory.appendLogEntry(userId, logText).then(() => log('已写入 LOG')).catch((e: any) => log(`写 LOG 失败: ${e?.message || e}`));
+          await logActivity(userId, 'log_appended', logText, sessionId);
+        }
+        if (judgeMemory && memoryDoc && memoryDoc.toUpperCase() !== 'NOTHING' && memoryDoc !== curMem.trim()) {
+          // memory = 整体覆盖(读-改-写)。防异常缩水:旧记忆较多而新内容骤降 → 疑似截断,弃用。
+          const suspiciousShrink = curMem.trim().length > 200 && memoryDoc.length < curMem.trim().length * 0.4;
+          const setMem = deps().brain.memory.setMemory;
+          if (suspiciousShrink) {
+            log(`记忆疑似异常缩水(${curMem.trim().length}→${memoryDoc.length}),跳过覆盖`);
+          } else if (setMem) {
+            try {
+              await setMem(userId, memoryDoc.slice(0, 20000));
+              await logActivity(userId, 'memory_updated', memoryDoc.slice(0, 300), sessionId);
+              log('已更新 memory(整体覆盖)');
+            } catch (e: any) { log(`写 memory 失败(服务端可能未部署 PUT /brain/memory): ${e?.message || e}`); }
+          } else {
+            log('当前 brain 不支持 setMemory,跳过记忆覆盖(需更新服务端)');
+          }
+        }
+      }
+    }
+
+    if (assistMode && (logDue || memoryDue)) {
+      const discRunId = await startAssistDiscussion({ sessionId, userId, cfg, sk, wantLog: logDue, wantMemory: memoryDue });
+      if (discRunId) {
+        await logActivity(userId, 'assist_discussion', `与主 Agent 商议${memoryDue ? '日志+记忆' : '日志'}更新(run ${discRunId.slice(0, 8)})`, sessionId);
+        log(`辅助讨论已发起 run=${discRunId}`);
       }
     }
   } catch (e: any) {
     log(`onUserRunDone 异常: ${e?.message || e}`);
+  }
+}
+
+/**
+ * 辅助模式讨论:把主会话 branch(最近 30 条,kind='discussion' 不进会话列表)出一个子会话,在其中起
+ * 一场 2 人群聊——Historian(临时人格,用 historian 配置的轻量模型)先开口给评估,主 Agent 随后定夺并
+ * **自己**调 log_event/remember 写入(群聊逐发言人切 ALS,写入自然落主 Agent 的记忆域)。
+ * 无主持人总结(groupNoSummary);sandbox+full-auto → 后台绝不会卡在 host 写审批上。
+ * fire-and-forget:返回讨论 runId;分支/建 run 失败 → null(绝不抛)。
+ */
+async function startAssistDiscussion(opts: {
+  sessionId: string;
+  userId: string;
+  cfg: HistorianConfig;
+  /** 主会话行:{title, app_id, model_id, agent_config}。 */
+  sk: any;
+  wantLog: boolean;
+  wantMemory: boolean;
+}): Promise<string | null> {
+  const { sessionId, userId, cfg, sk } = opts;
+  try {
+    // 主 Agent 人格 slug(展示身份,来自会话 agent_config;无/无效 → 默认 agent)。
+    let activeSlug = DEFAULT_AGENT_SLUG;
+    try {
+      const raw = sk.agent_config;
+      const c = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : null;
+      if (c?.agentSlug && (await getAgent(String(c.agentSlug)).catch(() => null))) activeSlug = String(c.agentSlug);
+    } catch { /* 默认 agent */ }
+    const mainDef = await getAgent(activeSlug);
+    if (!mainDef) return null;
+
+    // 分支点 = 主会话最新消息(branch 继承到此为止的最近 30 条)。
+    const last = await query<any[]>(
+      `SELECT id FROM chat_messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT 1`,
+      [sessionId],
+    );
+    if (!last[0]?.id) return null;
+
+    const appId = String(sk.app_id || deps().profile.appId);
+    const branch = await branchSession({
+      sourceSessionId: sessionId,
+      userId,
+      appId,
+      messageId: String(last[0].id),
+      title: `记忆维护:${String(sk.title || '').slice(0, 40) || sessionId.slice(0, 8)}`,
+      kind: 'discussion',
+      lastN: 30,
+    });
+    if (!branch) return null;
+
+    // 当前记忆/今日日志随开场白注入,主 Agent 据此判断「是否已记过/是否值得记」。
+    // 此刻 ALS 已是本会话的记忆域(onUserRunDone 顶部 enterRunContext),直接读即为主 Agent 的文件。
+    const mem = String((await deps().brain.memory.getMemory(userId).catch(() => ({ content: '' })))?.content || '').trim();
+    const todayLog = String((await deps().brain.memory.getLog(userId).catch(() => ({ content: '' } as any)))?.content || '').trim();
+
+    const topics = [opts.wantLog ? 'the daily LOG' : '', opts.wantMemory ? 'the long-term MEMORY' : ''].filter(Boolean).join(' and ');
+    const histSlug = `historian-${uuidv4().slice(0, 8)}`;
+    const histDef = {
+      slug: histSlug,
+      name: 'Historian',
+      description: 'Background historian — assesses whether the conversation warrants log/memory updates',
+      model: cfg.modelId, // 评估用 historian 配置的轻量模型;主 Agent 用会话模型
+      systemPrompt:
+        `${(cfg.prompt && cfg.prompt.trim()) || DEFAULT_HISTORIAN_PROMPT}\n\n## Assist Mode\n` +
+        `In this short discussion you are the advisor, not the writer. Assess whether the conversation shown in the context warrants updating ${topics}, ` +
+        'and open the discussion with your concrete judgment — if an update is warranted, propose the exact wording. ' +
+        `You must NOT call remember or log_event yourself: ${mainDef.name} owns its memory and makes the final call. Be brief.`,
+    };
+
+    const message =
+      `[Historian assist] Decide together whether ${topics} should be updated for this conversation (see the context above). ` +
+      `Historian speaks first with its assessment; then ${mainDef.name} makes the final call and, if an update is warranted, ` +
+      'performs it ITSELF by calling log_event (one short sentence for what happened today) and/or remember (only long-term stable facts/preferences about the user — be restrained). ' +
+      'Do not do any other work. Keep it brief — one round is usually enough.\n\n' +
+      `[Current long-term MEMORY]\n${(mem || '(empty)').slice(0, 3000)}\n\n` +
+      `[Today's LOG so far]\n${(todayLog || '(empty)').slice(-1500)}`;
+
+    const runId = uuidv4();
+    await createRun({
+      id: runId,
+      sessionId: branch.id,
+      userId,
+      appId,
+      modelId: String(sk.model_id || deps().profile.defaultModelId || cfg.modelId),
+      assistantMessageId: uuidv4(),
+      input: {
+        message,
+        userMessageId: uuidv4(),
+        attachments: [],
+        agentConfig: {
+          groupChat: true,
+          groupAgents: [activeSlug, histSlug],
+          groupTempAgents: [histDef],
+          priorityAgent: histSlug, // Historian 先开口(评估),主 Agent 随后定夺
+          groupMaxRounds: 2, // 简短:评估+定夺各一轮,投票可提前收束
+          groupNoSummary: true, // 结论=主 Agent 的工具动作,无需主持人总结
+          groupSeedHistory: true, // 参与者看得到 branch 继承来的对话上下文
+          execMode: 'sandbox', // 讨论不需要 host FS;sandbox+full-auto → 后台绝不卡审批
+          approvalMode: 'full-auto',
+        },
+      },
+    });
+    // 动态 import:localHistorian 被 agentLoop 静态引用,反向静态 import 会成环(同 discussion.ts)。
+    const { enqueueRun } = await import('./agentLoop.js');
+    enqueueRun(branch.id, runId);
+    return runId;
+  } catch (e: any) {
+    log(`辅助讨论发起失败: ${e?.message || e}`);
+    return null;
   }
 }

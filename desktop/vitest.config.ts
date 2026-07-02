@@ -5,6 +5,6 @@ export default defineConfig({
   resolve: { alias: { '@': resolve(__dirname, 'frontend/src') } },
   test: {
     environment: 'node',
-    include: ['frontend/src/**/*.test.ts', 'electron/**/*.test.ts'],
+    include: ['frontend/src/**/*.test.ts', 'electron/**/*.test.ts', 'shared/**/*.test.ts'],
   },
 })

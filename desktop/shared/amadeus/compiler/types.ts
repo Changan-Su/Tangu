@@ -62,6 +62,9 @@ export interface PageManifest {
   compiler: { version: string }
   root: StackNode
   blocks: Record<BlockId, BlockEntry>
+  /** Foreign frontmatter lines (everything but the amadeus_* keys), verbatim — preserved
+   *  across load→save so Obsidian properties (tags 等) survive Amadeus edits. */
+  fmExtra?: string
 }
 
 /** A block whose inline content has been parsed from the note. */

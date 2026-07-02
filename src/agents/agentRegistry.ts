@@ -19,6 +19,7 @@ import path from 'node:path';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { agentsDir, memoryDir, userMdFile, DEFAULT_AGENT_SLUG } from '../core/tanguHome.js';
 import { DEFAULT_AGENT_AVATAR_B64, DEFAULT_AGENT_AVATAR_MIME } from './defaultAvatar.js';
+import { loadSpecialAgentsConfig, DEFAULT_MUSE_PROMPT } from '../services/specialAgentsConfig.js';
 
 export type ThinkLevel = 'off' | 'low' | 'medium' | 'high' | '';
 export type ApprovalMode = 'readonly' | 'auto-edit' | 'full-auto' | '';
@@ -37,7 +38,8 @@ export interface NormalAgentDef {
   /** 最大循环轮数（null=用默认）。 */
   maxIterations: number | null;
   approvalMode: ApprovalMode;
-  createdBy: 'user' | 'agent';
+  /** system = 内置系统 agent(如 Muse):UI 显示「后台」徽章,启用期间禁删。 */
+  createdBy: 'user' | 'agent' | 'system';
   createdAt: string;
   /** developer_instructions —— 该 agent 的开发指令 / system prompt 主体(来自 config.toml)。 */
   systemPrompt: string;
@@ -168,7 +170,7 @@ export function parseAgentConfig(slug: string, tomlRaw: string, soul: string): N
     thinkingLevel: think,
     maxIterations: Number.isFinite(maxIter) && maxIter > 0 ? Math.min(200, Math.floor(maxIter)) : null,
     approvalMode: approval,
-    createdBy: meta.created_by === 'agent' ? 'agent' : 'user',
+    createdBy: meta.created_by === 'agent' ? 'agent' : meta.created_by === 'system' ? 'system' : 'user',
     createdAt: str(meta.created_at),
     systemPrompt: str(meta.developer_instructions).trim(),
     soul: soul.trim(),
@@ -307,7 +309,7 @@ async function writeAgentScaffold(a: (typeof DEFAULT_AGENTS)[number]): Promise<v
     const def: NormalAgentDef = {
       slug: a.slug, name: a.name, version: '1.0.0', description: a.description || '', model: a.model || '',
       tools: a.tools || [], thinkingLevel: a.thinkingLevel || '', maxIterations: a.maxIterations ?? null,
-      approvalMode: a.approvalMode || '', createdBy: 'user', createdAt: new Date().toISOString(),
+      approvalMode: a.approvalMode || '', createdBy: a.createdBy || 'user', createdAt: new Date().toISOString(),
       systemPrompt: a.systemPrompt, soul: a.soul || '', libraryOrder: [],
     };
     await fs.writeFile(path.join(adir, 'config.toml'), serializeAgentConfig(def), 'utf-8');
@@ -315,6 +317,37 @@ async function writeAgentScaffold(a: (typeof DEFAULT_AGENTS)[number]): Promise<v
   if (!existsSync(path.join(adir, 'SOUL.md'))) {
     await fs.writeFile(path.join(adir, 'SOUL.md'), a.soul || '', 'utf-8');
   }
+}
+
+// ── Muse 系统 agent(Special Agent 的文件夹化身份;由 muse supervisor 按需播种/自愈)──
+
+export const MUSE_AGENT_SLUG = 'muse';
+
+/** Muse 的内置骨架。人格/指令英文(硬编码模型提示纪律);每周期的动态上下文(预算/用户记忆快照/
+ *  活动摘要)由 muse.ts 注入 kickoff 消息,不在此处。 */
+const MUSE_AGENT_PRESET: (typeof DEFAULT_AGENTS)[number] = {
+  slug: MUSE_AGENT_SLUG,
+  name: 'Muse',
+  description: '后台缪斯:持续观察你的活动,主动发现值得做的事(经 Muse TODO 提交)',
+  createdBy: 'system',
+  systemPrompt: DEFAULT_MUSE_PROMPT,
+  soul:
+    '# Muse\n\nA quiet observer with a spark of initiative. Muse watches the flow of the user\'s work and life from the background, ' +
+    'connects scattered threads across conversations and files, and surfaces the few things genuinely worth doing next.\n' +
+    'Curious but restrained: proposes only what is actionable and valuable now, learns from what the user accepts or dismisses, ' +
+    'and would rather stay silent than waste the user\'s attention.',
+};
+
+/**
+ * 确保 Muse 系统 agent 文件夹存在(幂等,绝不覆盖已有文件——用户对 SOUL/指令的修改被尊重)。
+ * legacyPrompt = 旧 specialAgents.muse.prompt 自定义值,仅首次创建时一次性迁移为 developer_instructions。
+ */
+export async function ensureMuseAgent(legacyPrompt?: string): Promise<void> {
+  if (existsSync(path.join(agentsDir(), MUSE_AGENT_SLUG, 'config.toml'))) return;
+  const preset = { ...MUSE_AGENT_PRESET };
+  if (legacyPrompt && legacyPrompt.trim()) preset.systemPrompt = legacyPrompt.trim();
+  await writeAgentScaffold(preset);
+  cache = null;
 }
 
 /** 默认 agent 显式删头像的标记:存在则 ensureXyraDefaults 不再自动补种(由 deleteAgentAvatar 写入)。 */
@@ -537,7 +570,7 @@ export interface SaveAgentInput {
   soul?: string;
   /** 头像文件名(Library 内);缺省保留已有。 */
   avatar?: string;
-  createdBy?: 'user' | 'agent';
+  createdBy?: 'user' | 'agent' | 'system';
   /** 共用默认 Agent 记忆/日志;缺省保留已有。 */
   shareDefaultMemory?: boolean;
   /** 开启云同步(跨设备镜像);缺省保留已有。 */
@@ -586,6 +619,10 @@ export async function saveAgent(input: SaveAgentInput): Promise<NormalAgentDef> 
 export async function deleteAgent(slug: string): Promise<boolean> {
   if (!isValidSlug(slug)) return false;
   if (slug === DEFAULT_AGENT_SLUG) return false; // 不允许删默认 agent(含其记忆/日志)
+  if (slug === MUSE_AGENT_SLUG) {
+    // Muse 启用期间禁删(supervisor 会自愈重建,删了也白删且丢记忆);关闭 Muse 后允许删。
+    try { if (loadSpecialAgentsConfig().muse.enabled) return false; } catch { /* 配置读失败不阻删 */ }
+  }
   try {
     await fs.rm(path.join(agentsDir(), slug), { recursive: true, force: true });
     await fs.rm(path.join(agentsDir(), `${slug}.md`), { force: true }).catch(() => { /* 清理可能的遗留扁平 */ });

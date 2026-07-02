@@ -21,7 +21,7 @@ const Seg: React.FC<{ value: boolean; onChange: (b: boolean) => void; onLabel: s
 export const SpecialAgentsTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg }) => {
   const { t } = useI18n()
   const [conf, setConf] = useState<SpecialAgentsConfig | null>(null)
-  const [defaults, setDefaults] = useState<{ historianPrompt: string; musePrompt: string }>({ historianPrompt: '', musePrompt: '' })
+  const [defaults, setDefaults] = useState<{ historianPrompt: string }>({ historianPrompt: '' })
   const [models, setModels] = useState<ModelInfo[]>([])
   const [msg, setMsg] = useState('')
 
@@ -77,6 +77,18 @@ export const SpecialAgentsTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg })
         </div>
         <p className="ac-desc">{t('settings.special.historianDesc')}{!h.modelId && ` · ${t('settings.special.pickModelFirst')}`}</p>
         <div className="field"><label>{t('settings.special.model')}</label>{modelSelect(h.modelId, (v) => saveHistorian({ modelId: v }))}</div>
+        <div className="field">
+          <label>{t('settings.special.h.mode')}</label>
+          <div className="seg seg-sm">
+            <button type="button" className={h.mode !== 'assist' ? 'active' : ''} onClick={() => saveHistorian({ mode: 'independent' })}>
+              {t('settings.special.h.modeIndependent')}
+            </button>
+            <button type="button" className={h.mode === 'assist' ? 'active' : ''} onClick={() => saveHistorian({ mode: 'assist' })}>
+              {t('settings.special.h.modeAssist')}
+            </button>
+          </div>
+          <div className="hint" style={{ marginTop: 4 }}>{t('settings.special.h.modeHint')}</div>
+        </div>
         <div className="field-row">
           {numField(t('settings.special.h.titleRounds'), h.everyTitleRounds, (n) => saveHistorian({ everyTitleRounds: n }), 1, 100)}
           {numField(t('settings.special.h.memoryRounds'), h.everyMemoryRounds, (n) => saveHistorian({ everyMemoryRounds: n }), 1, 100)}
@@ -141,11 +153,8 @@ export const SpecialAgentsTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg })
           <textarea rows={2} value={m.allowedFolders.join('\n')}
             onChange={(e) => saveMuse({ allowedFolders: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) })} />
         </div>
-        <div className="field" style={{ marginBottom: 0 }}>
-          <label>{t('settings.special.m.prompt')}</label>
-          <textarea rows={3} value={m.prompt || defaults.musePrompt}
-            onChange={(e) => saveMuse({ prompt: e.target.value === defaults.musePrompt ? '' : e.target.value })} />
-        </div>
+        {/* 人格/指令已迁入 ~/.tangu/agents/muse/(文件夹系统 agent),在 Agent 名册里像普通 agent 一样编辑。 */}
+        <div className="hint" style={{ marginBottom: 0 }}>{t('settings.special.m.promptMoved')}</div>
       </div>
       {msg && <div className="hint" style={{ color: 'var(--danger)' }}>{msg}</div>}
     </>

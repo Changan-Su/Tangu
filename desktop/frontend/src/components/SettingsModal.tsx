@@ -968,6 +968,24 @@ export const SettingsModal: React.FC<{
                       </label>
                       <div className="hint">{t('settings.notes.previewHint')}</div>
                     </div>
+                    <div className="field">
+                      <label>{t('settings.notes.dailyLabel')}</label>
+                      <div className="settings-inline-row">
+                        <input
+                          type="text"
+                          value={stored.notesDailyFolder ?? ''}
+                          onChange={(e) => setStored({ ...stored, notesDailyFolder: e.target.value })}
+                          placeholder={t('settings.notes.dailyPlaceholder')}
+                        />
+                        <button
+                          className="btn primary sm"
+                          onClick={() => void window.tangu!.setConfig({ notesDailyFolder: (stored.notesDailyFolder || '').trim().replace(/^\/+|\/+$/g, '') }).then(setStored)}
+                        >
+                          {t('settings.btn.save')}
+                        </button>
+                      </div>
+                      <div className="hint">{t('settings.notes.dailyHint')}</div>
+                    </div>
                   </>
                 )}
 

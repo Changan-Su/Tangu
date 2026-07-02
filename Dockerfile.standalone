@@ -18,6 +18,12 @@ COPY package*.json ./
 RUN npm ci
 COPY . .
 RUN npm run build   # tsc + postbuild(build:plugins → stickers / wechat-segment)
+# forsion-worker 插件（独立私有仓，嵌套在 plugins/forsion-worker/；开源构建可缺席）——
+# 存在则容器内构建，使 `git clone → docker build` 全自包含（Tangu Manager 宿主机 GitOps 用，
+# 无需宿主预构建 dist）。core build 在上一步已产出插件 import type 需要的 dist/index.d.ts。
+RUN if [ -f plugins/forsion-worker/package.json ]; then \
+      cd plugins/forsion-worker && npm install && npm run build && npm prune --omit=dev; \
+    fi
 
 # ---------- Stage 2: 仅生产依赖 ----------
 FROM node:20-alpine AS prod-deps

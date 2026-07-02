@@ -190,36 +190,12 @@ function indicatorEl(cls: 'wb-drop-line' | 'wb-drop-zone'): HTMLDivElement {
   return el
 }
 
-// 让位动画:tab 模式把插入点及其后的 tab 右移一个「被拖 tab 宽」腾位(CSS transition:transform 补间)。同位不重放。
-let shifted: HTMLElement[] = []
-let shiftKey = ''
-function resetShift(): void {
-  if (!shifted.length) return
-  for (const t of shifted) t.style.transform = ''
-  shifted = []
-  shiftKey = ''
-}
-function applyShift(group: { element?: HTMLElement; id?: string }, index: number): void {
-  const key = `${group.id ?? ''}:${index}`
-  if (key === shiftKey) return
-  resetShift()
-  shiftKey = key
-  const strip = group.element?.querySelector('.dv-tabs-container')
-  if (!strip) return
-  const tabs = Array.from(strip.querySelectorAll<HTMLElement>('.dv-tab')).filter((t) => !t.classList.contains('wb-tab-dragging'))
-  const dragged = document.querySelector<HTMLElement>('.dv-tab.wb-tab-dragging')
-  const gap = dragged ? dragged.getBoundingClientRect().width : 150
-  for (let i = index; i < tabs.length; i++) { tabs[i].style.transform = `translateX(${gap}px)`; shifted.push(tabs[i]) }
-}
-
 function hideIndicator(): void {
   if (dropLineEl) dropLineEl.style.display = 'none'
   if (dropZoneEl) dropZoneEl.style.display = 'none'
-  resetShift()
 }
 
 function showTarget(t: DropTarget): void {
-  const g = t.group as unknown as { element?: HTMLElement; id?: string }
   if (t.mode === 'tab') {
     if (dropZoneEl) dropZoneEl.style.display = 'none'
     const el = (dropLineEl ??= indicatorEl('wb-drop-line'))
@@ -227,10 +203,8 @@ function showTarget(t: DropTarget): void {
     el.style.left = `${Math.round(t.lineX) - 1}px`
     el.style.top = `${Math.round(t.top)}px`
     el.style.height = `${Math.round(t.height)}px`
-    applyShift(g, t.index)
   } else {
     if (dropLineEl) dropLineEl.style.display = 'none'
-    resetShift()
     const el = (dropZoneEl ??= indicatorEl('wb-drop-zone'))
     el.style.display = 'block'
     el.style.left = `${Math.round(t.rect.left)}px`
@@ -346,9 +320,12 @@ export const WorkspaceHost: React.FC<{
     }
     e.api.onDidLayoutChange(syncLayout)
     // 拖放全走受控自定义层(见上 useEffect + onTabDragStart);此处不再挂 Dockview 原生 onWillDrag*/onDidDrop。
-    e.api.onDidActivePanelChange(({ panel }) => ws.setFocusedLeaf(panel))
+    // refreshTabs:原生 tab 点击 / addPanel 自动激活 都只发 onDidActivePanelChange,不经 activateLeaf ——
+    // 不刷则 mainTabs.active 失真(Amadeus 多标签页的 adopt/activate 依赖它)。refreshTabs 无变化时自 no-op。
+    e.api.onDidActivePanelChange(({ panel }) => { ws.setFocusedLeaf(panel); ws.refreshTabs() })
     const activeType = ((e.api.activePanel?.params ?? {}) as { __type?: string }).__type
     ws.setFocusedLeaf(activeType === 'chat' ? e.api.activePanel : e.api.panels.find((panel) => ((panel.params ?? {}) as { __type?: string }).__type === 'chat'))
+    ws.refreshTabs() // 布局恢复/默认构建后 seed 一次初始 active 态
   }
 
   return (

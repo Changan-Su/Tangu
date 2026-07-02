@@ -62,6 +62,25 @@ export function parseFrontmatter(markdown: string): Record<string, string> {
   return {}
 }
 
+/** Reserved single-line keys we own; everything else in the frontmatter is the user's. */
+export const AMADEUS_FM_KEY = /^(amadeus_page|amadeus_schema|amadeus_layout):/
+
+/** Foreign frontmatter lines (everything except the amadeus_* keys), verbatim — multi-line
+ *  values, comments and ordering preserved. '' when the note has no foreign frontmatter. */
+export function extractFrontmatterExtra(markdown: string): string {
+  const tree = parser.parse(markdown) as unknown as MdRoot
+  for (const node of tree.children ?? []) {
+    if (node.type === 'yaml') {
+      return (node.value ?? '')
+        .split('\n')
+        .filter((l) => !AMADEUS_FM_KEY.test(l))
+        .join('\n')
+        .replace(/^\n+|\n+$/g, '')
+    }
+  }
+  return ''
+}
+
 /** Split a FOREIGN plain-markdown document into one markdown string per top-level block. */
 export function splitIntoBlocks(markdown: string): string[] {
   const tree = parser.parse(markdown) as unknown as MdRoot

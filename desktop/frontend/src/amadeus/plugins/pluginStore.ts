@@ -44,7 +44,8 @@ interface PluginState {
   statusItems: Owned<StatusItemContribution>[]
   disposers: Record<string, (() => void) | undefined>
   initialized: boolean
-  init(): void
+  /** 注册并按偏好启用一组插件;缺省 = 全部 builtins(独立版);桌面壳传自己的选择性子集。 */
+  init(plugins?: AmadeusPlugin[]): void
   enable(id: string): void
   disable(id: string): void
   toggle(id: string): void
@@ -170,10 +171,10 @@ export const usePluginStore = create<PluginState>((set, get) => {
 
     isActive: (id) => get().activeIds.includes(id),
 
-    init() {
+    init(plugins = BUILTIN_PLUGINS) {
       if (get().initialized) return
-      set({ plugins: [...BUILTIN_PLUGINS], disabledIds: readDisabled(), initialized: true })
-      for (const p of BUILTIN_PLUGINS) applyPref(p.id)
+      set({ plugins: [...plugins], disabledIds: readDisabled(), initialized: true })
+      for (const p of plugins) applyPref(p.id)
     },
 
     enable(id) {

@@ -2,10 +2,11 @@
  *  每个 Space 贡献一个 ribbon 顶部图标(可拖动改序,默认排在折叠钮之下、商店之上),点击切换。
  *  Tangu Space = 现有助手界面(会话/对话/文件/目录/记忆/子聊天)。Amadeus Space 见 Milestone 2。 */
 import { Bot, NotebookText } from 'lucide-react'
-import { registerSpace, addRibbonIcon, useSpaceStore, setActiveSpace, useWorkspace, label } from './engine'
+import { registerSpace, addRibbonIcon, useSpaceStore, setActiveSpace, useWorkspace, deleteNamedLayout, clearLayout, label } from './engine'
 import type { SpaceDefinition, PersistedPanel } from './engine'
 import { useApp } from './stores/appStore'
 import { usePageStore } from '@amadeus/store/pageStore'
+import { installAmadeusCommands } from './amadeusCommands'
 
 const ws = () => useWorkspace.getState()
 const app = () => useApp.getState()
@@ -59,12 +60,17 @@ const tanguSpace: SpaceDefinition = {
   },
 }
 
-/** Amadeus Space 的侧栏默认:左=笔记列表;右=大纲/反链 同组 tab。 */
+/** Amadeus Space 的侧栏默认:左=笔记/搜索/标签 同组 tab;右=大纲/反链/关系图 同组 tab。 */
 const AMADEUS_SIDE_VIEWS: Record<'left' | 'right', PersistedPanel[]> = {
-  left: [{ type: 'amadeus-pages', params: {} }],
+  left: [
+    { type: 'amadeus-pages', params: {} },
+    { type: 'amadeus-search', params: {} },
+    { type: 'amadeus-tags', params: {} },
+  ],
   right: [
     { type: 'amadeus-outline', params: {} },
     { type: 'amadeus-backlinks', params: {} },
+    { type: 'amadeus-graph', params: {} },
   ],
 }
 
@@ -79,13 +85,19 @@ const amadeusSpace: SpaceDefinition = {
     const p = usePageStore.getState()
     if (p.vaultRoot) void p.createPage() // 有 vault → 新建一篇空笔记并在编辑器打开(＋新建标签页语义)
   },
-  /** 编辑器(主)→ 笔记列表(左)→ 右栏(大纲 + 反链 同组 tab)。 */
+  /** 编辑器(主)→ 左栏(笔记 + 搜索/标签 同组 tab)→ 右栏(大纲 + 反链 同组 tab)。
+   *  openView 会把新面板设为活动 tab,故最后把「笔记」「大纲」拉回活动态。 */
   build() {
     ws().setSidebarDefaults(AMADEUS_SIDE_VIEWS)
     ws().openView('amadeus-editor', {}, 'main')
-    ws().openView('amadeus-pages', {}, 'left')
-    ws().openView('amadeus-outline', {}, 'right')
+    const pagesLeaf = ws().openView('amadeus-pages', {}, 'left')
+    ws().openView('amadeus-search', {}, 'left')
+    ws().openView('amadeus-tags', {}, 'left')
+    const outlineLeaf = ws().openView('amadeus-outline', {}, 'right')
     ws().openView('amadeus-backlinks', {}, 'right')
+    ws().openView('amadeus-graph', {}, 'right')
+    if (outlineLeaf) ws().activateLeaf(outlineLeaf.id)
+    if (pagesLeaf) ws().activateLeaf(pagesLeaf.id)
   },
 }
 
@@ -102,5 +114,18 @@ export function registerSpaces(): void {
   for (const sp of SPACES) {
     registerSpace(sp)
     addRibbonIcon({ id: `space:${sp.id}`, side: 'top', component: ({ expanded }) => <SpaceButton space={sp} expanded={expanded} /> })
+  }
+  if (window.amadeus && AMADEUS_ENABLED) {
+    installAmadeusCommands()
+    // 旧 space:amadeus 命名布局没有新加的 搜索/标签/关系图 侧栏 tab → 一次性删除,下次进入按新默认重建。
+    try {
+      if (localStorage.getItem('amadeus_layout_v2') !== '1') {
+        deleteNamedLayout('space:amadeus')
+        // 上次退出停留在 Amadeus → 当前布局(LAYOUT_KEY)就是旧 Amadeus 布局,启动恢复会绕过命名布局迁移;
+        // 一并清掉,onReady 落空走 buildDefault 按新默认重建(代价=丢一次该空间的布局微调,与命名布局同权衡)。
+        if (localStorage.getItem('forsion_tangu_active_space') === 'amadeus') clearLayout()
+        localStorage.setItem('amadeus_layout_v2', '1')
+      }
+    } catch { /* ignore */ }
   }
 }

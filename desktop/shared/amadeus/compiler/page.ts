@@ -17,7 +17,7 @@ import {
   pageFileName,
   stripPageBasename,
 } from './names'
-import { parseFrontmatter, stripFrontmatter } from './split'
+import { extractFrontmatterExtra, parseFrontmatter, stripFrontmatter } from './split'
 import {
   COMPILER_VERSION,
   PAGE_SCHEMA,
@@ -126,6 +126,7 @@ function buildPage(
   contents: Record<BlockId, string>,
   createdAt: string,
   now: string,
+  fmExtra?: string,
 ): LoadedPage {
   const present = new Set(Object.keys(blockTypes))
   const manifest: PageManifest = {
@@ -137,6 +138,7 @@ function buildPage(
     compiler: { version: COMPILER_VERSION },
     root: reconcileRoot(layout, present),
     blocks: Object.fromEntries(Object.entries(blockTypes).map(([bid, t]) => [bid, { type: t }])),
+    ...(fmExtra ? { fmExtra } : {}),
   }
   return { manifest, blocks: hydrate(manifest, contents) }
 }
@@ -165,7 +167,8 @@ export async function newPage(io: CompilerIO, pagePath: string, now: string): Pr
 function importForeign(pagePath: string, raw: string, now: string): LoadedPage {
   const body = stripFrontmatter(raw).trim()
   const id = nextBlockId([])
-  return buildPage(pagePath, generatePageId(), EMPTY_STACK, { [id]: 'markdown' }, { [id]: body }, now, now)
+  // 外来 fm(如 Obsidian properties)进 fmExtra,否则首次编辑落盘即被销毁。
+  return buildPage(pagePath, generatePageId(), EMPTY_STACK, { [id]: 'markdown' }, { [id]: body }, now, now, extractFrontmatterExtra(raw))
 }
 
 /** Parse a v3 note: frontmatter (id + layout) + inline marker-delimited block content.
@@ -179,6 +182,7 @@ function parseV3(
 ): { page: LoadedPage; renumbered: boolean } {
   const parsed = parseBody(stripFrontmatter(raw))
   const layout = parseLayout(fm.amadeus_layout)
+  const fmExtra = extractFrontmatterExtra(raw)
   const isCleanId = (id: BlockId | null): boolean => id != null && /^\d+$/.test(id)
   const blockTypes: Record<BlockId, string> = {}
   const contents: Record<BlockId, string> = {}
@@ -194,7 +198,7 @@ function parseV3(
       contents[id] = b.content
       if (b.id != null) remap.set(b.id, id)
     })
-    const page = buildPage(pagePath, fm.amadeus_page, remapLayout(layout, remap), blockTypes, contents, now, now)
+    const page = buildPage(pagePath, fm.amadeus_page, remapLayout(layout, remap), blockTypes, contents, now, now, fmExtra)
     return { page, renumbered: true }
   }
 
@@ -203,7 +207,7 @@ function parseV3(
     blockTypes[id] = 'markdown'
     contents[id] = b.content
   }
-  return { page: buildPage(pagePath, fm.amadeus_page, layout, blockTypes, contents, now, now), renumbered: false }
+  return { page: buildPage(pagePath, fm.amadeus_page, layout, blockTypes, contents, now, now, fmExtra), renumbered: false }
 }
 
 /** Open a note: migrate v1/v2 if present, else parse v3, else adopt a foreign note, else create new. */
@@ -264,7 +268,12 @@ async function migrateV1(io: CompilerIO, pagePath: string, now: string): Promise
       allRead = false
     }
   }
-  const page = buildPage(pagePath, old.id ?? generatePageId(), remapLayout(old.root ?? EMPTY_STACK, remap), blockTypes, contents, old.createdAt ?? now, now)
+  // 迁移会立刻重写 main.md——外来 frontmatter(Obsidian properties)必须先捞出来,否则一次打开即销毁。
+  let fmExtra = ''
+  try {
+    fmExtra = extractFrontmatterExtra(await io.readFile(pageFileName(pagePath)))
+  } catch { /* v1 可能没有 main.md 投影 */ }
+  const page = buildPage(pagePath, old.id ?? generatePageId(), remapLayout(old.root ?? EMPTY_STACK, remap), blockTypes, contents, old.createdAt ?? now, now, fmExtra)
   await savePage(io, pagePath, page.manifest, { contents })
   if (allRead) {
     try {
@@ -288,8 +297,11 @@ async function migrateV2(io: CompilerIO, pagePath: string, now: string): Promise
     blocks?: Record<string, { type?: string }>
   }
   let layout: StackNode = EMPTY_STACK
+  let fmExtra = ''
   try {
-    layout = parseLayout(parseFrontmatter(await io.readFile(pageFileName(pagePath))).amadeus_layout)
+    const raw = await io.readFile(pageFileName(pagePath))
+    layout = parseLayout(parseFrontmatter(raw).amadeus_layout)
+    fmExtra = extractFrontmatterExtra(raw) // 迁移即重写文件,外来 fm 必须保留
   } catch {
     layout = EMPTY_STACK
   }
@@ -309,7 +321,7 @@ async function migrateV2(io: CompilerIO, pagePath: string, now: string): Promise
       allRead = false
     }
   }
-  const page = buildPage(pagePath, idx.ownerId ?? generatePageId(), remapLayout(layout, remap), blockTypes, contents, idx.createdAt ?? now, now)
+  const page = buildPage(pagePath, idx.ownerId ?? generatePageId(), remapLayout(layout, remap), blockTypes, contents, idx.createdAt ?? now, now, fmExtra)
   await savePage(io, pagePath, page.manifest, { contents })
   if (allRead) {
     try {

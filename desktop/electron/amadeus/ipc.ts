@@ -109,6 +109,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
     return page
   })
 
+  // 只读加载(模板读取等):不写 lastPage,不当成「打开」;文件不存在直接报错——
+  // 编译器 loadPage 缺文件会 newPage 落盘,只读语义下不允许悄悄造文件。
+  ipcMain.handle(IPC.readPage, async (_e, pagePath: string) => {
+    const io = vault.pageIO(pagePath)
+    if (!(await io.exists(pageFileName(pagePath)))) throw new Error(`note not found: ${pagePath}`)
+    return loadPage(io, pagePath, nowIso())
+  })
+
   ipcMain.handle(IPC.newPage, async (_e, pagePath: string) => {
     const page = await newPage(vault.pageIO(pagePath), pagePath, nowIso())
     await rememberPage(pagePath)

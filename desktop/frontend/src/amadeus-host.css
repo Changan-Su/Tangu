@@ -32,7 +32,7 @@
 /* 编辑器正文排版:两边留白 + Obsidian 式贴左对齐。Amadeus 块默认左侧有 edge-zone(14)+列内距(2)+
  * 拖拽槽(22)+块体(4)≈42px 缩进,把正文文字推得很靠右。这里将其归零 → 正文文字贴到内容最左边(与标题齐),
  * 拖拽手柄绝对定位到左侧留白、悬浮显示;右侧操作留在 22px 右列。
- * 代价:失去「拖到行两侧边缘裂出新列」的投放区(单列笔记无影响,块内拖拽重排照常)。 */
+ * 「拖到行两侧边缘裂出新列」的投放区不再牺牲:拖拽中经 .stack[data-dnd] 绝对定位浮回页边距(见文末)。 */
 .am-app .page-view { padding-left: 48px; padding-right: 48px; }
 .am-app .edge-zone { flex-basis: 0; }
 .am-app .column { padding-left: 0; padding-right: 0; }
@@ -73,6 +73,14 @@
   font-size: 14px; line-height: 1.7; padding: 4px 48px 80px;
 }
 .amx-empty { padding: 16px; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
+/* 分屏占位:非活动编辑器认领了别的笔记时的「点击加载」钮。 */
+.amx-stale-btn {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  border: 1px dashed var(--border); background: transparent; color: var(--text-muted);
+  font: inherit; font-size: 13px; padding: 8px 14px; border-radius: var(--radius-md, 10px);
+  transition: background var(--duration-fast, 0.15s), color var(--duration-fast, 0.15s);
+}
+.amx-stale-btn:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.08)); color: var(--text); }
 
 /* ── 右栏面板(原生 Tangu token,不在 .am-app 内) ── */
 .amx-panel { height: 100%; overflow: auto; background: var(--bg); color: var(--text); padding: 4px 6px 12px; }
@@ -112,3 +120,118 @@
  * 比 styles.css 的 `.milkdown .ProseMirror .wikilink` 多一层 .am-app → 特异性更高,覆盖其 color。 */
 .am-app .milkdown .ProseMirror .wikilink { color: #6c5ce7; text-decoration-color: color-mix(in srgb, #6c5ce7 45%, transparent); }
 .am-app[data-mode='dark'] .milkdown .ProseMirror .wikilink { color: #a89bf5; text-decoration-color: color-mix(in srgb, #a89bf5 45%, transparent); }
+
+/* ── 快速切换浮层(复用 engine 的 cmd-* 外观;这两个双行类 engine.css 没有) ── */
+.cmd-row { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; }
+.cmd-path { font-size: 11px; color: var(--text-faint, var(--text-muted)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+
+/* ── 全文搜索面板 ── */
+.amx-search-box { margin: 0 6px 8px; }
+.amx-search-snippet mark { background: var(--accent-light, rgba(127, 127, 127, 0.25)); color: inherit; border-radius: 3px; padding: 0 1px; }
+/* 命中定位:目标块短暂高亮脉冲(搜索跳转后)。 */
+.am-app .block-host.amx-block-flash, .amx-block-flash { animation: amx-flash-kf 1.2s ease; border-radius: 8px; }
+
+/* ── 标签面板 ── */
+.amx-tag { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.amx-tag.active { color: var(--accent, var(--text)); }
+.amx-tag-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.amx-tag-count { flex: 0 0 auto; font-size: 11px; color: var(--text-faint, var(--text-muted)); }
+.amx-tag-page { padding-left: 24px; }
+
+/* ── 局部关系图(右栏 tab) ── */
+.amx-graph { display: block; width: 100%; height: auto; }
+.amx-graph-edge { stroke: var(--border); stroke-width: 1.2; }
+.amx-graph-node circle { fill: var(--text-faint, var(--text-muted)); cursor: pointer; transition: fill var(--duration-fast, 0.15s); }
+.amx-graph-node:hover circle { fill: var(--accent, #6c5ce7); }
+.amx-graph-node.center circle { fill: var(--accent, #6c5ce7); cursor: default; }
+.amx-graph-node text { fill: var(--text-muted); font-size: 10px; cursor: pointer; user-select: none; }
+.amx-graph-node.center text { fill: var(--text); font-weight: 600; }
+
+/* ── 全局吐司(插件 notify / 字数统计):底部居中,非交互。 ── */
+.amx-toast {
+  position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); z-index: 90;
+  padding: 8px 14px; font-size: 13px; color: var(--text);
+  background: var(--bg-glass, var(--bg-card)); backdrop-filter: var(--panel-blur, blur(8px));
+  border: var(--border-width, 1px) solid var(--border); border-radius: var(--radius-md, 10px);
+  box-shadow: 0 8px 24px var(--shadow, rgba(0, 0, 0, 0.15)); pointer-events: none;
+}
+
+/* ── 插件状态条项(字数统计等):编辑器工具条右侧。 ── */
+.amx-status { display: inline-flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.amx-status .status-item { font-size: 12px; color: var(--text-faint, var(--text-muted)); white-space: nowrap; }
+
+/* ── Callout 标注(> [!note] …,Obsidian 语法;纯装饰,序列化零影响) ── */
+.am-app .milkdown .ProseMirror blockquote.callout {
+  --callout-color: #448aff;
+  border-left: 3px solid var(--callout-color);
+  background: color-mix(in srgb, var(--callout-color) 8%, transparent);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-inline: 0;
+}
+.am-app .milkdown .ProseMirror blockquote.callout-info { --callout-color: #00b8d4; }
+.am-app .milkdown .ProseMirror blockquote.callout-tip,
+.am-app .milkdown .ProseMirror blockquote.callout-hint { --callout-color: #00bfa5; }
+.am-app .milkdown .ProseMirror blockquote.callout-warning,
+.am-app .milkdown .ProseMirror blockquote.callout-caution { --callout-color: #ff9100; }
+.am-app .milkdown .ProseMirror blockquote.callout-danger,
+.am-app .milkdown .ProseMirror blockquote.callout-error { --callout-color: #ff5252; }
+.am-app .milkdown .ProseMirror blockquote.callout-bug { --callout-color: #f50057; }
+.am-app .milkdown .ProseMirror blockquote.callout-example { --callout-color: #7c4dff; }
+.am-app .milkdown .ProseMirror blockquote.callout-quote { --callout-color: #9e9e9e; }
+.am-app .milkdown .ProseMirror .callout-token {
+  color: var(--callout-color, #448aff);
+  background: color-mix(in srgb, var(--callout-color, #448aff) 14%, transparent);
+  border-radius: 5px; padding: 0 5px; font-weight: 600; font-size: 0.85em;
+}
+
+/* ── 属性面板(标题下方,Notion properties 式):折叠 chip + 行式键值编辑 ── */
+.amx-props { margin: 0 0 6px; font-size: 12.5px; }
+.amx-props-bar { display: flex; align-items: center; gap: 4px; }
+.amx-props-chip, .amx-props-add {
+  display: inline-flex; align-items: center; gap: 3px; border: none; cursor: pointer;
+  background: transparent; color: var(--text-faint, var(--text-muted)); font: inherit; font-size: 12px;
+  padding: 2px 6px; border-radius: var(--radius-sm, 8px);
+  transition: background var(--duration-fast, 0.15s), color var(--duration-fast, 0.15s);
+}
+.amx-props-chip:hover, .amx-props-add:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.08)); color: var(--text); }
+.amx-props-rows { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.amx-props-empty { color: var(--text-faint, var(--text-muted)); padding: 2px 6px; }
+.amx-prop-row { display: flex; align-items: flex-start; gap: 8px; padding: 1px 0; }
+.amx-prop-key {
+  flex: 0 0 128px; min-width: 0; border: none; outline: none; background: transparent;
+  color: var(--text-muted); font: inherit; font-size: 12.5px; padding: 3px 6px; border-radius: 6px;
+}
+.amx-prop-key:hover, .amx-prop-key:focus { background: var(--overlay-light, rgba(127, 127, 127, 0.07)); }
+.amx-prop-input {
+  flex: 1; min-width: 0; border: none; outline: none; background: transparent;
+  color: var(--text); font: inherit; font-size: 12.5px; padding: 3px 6px; border-radius: 6px;
+}
+.amx-prop-input:hover, .amx-prop-input:focus { background: var(--overlay-light, rgba(127, 127, 127, 0.07)); }
+.amx-prop-check { align-self: center; accent-color: var(--accent, #6c5ce7); }
+.amx-prop-nested { flex: 1; white-space: pre-wrap; color: var(--text-muted); font-family: var(--font-mono, ui-monospace, monospace); font-size: 11.5px; padding: 3px 6px; }
+.amx-prop-del { flex: 0 0 auto; align-self: center; border: none; background: transparent; color: var(--text-faint); cursor: pointer; padding: 3px; border-radius: 5px; opacity: 0; }
+.amx-prop-row:hover .amx-prop-del { opacity: 1; }
+.amx-prop-del:hover { color: var(--danger, #e5484d); background: var(--overlay-light, rgba(127, 127, 127, 0.08)); }
+.amx-prop-chips { flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px 6px; }
+.amx-chip {
+  display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; line-height: 1;
+  background: var(--overlay-light, rgba(127, 127, 127, 0.1)); color: var(--text);
+  border-radius: 999px; padding: 4px 8px;
+}
+.amx-chip-x { display: inline-flex; border: none; background: transparent; color: var(--text-faint); cursor: pointer; padding: 0; }
+.amx-chip-x:hover { color: var(--danger, #e5484d); }
+.amx-prop-chips input { flex: 1; min-width: 60px; border: none; outline: none; background: transparent; color: var(--text); font: inherit; font-size: 12px; }
+.amx-props-raw {
+  display: block; width: 100%; min-height: 80px; margin-top: 4px; resize: vertical;
+  border: 1px solid var(--border); border-radius: var(--radius-sm, 8px); outline: none;
+  background: transparent; color: var(--text); font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px; line-height: 1.6; padding: 8px 10px;
+}
+
+/* ── 拖拽分栏投放区:静止时零宽(保 Obsidian 左对齐),拖拽中(.stack[data-dnd])绝对定位浮进
+ *    48px 页边距 → 无内容位移,拖到行两侧边缘即可裂出新列(与 styles.css 的 [data-over] 高亮配合)。 ── */
+.am-app .row { position: relative; }
+.am-app .stack[data-dnd] .edge-zone { position: absolute; top: 0; bottom: 0; width: 40px; z-index: 4; border-radius: 8px; }
+.am-app .stack[data-dnd] .edge-zone[data-side='left'] { left: -46px; }
+.am-app .stack[data-dnd] .edge-zone[data-side='right'] { right: -46px; }

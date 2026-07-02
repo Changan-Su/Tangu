@@ -60,6 +60,8 @@ export interface HistorianConfig {
   everyTitleRounds: number
   everyMemoryRounds: number
   firstRoundTrigger: boolean
+  /** independent=自己判断并写日志/记忆(默认);assist=分支出后台讨论,由主 Agent 自己定夺并写入(首轮始终 independent)。 */
+  mode: 'independent' | 'assist'
   prompt: string
 }
 export interface MuseConfig {
@@ -70,9 +72,7 @@ export interface MuseConfig {
   maxIterationsPerCycle: number
   maxTodosPerWindow: number
   supervisorPollMinutes: number
-  compactAtRatio: number
   activeHours: { start: number; end: number } | null
-  prompt: string
   allowedFolders: string[]
 }
 export interface SpecialAgentsConfig { historian: HistorianConfig; muse: MuseConfig }
@@ -124,7 +124,8 @@ export interface NormalAgentDef {
   thinkingLevel: 'off' | 'low' | 'medium' | 'high' | ''
   maxIterations: number | null
   approvalMode: 'readonly' | 'auto-edit' | 'full-auto' | ''
-  createdBy: 'user' | 'agent'
+  /** system = 内置系统 agent(如 Muse):名册/选择器显示「后台」徽章,启用期间禁删。 */
+  createdBy: 'user' | 'agent' | 'system'
   createdAt: string
   systemPrompt: string
   /** 人格(SOUL.md)。 */
@@ -451,6 +452,8 @@ export interface StoredDesktopConfig extends TanguDesktopConfig {
   notesAttachmentFolder?: string
   /** 导入文件是否默认开启预览(![[file]] 形式);false=插入 [名](路径) 链接。 */
   notesImportPreview?: boolean
+  /** 日记(每日笔记)所在 vault 相对文件夹;'' = vault 根。 */
+  notesDailyFolder?: string
   backendState?: BackendStatusInfo
   /** 主进程附带的用户主目录(本机模式 cwd 兜底)。 */
   homeDir?: string

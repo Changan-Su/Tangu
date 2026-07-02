@@ -22,6 +22,10 @@ export interface BranchSessionInput {
   messageId: string;
   /** 新会话标题;缺省取源会话标题。 */
   title?: string;
+  /** 新会话 kind(缺省 'user');Historian 辅助讨论传 'discussion' → 不进用户会话列表。 */
+  kind?: string;
+  /** 只继承分支点前最近 N 条消息(缺省全量);后台讨论用轻量窗口,避免长会话整表复制。 */
+  lastN?: number;
 }
 
 /**
@@ -29,7 +33,7 @@ export interface BranchSessionInput {
  * 返回 { id, copied } 或 null(源会话不存在/非本人本 app,或 messageId 不属于该会话)。
  */
 export async function branchSession(input: BranchSessionInput): Promise<{ id: string; copied: number } | null> {
-  const { sourceSessionId, userId, appId, messageId, title } = input;
+  const { sourceSessionId, userId, appId, messageId, title, kind, lastN } = input;
 
   // 1) 源会话 + owner/app 校验
   const srcRows = await query<any[]>(
@@ -48,22 +52,28 @@ export async function branchSession(input: BranchSessionInput): Promise<{ id: st
   if (!msgRows[0]) return null;
   const throughTs = Number(msgRows[0].timestamp);
 
-  // 3) 建新会话:克隆模型/配置/工程信息(archived/todos/kind 走默认,从干净状态起)
+  // 3) 建新会话:克隆模型/配置/工程信息(archived/todos 走默认,从干净状态起;kind 可指定,缺省 'user')
   const newId = uuidv4();
   const newTitle = (typeof title === 'string' && title.trim() ? title.trim() : (src.title || 'New Chat')).slice(0, 200);
   await query(
-    `INSERT INTO chat_sessions (id, user_id, app_id, title, model_id, emoji, agent_config, project_path, project_name)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO chat_sessions (id, user_id, app_id, title, model_id, emoji, agent_config, project_path, project_name, kind)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [newId, userId, appId, newTitle, src.model_id, src.emoji,
-     asJsonText(src.agent_config), src.project_path, src.project_name],
+     asJsonText(src.agent_config), src.project_path, src.project_name, kind || 'user'],
   );
 
-  // 4) 复制 timestamp <= 分支点 的消息:新 uuid,保留原 timestamp 与全部字段
-  const msgs = await query<any[]>(
-    `SELECT role, content, timestamp, model_id, reasoning, is_error, tool_calls, tool_results, attachments
-     FROM chat_messages WHERE session_id = ? AND timestamp <= ? ORDER BY timestamp ASC`,
-    [sourceSessionId, throughTs],
-  );
+  // 4) 复制 timestamp <= 分支点 的消息:新 uuid,保留原 timestamp 与全部字段(lastN → 只取最近 N 条)
+  const msgs = lastN && lastN > 0
+    ? (await query<any[]>(
+        `SELECT role, content, timestamp, model_id, reasoning, is_error, tool_calls, tool_results, attachments
+         FROM chat_messages WHERE session_id = ? AND timestamp <= ? ORDER BY timestamp DESC LIMIT ?`,
+        [sourceSessionId, throughTs, Math.floor(lastN)],
+      )).reverse()
+    : await query<any[]>(
+        `SELECT role, content, timestamp, model_id, reasoning, is_error, tool_calls, tool_results, attachments
+         FROM chat_messages WHERE session_id = ? AND timestamp <= ? ORDER BY timestamp ASC`,
+        [sourceSessionId, throughTs],
+      );
   // ponytail: 逐行插入。分支是一次性操作(非热路径),量大再批量;与既有删除级联一样不开显式事务。
   for (const m of msgs) {
     await query(

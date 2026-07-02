@@ -58,8 +58,15 @@ export function WeChatSpecialView() {
 }
 
 export function AgentsDetailSpecialView() {
-  const s = useApp(useShallow((state) => ({ cfg: state.cfg, openSettings: state.openSettings })))
-  return <AgentsDetailView cfg={s.cfg} onOpenSettings={() => s.openSettings('agents')} />
+  const s = useApp(useShallow((state) => ({ cfg: state.cfg, sessions: state.sessions, openSettings: state.openSettings })))
+  return (
+    <AgentsDetailView
+      cfg={s.cfg}
+      sessions={s.sessions}
+      onOpenSession={focusSession}
+      onOpenSettings={() => s.openSettings('agents')}
+    />
+  )
 }
 
 export function WorkspaceDetailSpecialView() {

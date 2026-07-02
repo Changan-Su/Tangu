@@ -125,6 +125,8 @@
   position: fixed;
   inset: 0;
   z-index: 1000;
+  /* 压住底下 .rb/.t2s-side/tab 栏的拖窗区(拖窗区无视 z-index,见 base.css「Electron 拖窗区兜底」)。 */
+  -webkit-app-region: no-drag;
   display: flex;
   justify-content: center;
   align-items: flex-start;
@@ -254,10 +256,7 @@
   display: flex;
   align-items: center;
   color: var(--text-muted);
-  /* 含 transform:Dockview smooth-reorder(FLIP)靠 .dv-tab--shifting 的 transition:transform 补间「排斥让位」,
-   * 但本主题这条 (0,3,0) 比 Dockview 的 .dv-tab--shifting (0,2,0) 更特异 → 会顶掉它的 transform 过渡使让位变瞬跳,
-   * 故这里把 transform 一并纳入过渡,保住丝滑动画(拖拽塌缩时 Dockview 内联 transition:none 仍会即时压掉,不受影响)。 */
-  transition: color var(--duration-fast, 0.15s), background var(--duration-fast, 0.15s), transform var(--dv-transition-duration, 200ms) ease-out;
+  transition: color var(--duration-fast, 0.15s), background var(--duration-fast, 0.15s);
 }
 .dockview-theme-lcl .dv-tab:hover { color: var(--text); }
 /* 命名标签(非图标 tab)圆角胶囊本体在 .wb-tab 上 */

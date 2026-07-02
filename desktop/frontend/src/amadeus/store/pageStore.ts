@@ -117,6 +117,8 @@ interface PageState {
   createPage(): Promise<void>
   /** Create a new untitled page inside `folder` (vault-relative; '' = vault root) and open it. */
   createPageInFolder(folder: string): Promise<void>
+  /** 打开某路径的笔记;不存在则先创建(日记等「打开或新建」语义)。 */
+  openOrCreate(path: string): Promise<void>
   renamePage(newName: string): Promise<boolean>
   /** Open the page named by a [[wikilink]] (creating it if missing). */
   openWikiLink(name: string): void
@@ -144,6 +146,8 @@ interface PageState {
 
   setBlockContent(id: BlockId, content: string): void
   insertBlockAfter(afterId: BlockId | null, colId?: ColumnId, initialContent?: string): BlockId
+  /** Insert several blocks after `afterId`(模板插入;单次 _commit,布局依序排在其后)。 */
+  insertBlocksAfter(afterId: BlockId | null, contents: string[]): void
   /** Append a cross-note embed cell (`![[target]]`) as a new full-width row. */
   insertEmbed(target: string): void
   duplicateBlock(id: BlockId): void
@@ -156,10 +160,15 @@ interface PageState {
   setDnd(activeId: string | null, overId: string | null): void
   /** Split: pull a block into a new column on one side of a row (Notion-style columns). */
   addColumnWithBlock(rowId: RowId, id: BlockId, side: 'left' | 'right'): void
+  /** Split the block's OWN row: pull it out into a new column beside it(菜单式分栏,免拖拽)。 */
+  splitToColumn(id: BlockId, side: 'left' | 'right'): void
   /** Pull a block into a brand-new full-width row after the given row index. */
   addRowWithBlock(afterRowIndex: number, id: BlockId): void
   /** Resize the divider between two adjacent columns (leftFraction of their combined width). */
   resizeColumns(rowId: RowId, leftColId: ColumnId, rightColId: ColumnId, leftFraction: number): void
+
+  /** Overwrite the note's foreign frontmatter(属性面板;'' = 清空)。 */
+  setFmExtra(text: string): void
 
   save(): Promise<void>
   /** Force any pending debounced save to disk now, so the main index is fresh before navigating/searching. */
@@ -170,6 +179,7 @@ interface PageState {
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+let loadSeq = 0
 
 function hydrate(page: LoadedPage): {
   manifest: PageManifest
@@ -285,13 +295,15 @@ export const usePageStore = create<PageState>((set, get) => {
     },
 
     async loadPage(path) {
+      const seq = ++loadSeq // last-request-wins:双击/多 tab 竞速时,迟到的结果不得覆盖新导航
       await get().flushSave() // persist the outgoing page so its links are indexed before navigating
       set({ status: 'loading', error: null })
       try {
         const page = await amadeus.loadPage(path)
+        if (seq !== loadSeq) return // 已被更新的导航取代
         set({ activePage: path, ...hydrate(page), status: 'ready' })
       } catch (e) {
-        set({ status: 'idle', error: String(e) })
+        if (seq === loadSeq) set({ status: 'idle', error: String(e) })
       }
     },
 
@@ -299,7 +311,16 @@ export const usePageStore = create<PageState>((set, get) => {
       await get().createPageInFolder('')
     },
 
+    async openOrCreate(path) {
+      // 一律走 loadPage:主进程 loadPage 本就是「存在则解析、不存在才 newPage」,绝不覆盖已有文件
+      // (缓存 pages[] 可能落后于磁盘,直接 newPage 会把已有笔记清空)。
+      const known = get().pages.includes(path)
+      await get().loadPage(path)
+      if (!known) await get().refreshPages()
+    },
+
     async createPageInFolder(folder) {
+      await get().flushSave() // 换页前落盘,防 400ms 待存的上一页内容被丢/写错对象
       const norm = folder.replace(/\\/g, '/').replace(/\/+$/, '')
       const existing = new Set(get().pages)
       const join = (base: string): string => (norm ? `${norm}/${base}` : base)
@@ -347,6 +368,7 @@ export const usePageStore = create<PageState>((set, get) => {
       if (!base) return
       void (async () => {
         try {
+          await get().flushSave() // 换页前落盘,防待存的上一页内容被丢/写错对象
           const path = `${base}.md`
           const page = await amadeus.newPage(path)
           await get().refreshPages()
@@ -475,6 +497,31 @@ export const usePageStore = create<PageState>((set, get) => {
       return newId
     },
 
+    insertBlocksAfter(afterId, contents) {
+      const m = get().manifest
+      if (!m || !contents.length) return
+      const root = clone(m.root)
+      // 逐个生成 id(nextBlockId 需已知全集防撞)。
+      const ids: BlockId[] = []
+      let known = Object.keys(m.blocks)
+      for (let i = 0; i < contents.length; i++) {
+        const id = nextBlockId(known)
+        ids.push(id)
+        known = [...known, id]
+      }
+      const loc = afterId ? locate(root, afterId) : null
+      if (loc) root.children[loc.rowIdx].columns[loc.colIdx].children.splice(loc.childIdx + 1, 0, ...ids.map((ref) => ({ ref })))
+      else for (const id of ids) appendToEnd(root, id)
+      const bm = { ...m.blocks }
+      const blocks = { ...get().blocks }
+      ids.forEach((id, i) => {
+        bm[id] = { type: 'markdown' }
+        blocks[id] = { id, type: 'markdown', content: contents[i] }
+      })
+      get()._commit({ ...m, root, blocks: bm }, blocks)
+      get().requestFocus(ids[ids.length - 1], 'end')
+    },
+
     insertEmbed(target) {
       // An embed is just a normal block whose content is an `![[ ]]` directive; BlockHost
       // renders such a block read-only by resolving the target. Append it as a new row.
@@ -552,6 +599,18 @@ export const usePageStore = create<PageState>((set, get) => {
       get()._commit({ ...m, root })
     },
 
+    splitToColumn(id, side) {
+      const m = get().manifest
+      if (!m) return
+      const loc = locate(m.root, id)
+      if (!loc) return
+      const row = m.root.children[loc.rowIdx]
+      if (row.columns.length >= 4) return // ponytail: 4 列封顶,再多没法读
+      // 整行只有这一个块时分栏无意义(拆出去原行就空了)。
+      if (row.columns.length === 1 && row.columns[0].children.length === 1) return
+      get().addColumnWithBlock(row.id, id, side)
+    },
+
     addColumnWithBlock(rowId, id, side) {
       const m = get().manifest
       if (!m) return
@@ -611,6 +670,16 @@ export const usePageStore = create<PageState>((set, get) => {
       left.width = combined * f
       right.width = combined * (1 - f)
       get()._commit({ ...m, root })
+    },
+
+    setFmExtra(text) {
+      const m = get().manifest
+      if (!m) return
+      const fmExtra = text.replace(/^\n+|\n+$/g, '')
+      const next: PageManifest = { ...m }
+      if (fmExtra) next.fmExtra = fmExtra
+      else delete next.fmExtra
+      get()._commit(next)
     },
 
     async save() {

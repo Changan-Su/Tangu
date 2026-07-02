@@ -1,0 +1,17 @@
+# Dockerfile 专属 ignore(BuildKit:优先于根 .dockerignore 且整体替换它)。
+# 根 .dockerignore 排除了整个 `desktop`,但 web 经别名复用 desktop/frontend/src,
+# 故这里放行 desktop/frontend,只剔除构建产物/依赖与无关大目录。
+**/node_modules
+**/dist
+**/.vite
+**/out
+.git
+*.log
+.env
+.env.*
+# 构建只 COPY desktop/frontend + web;以下大目录即便不 COPY 也排除以缩小上下文。
+archived
+designs
+desktop/electron
+desktop/build
+desktop/out

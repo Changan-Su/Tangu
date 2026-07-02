@@ -209,6 +209,8 @@ interface TanguStoredConfig {
   notesAttachmentFolder: string
   /** 导入文件是否默认开启预览(![[file]] 形式);false=插入 [名](路径) 链接。 */
   notesImportPreview: boolean
+  /** 日记(每日笔记)所在 vault 相对文件夹;'' = vault 根。 */
+  notesDailyFolder: string
 }
 
 /**
@@ -244,6 +246,7 @@ const DEFAULT_CONFIG: TanguStoredConfig = {
   notesAttachmentMode: 'attachments',
   notesAttachmentFolder: 'assets',
   notesImportPreview: true,
+  notesDailyFolder: '',
 }
 
 /** 默认工作区目录(配置未填时兜底 ~/Tangu);best-effort 创建,失败不阻断。 */
@@ -308,6 +311,7 @@ async function loadConfig(): Promise<TanguStoredConfig> {
       notesAttachmentMode: notes.mode || 'attachments',
       notesAttachmentFolder: notes.folder || 'assets',
       notesImportPreview: notes.preview !== false,
+      notesDailyFolder: notes.dailyFolder || '',
     } : {}),
   }
   // 环境变量兜底:TANGU_CLOUD_URL(managed/登录默认)、TANGU_BACKEND_URL(external 外部地址)。
@@ -350,6 +354,7 @@ async function saveConfig(patch: Partial<TanguStoredConfig>): Promise<TanguStore
   if ('notesAttachmentMode' in patch) { notes.mode = patch.notesAttachmentMode; nT = true }
   if ('notesAttachmentFolder' in patch) { notes.folder = patch.notesAttachmentFolder; nT = true }
   if ('notesImportPreview' in patch) { notes.preview = patch.notesImportPreview; nT = true }
+  if ('notesDailyFolder' in patch) { notes.dailyFolder = patch.notesDailyFolder; nT = true }
   if (cT) home.cloud = cloud
   if (bT) home.browser = browser
   if (wT) home.wechat = wechat

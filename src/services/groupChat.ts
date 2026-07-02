@@ -37,6 +37,8 @@ const SPEECH_CAP = 16_000;
 
 export const HOST_SLUG = '__host__';
 const USER_SLUG = '__user__';
+/** 播种的「此前对话」上下文条目(groupSeedHistory):不属于任何发言人,formatDelta 原样呈现。 */
+export const CONTEXT_SLUG = '__context__';
 
 export interface GroupChatParams {
   runId: string;
@@ -55,7 +57,7 @@ export interface GroupChatParams {
   signal: AbortSignal;
 }
 
-interface TranscriptEntry { round: number; slug: string; name: string; text: string }
+export interface TranscriptEntry { round: number; slug: string; name: string; text: string }
 
 /** 本次群聊 run 的真实 token 累计(usage 事件的 total + 终态 tokens_total 用)。 */
 interface Meter { tokens: number }
@@ -89,6 +91,11 @@ export async function runGroupChat(p: GroupChatParams): Promise<void> {
       if (idx > 0) participants.unshift(participants.splice(idx, 1)[0]);
     }
 
+    // ①.5 播种既有会话历史(groupSeedHistory):把本会话已有消息(分支复制来的/先前的)作为一条
+    // 上下文条目进 transcript → 每个参与者首轮 delta 自然看到。必须在 ② 落库开场白**之前**读,
+    // 否则开场白会在上下文块里重复出现。历史为空 → 无条目,与不开旗标行为一致。
+    const seedEntry = p.agentConfig.groupSeedHistory ? await buildHistorySeed(sessionId).catch(() => null) : null;
+
     // ② 用户消息落库(group 分支早于 runLoop 的 insertUserMessage 点,故此处补上)
     if (p.userMessageId && p.message) {
       await state.insertUserMessage({
@@ -107,7 +114,10 @@ export async function runGroupChat(p: GroupChatParams): Promise<void> {
       ctxByAgent.set(a.slug, [{ role: 'system', content: buildGroupSystem(a, roster, p.message) } as ChatMessage]);
       seen.set(a.slug, 0);
     }
-    const transcript: TranscriptEntry[] = [{ round: 0, slug: USER_SLUG, name: 'User', text: String(p.message) }];
+    const transcript: TranscriptEntry[] = [
+      ...(seedEntry ? [seedEntry] : []),
+      { round: 0, slug: USER_SLUG, name: 'User', text: String(p.message) },
+    ];
 
     let costTotal = 0;
     const meter: Meter = { tokens: 0 };
@@ -182,9 +192,10 @@ export async function runGroupChat(p: GroupChatParams): Promise<void> {
       participants: participants.map((a) => ({ slug: a.slug, name: a.name })),
     });
 
-    // ④ 主持人总结。groupAutoSummary(后台 @讨论:无交互用户)→ 直接总结;否则询问用户(run 内 await,不结束 run)。
+    // ④ 主持人总结。groupNoSummary(Historian 辅助讨论等:结论=主 agent 的工具动作,无需总结)→ 整步跳过;
+    // groupAutoSummary(后台 @讨论:无交互用户)→ 直接总结;否则询问用户(run 内 await,不结束 run)。
     let summarized = false;
-    if (!signal.aborted) {
+    if (!signal.aborted && !p.agentConfig.groupNoSummary) {
       const ans = p.agentConfig.groupAutoSummary
         ? '是,总结'
         : await requestInquiry(
@@ -406,12 +417,41 @@ function buildGroupSystem(agent: NormalAgentDef, roster: string, topic: string):
   );
 }
 
-function formatDelta(delta: TranscriptEntry[], selfName: string): string {
+export function formatDelta(delta: TranscriptEntry[], selfName: string): string {
   if (!delta.length) return `It is now your turn (${selfName}) to speak.`;
   const lines = delta
-    .map((t) => (t.slug === USER_SLUG ? `[User] ${t.text}` : `@${t.name}:\n${t.text}`))
+    .map((t) => (t.slug === CONTEXT_SLUG ? t.text : t.slug === USER_SLUG ? `[User] ${t.text}` : `@${t.name}:\n${t.text}`))
     .join('\n\n');
   return `New remarks in the group:\n\n${lines}\n\n———\nIt is now your turn (${selfName}) to speak. You may @ a member, or quote their remark with >.`;
+}
+
+/**
+ * 把本会话已有消息(user/assistant 文本)拼成一条 CONTEXT transcript 条目(单条 cap 2000、总量尾部 8000,
+ * 对齐 localHistorian.recentTranscript 的量级)。无有效历史 → null。
+ */
+async function buildHistorySeed(sessionId: string): Promise<TranscriptEntry | null> {
+  const state = deps().state;
+  const n = await state.countSessionMessages(sessionId);
+  if (!n) return null;
+  const take = Math.min(n, 30);
+  const rows = await state.listSessionMessagesWindow(sessionId, take, n - take);
+  const lines: string[] = [];
+  for (const r of rows || []) {
+    const role = r.role === 'model' ? 'assistant' : r.role;
+    if (role !== 'user' && role !== 'assistant') continue;
+    const content = String(r.content || '').trim();
+    if (!content) continue;
+    lines.push(`${role === 'user' ? '[User]' : '[Assistant]'} ${content.slice(0, 2000)}`);
+  }
+  if (!lines.length) return null;
+  let block = lines.join('\n\n');
+  if (block.length > 8000) block = block.slice(-8000);
+  return {
+    round: 0,
+    slug: CONTEXT_SLUG,
+    name: 'Context',
+    text: `[Context — the conversation so far in this session]\n\n${block}\n\n[End of context]`,
+  };
 }
 
 const VOTE_PROMPT =

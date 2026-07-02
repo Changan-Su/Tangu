@@ -45,6 +45,7 @@ export const AgentPicker: React.FC<{
                   : <span className="agent-pill-initial">{firstChar(a.name)}</span>}
               </span>
               <span className="engine-pill-label">{a.name}</span>
+              {a.createdBy === 'system' && <span className="agent-badge-system">{t('agent.badge.system')}</span>}
             </button>
           )
         })}

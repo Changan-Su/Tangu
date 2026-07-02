@@ -6,6 +6,7 @@ export const IPC = {
   restoreVault: 'vault:restore',
   listPages: 'vault:list',
   loadPage: 'page:load',
+  readPage: 'page:read',
   newPage: 'page:new',
   savePage: 'page:save',
   renamePage: 'page:rename',
@@ -104,6 +105,8 @@ export interface AmadeusApi {
   restoreVault(): Promise<VaultInfo | null>
   listPages(): Promise<string[]>
   loadPage(pagePath: string): Promise<LoadedPage>
+  /** 只读加载(模板读取等):不写 lastPage,不算「打开」。 */
+  readPage(pagePath: string): Promise<LoadedPage>
   newPage(pagePath: string): Promise<LoadedPage>
   savePage(pagePath: string, manifest: PageManifest, contents: Record<string, string>): Promise<void>
   /** Rename a page (same folder); rewrites manifest + all block sidecars + main.md. */

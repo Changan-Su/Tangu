@@ -8,11 +8,19 @@ import {
   ILINK_BASE_URL,
   LONG_POLL_TIMEOUT_MS,
   extractText,
+  extractImageMedias,
+  extractFileMedias,
+  describeMediaItems,
   isRateLimited,
   isSessionExpired,
   type IlinkInboundMessage,
   type IlinkMediaKind,
 } from './ilinkClient.js';
+
+/** 入站图片附件（下载解密后，喂给 run 的形态，与 Tangu 桌面端一致：{name,mimeType,data(base64)}）。 */
+export interface InboundImage { name: string; mimeType: string; data: string }
+/** 入站文件（下载解密后交上层落盘;mimeType 可能是嗅探出的图片类型——jpg 当文件发也认得出）。 */
+export interface InboundFile { name: string; mimeType: string; buffer: Buffer }
 
 export interface AccountCredentials {
   accountId: string;
@@ -28,7 +36,7 @@ interface AccountState extends AccountCredentials {
 
 export interface IlinkRuntimeOptions {
   stateDir: string;
-  onMessage: (msg: { accountId: string; openid: string; text: string; messageId?: string }) => Promise<string>;
+  onMessage: (msg: { accountId: string; openid: string; text: string; messageId?: string; attachments?: InboundImage[]; files?: InboundFile[] }) => Promise<string>;
   onSessionExpired?: (accountId: string) => void;
   logger?: (level: 'info' | 'warn' | 'error', msg: string) => void;
 }
@@ -55,6 +63,9 @@ export class IlinkRuntime {
     this.log = opts.logger ?? ((level, msg) => {
       const fn = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
       fn(`[tangu-wechat] ${msg}`);
+      // 同步落盘 stateDir/runtime.log(尽力而为):桌面内置后端 stdout 只进内存 ring buffer,
+      // 微信链路排障必须有可 tail 的文件。ponytail: 只追加不轮转,流量极小。
+      void fs.appendFile(path.join(this.opts.stateDir, 'runtime.log'), `${new Date().toISOString()} ${level} ${msg}\n`).catch(() => {});
     });
   }
 
@@ -284,6 +295,8 @@ export class IlinkRuntime {
 
   private async handleMessage(account: AccountState, client: IlinkClient, msg: IlinkInboundMessage): Promise<void> {
     const openid = String(msg.from_user_id ?? '').trim();
+    // 每条入站消息先记录 item 形状(只字段名不含值):微信媒体格式无文档,静默丢消息时唯一线索就是这行。
+    this.log('info', `[${account.accountId}] inbound from=${openid.slice(0, 10)}… items: ${describeMediaItems(msg.item_list) || '(no item_list)'}`);
     if (!openid || openid === account.accountId) return;
     const messageId = String(msg.message_id ?? '');
     if (this.isDuplicate(account.accountId, messageId)) return;
@@ -293,8 +306,47 @@ export class IlinkRuntime {
       await this.persistState(account);
     }
     const text = extractText(msg.item_list).trim();
-    if (!text) return;
-    const reply = await this.opts.onMessage({ accountId: account.accountId, openid, text, messageId });
+    const imageMedias = extractImageMedias(msg.item_list);
+    const fileMedias = extractFileMedias(msg.item_list);
+    // 消息里图片/文件项的总数(含 media 描述解析不出的),用来发现「有媒体但一件都没解析出」的结构不符。
+    const mediaItemCount = (msg.item_list ?? []).filter((it) => it?.type === 2 || it?.type === 4).length;
+    if (mediaItemCount > imageMedias.length + fileMedias.length) {
+      this.log('warn', `[${account.accountId}] 入站媒体项结构不符（缺 media/encrypt_query_param）：${describeMediaItems(msg.item_list)}`);
+    }
+    if (!text && !imageMedias.length && !fileMedias.length && !mediaItemCount) return; // 语音已转文字;视频等类型暂不支持
+    // 下载解密（尽力而为：单件失败不阻塞其它，也不让整条消息静默丢——最后统计缺口补文字提示）。
+    const attachments: InboundImage[] = [];
+    for (const m of imageMedias) {
+      try {
+        const img = await client.downloadMedia(m);
+        attachments.push({ name: `wechat-image.${img.mimeType.split('/')[1] || 'jpg'}`, mimeType: img.mimeType, data: img.buffer.toString('base64') });
+      } catch (e: any) {
+        this.log('warn', `[${account.accountId}] 入站图片处理失败：${e?.message || e} items=${describeMediaItems(msg.item_list)}`);
+      }
+    }
+    const files: InboundFile[] = [];
+    for (const f of fileMedias) {
+      try {
+        const m = await client.downloadMedia(f.media, { expectedSize: f.size });
+        files.push({ name: f.fileName, mimeType: m.mimeType, buffer: m.buffer });
+      } catch (e: any) {
+        this.log('warn', `[${account.accountId}] 入站文件处理失败（${f.fileName}）：${e?.message || e} items=${describeMediaItems(msg.item_list)}`);
+      }
+    }
+    // 有媒体但没全解出来 → 给 agent 一句可见的提示(它可以告知用户重发),不静默。
+    const lost = mediaItemCount - attachments.length - files.length;
+    const textOut = [text, lost > 0 ? `（用户随消息发来 ${lost} 个图片/文件，但读取失败，请告知用户）` : '']
+      .filter(Boolean)
+      .join('\n');
+    if (!textOut && !attachments.length && !files.length) return;
+    const reply = await this.opts.onMessage({
+      accountId: account.accountId,
+      openid,
+      text: textOut,
+      messageId,
+      attachments: attachments.length ? attachments : undefined,
+      files: files.length ? files : undefined,
+    });
     if (reply) await this.sendWithContext(account, client, openid, reply);
   }
 

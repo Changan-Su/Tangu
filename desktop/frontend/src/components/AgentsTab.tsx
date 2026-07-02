@@ -324,6 +324,7 @@ export const AgentsTab: React.FC<{ cfg: TanguDesktopConfig; onEditingChange?: (e
                 <b>{a.name}</b>
                 {a.slug === defaultSlug && <span style={{ color: 'var(--accent)', marginLeft: 8, fontSize: 11 }}>· {t('settings.agents.isDefault')}</span>}
                 {a.createdBy === 'agent' && <span style={{ color: 'var(--text-muted)', marginLeft: 8, fontSize: 11 }}>· {t('settings.agents.byAgent')}</span>}
+                {a.createdBy === 'system' && <span style={{ color: 'var(--text-muted)', marginLeft: 8, fontSize: 11 }}>· {t('agent.badge.system')}</span>}
                 {a.description && <span style={{ color: 'var(--text-muted)', marginLeft: 8, fontSize: 12 }}>{a.description.length > 60 ? `${a.description.slice(0, 60)}…` : a.description}</span>}
               </span>
               <button className="icon-btn" title={a.cloudSync ? t('settings.agents.cloudSyncOn') : t('settings.agents.cloudSyncOff')}

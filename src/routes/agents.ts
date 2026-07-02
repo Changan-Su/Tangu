@@ -11,7 +11,7 @@
 import { Router } from 'express';
 import { authMiddleware, AuthRequest } from '../core/http.js';
 import { deps } from '../seams/runtime.js';
-import { listAgents, getAgent, saveAgent, deleteAgent, saveAgentAvatar, readAgentAvatar, deleteAgentAvatar, readAgentsMeta, writeAgentsMeta, resolveMemorySlug, listLibraryFiles, readLibraryFile, writeLibraryFile, deleteLibraryFile } from '../agents/agentRegistry.js';
+import { listAgents, getAgent, saveAgent, deleteAgent, saveAgentAvatar, readAgentAvatar, deleteAgentAvatar, readAgentsMeta, writeAgentsMeta, resolveMemorySlug, listLibraryFiles, readLibraryFile, writeLibraryFile, deleteLibraryFile, MUSE_AGENT_SLUG } from '../agents/agentRegistry.js';
 import path from 'node:path';
 import { agentsDir, readUserMd, writeUserMd } from '../core/tanguHome.js';
 import { createLocalMemoryStore } from '../adapters/standalone/localMemoryBrain.js';
@@ -93,6 +93,9 @@ router.delete('/agent/agents/:slug', authMiddleware, async (req: AuthRequest, re
   if (!ensureLocal(res)) return;
   try {
     const ok = await deleteAgent(req.params.slug);
+    if (!ok && req.params.slug === MUSE_AGENT_SLUG) {
+      return res.status(400).json({ detail: 'Muse 正在启用中,请先在 设置·后台智能体 关闭 Muse 再删除' });
+    }
     res.json({ ok });
   } catch (e: any) {
     res.status(500).json({ detail: e?.message || 'delete agent failed' });

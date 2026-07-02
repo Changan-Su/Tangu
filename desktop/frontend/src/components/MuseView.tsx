@@ -1,5 +1,6 @@
 /**
  * Muse 工作区：上=Muse 当前思考 + 运行态；下=Muse TODO 清单（多选 → 选会话 → 注入并运行）。
+ * 嵌在「后台智能体」视图(AgentsDetailView)内使用,外层容器负责 padding/滚动。
  */
 import React, { useEffect, useState } from 'react'
 import { Sparkles, RefreshCw, Play, Check, XCircle } from 'lucide-react'
@@ -56,7 +57,7 @@ export const MuseView: React.FC<{
 
   const running = !!status?.running
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, padding: '16px 20px', overflowY: 'auto' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, fontWeight: 600 }}>
         <Sparkles size={16} /> {t('special.muse.title')}
         <span style={{ flex: 1 }} />

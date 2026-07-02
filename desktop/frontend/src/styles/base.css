@@ -1344,6 +1344,9 @@ a:hover { color: var(--accent-hover); }
 .agent-pill-avatar { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; display: block; }
 .agent-pill-initial { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: var(--overlay-light); font-size: 11px; font-weight: 600; line-height: 1; }
 .agent-picker .engine-pill.selected .agent-pill-initial { background: var(--bg-card); }
+/* 系统(后台)agent 徽章:pill 内仅选中态显示(未选中 pill 只剩头像,徽章跟随 label 隐藏) */
+.agent-badge-system { display: none; font-size: 10px; padding: 1px 5px; border-radius: 999px; background: var(--overlay-light); color: var(--text-muted); margin-left: 5px; line-height: 1.4; flex-shrink: 0; }
+.engine-pill.selected .agent-badge-system { display: inline-block; }
 /* 引擎(上)+ Agent(下)选择器成一组,出现在欢迎区下方、输入框上方 */
 .newchat-pickers { display: flex; flex-direction: column; align-items: center; gap: 2px; margin: 0 auto 8px; }
 .newchat-pickers .engine-picker { margin-bottom: 0; }
@@ -2326,3 +2329,19 @@ html.dark .brand-logo--dark { display: inline-block; }
 .mk-submit-ic { color: var(--accent); }
 .mk-submit-hint { font-size: 13.5px; color: var(--text-light); line-height: 1.6; }
 .mk-submit .btn { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ── Electron 拖窗区兜底 ──
+ * 拖窗区按 DOM 顺序几何合成(drag 并集、no-drag 差集),与 z-index/遮盖完全无关;
+ * drag 区内的鼠标事件(含 hover)被系统当窗口标题栏吞掉,永远到不了 DOM。
+ * 因此全屏浮层必须自己整体 no-drag,才能压住底下 Shell 的 .rb / .t2s-side / tab 栏拖窗区
+ * (且浮层必须晚于这些元素出现在 DOM,否则差集会被后来的 drag 并集覆盖回去)。 */
+.settings-page,
+.ob-hero-wrap,
+.ob-step-wrap,
+.memv-modal,
+.u-backdrop,
+.ctx-menu,
+.update-banner { -webkit-app-region: no-drag; }
+/* 设置/市场页顶部标题行补回拖窗条(交互子元素抠回,防止重蹈本 bug)。 */
+.settings-main-head { -webkit-app-region: drag; }
+.settings-main-head button, .settings-main-head input { -webkit-app-region: no-drag; }

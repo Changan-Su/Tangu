@@ -9,6 +9,7 @@ import { useBootstrap } from './stores/bootstrap'
 import { buildDefaultLayout } from './bootstrapEngine'
 import { TopBar } from './views/TopBar'
 import { SettingsModal } from './components/SettingsModal'
+import { AmadeusOverlays } from './amadeusOverlays'
 import { MarketModal } from './components/MarketModal'
 import { OnboardingWizard, ONBOARDING_DISMISS_KEY } from './components/OnboardingWizard'
 import { FeedbackModal } from './components/FeedbackModal'
@@ -57,6 +58,14 @@ export function Root() {
 
   return (
     <>
+      <div className={`shell-host${revealMain ? ' main-enter' : ''}`}>
+        <Shell dark={theme.mode === 'dark'} soft={!!getLanguage(theme.lang)?.manifest.panelGap} buildDefault={buildDefaultLayout} header={<TopBar />} />
+      </div>
+
+      {/* Amadeus 全局浮层(快速切换等):须在 shell-host 之后(拖窗区 DOM 顺序,同下)。 */}
+      {window.amadeus && <AmadeusOverlays />}
+
+      {/* 必须排在 shell-host 之后:拖窗区按 DOM 顺序合成,横幅的 no-drag 若早于 Shell 的 drag 区会失效(见 base.css「Electron 拖窗区兜底」)。 */}
       {a.updateAvailable && !a.updateDismissed && (
         <div className="update-banner" style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 40 }}>
           <span>{a.tr('app.update.bannerTitle', { version: a.updateAvailable.version || '' })}</span>
@@ -64,10 +73,6 @@ export function Root() {
           <button className="update-banner-x" title={a.tr('app.update.bannerDismiss')} onClick={() => a.dismissUpdate()}>×</button>
         </div>
       )}
-
-      <div className={`shell-host${revealMain ? ' main-enter' : ''}`}>
-        <Shell dark={theme.mode === 'dark'} soft={!!getLanguage(theme.lang)?.manifest.panelGap} buildDefault={buildDefaultLayout} header={<TopBar />} />
-      </div>
 
       <AnimatePresence>
         {a.settingsOpen && (

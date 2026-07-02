@@ -2,6 +2,7 @@ import { Fragment, useState } from 'react'
 import {
   DndContext,
   DragOverlay,
+  MeasuringStrategy,
   PointerSensor,
   closestCorners,
   useDroppable,
@@ -139,12 +140,14 @@ export function PageView({ bare = false }: { bare?: boolean } = {}) {
       <DndContext
         sensors={sensors}
         collisionDetection={closestCorners}
+        // 桌面壳把 edge-zone 静止时压成零宽、拖拽中才浮现 → 必须拖拽期间持续重测 droppable 矩形。
+        measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
         onDragStart={onDragStart}
         onDragOver={onDragOver}
         onDragEnd={onDragEnd}
         onDragCancel={onDragCancel}
       >
-        <div className="stack">
+        <div className="stack" data-dnd={activeId ? '' : undefined}>
           <RowGap index={-1} />
           {root.children.map((row, i) => (
             <Fragment key={row.id}>

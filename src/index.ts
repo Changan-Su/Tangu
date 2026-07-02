@@ -106,8 +106,10 @@ export function createTanguModule(d: TanguDeps): TanguModule {
       startSessionReaper();
     }
 
-    // historian 也是全局后台扫描,worker 集群关掉避免重复复盘。
-    if (opts?.historian !== false) {
+    // historian(云端闲置会话复盘,服务 AI Studio)是全局后台扫描:worker 集群关掉避免重复复盘;
+    // 本地形态(hostExec=standalone/desktop)由按轮的 localHistorian 全权负责,这里不启动——
+    // 它 agent-unaware(无 run 上下文,全写默认 agent 文件夹),与 per-agent 记忆架构不兼容。
+    if (opts?.historian !== false && !deps().profile.capabilities.hostExec) {
       loadHistorianConfig().catch(() => {});
       startHistorian();
     }

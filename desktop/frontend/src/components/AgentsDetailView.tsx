@@ -1,32 +1,35 @@
 /**
- * 后台智能体详情(主区面板):Historian 活动流 + Muse 状态/待办 合一。
- * 右上「设置」进入 设置·后台智能体(Historian/Muse 配置)。
+ * 后台智能体详情(主区面板):Historian 活动流 + 完整 Muse 工作区(勾选/忽略/注入)合一。
+ * Muse 部分直接复用 MuseView(自带 4s 轮询与状态 pill);右上「设置」进入 设置·后台智能体。
  */
 import React, { useEffect, useState } from 'react'
 import { History, Sparkles, RefreshCw, Settings } from 'lucide-react'
-import { getHistorianActivity, getMuseStatus, getMuseTodos } from '../services/backendService'
-import type { HistorianActivityItem, MuseStatusInfo, MuseTodo, TanguDesktopConfig } from '../types'
+import { getHistorianActivity } from '../services/backendService'
+import type { HistorianActivityItem, SessionRecord, TanguDesktopConfig } from '../types'
 import { useApp } from '../stores/appStore'
 import { useI18n } from '../i18n'
+import { MuseView } from './MuseView'
 
 const ACTION_KEY: Record<string, string> = {
   title_updated: 'special.action.title_updated',
   log_appended: 'special.action.log_appended',
   memory_appended: 'special.action.memory_appended',
   memory_updated: 'special.action.memory_updated',
+  assist_discussion: 'special.action.assist_discussion',
 }
 
-export const AgentsDetailView: React.FC<{ cfg: TanguDesktopConfig; onOpenSettings: () => void }> = ({ cfg, onOpenSettings }) => {
+export const AgentsDetailView: React.FC<{
+  cfg: TanguDesktopConfig
+  sessions: SessionRecord[]
+  onOpenSession: (id: string) => void
+  onOpenSettings: () => void
+}> = ({ cfg, sessions, onOpenSession, onOpenSettings }) => {
   const { t } = useI18n()
   const connState = useApp((s) => s.connState)
   const [activity, setActivity] = useState<HistorianActivityItem[] | null>(null)
-  const [muse, setMuse] = useState<MuseStatusInfo | null>(null)
-  const [todos, setTodos] = useState<MuseTodo[]>([])
 
   const load = (): void => {
     void getHistorianActivity(cfg, 50).then(setActivity).catch(() => setActivity([]))
-    void getMuseStatus(cfg).then(setMuse).catch(() => setMuse(null))
-    void getMuseTodos(cfg, 'pending').then(setTodos).catch(() => setTodos([]))
   }
   useEffect(() => {
     if (connState !== 'ok') return // 未连上后端前不发请求(避免启动期 ERR_CONNECTION_REFUSED;连上后重跑)
@@ -60,21 +63,10 @@ export const AgentsDetailView: React.FC<{ cfg: TanguDesktopConfig; onOpenSetting
           </div>
         )}
 
-        <div className="agentsd-label" style={{ marginTop: 18 }}>
-          <Sparkles size={13} /> {t('agents.detail.muse')}
-          <span className={`mini-dot ${muse?.running ? 'ok' : ''}`} style={{ marginLeft: 6 }} />
+        {/* Muse 完整工作区(自带标题/状态 pill/轮询;注入后跳转目标会话) */}
+        <div style={{ marginTop: 18 }}>
+          <MuseView cfg={cfg} sessions={sessions} onInjected={onOpenSession} />
         </div>
-        {todos.length === 0 ? (
-          <div className="hint">{muse?.running ? t('agents.detail.noTodos') : t('agents.detail.museOff')}</div>
-        ) : (
-          <div className="agentsd-list">
-            {todos.map((td) => (
-              <div key={td.id} className="agentsd-row">
-                <span className="agentsd-detail" style={{ flex: 1 }}><b>{td.title}</b>{td.detail ? ` — ${td.detail}` : ''}</span>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   )

@@ -1,5 +1,5 @@
 /** 真实引擎装配:注册视图(会话/对话)+ ribbon + 命令 + 默认布局。替代 demoBootstrap。 */
-import { MessageCircle, MessagesSquare, Plus, Command as CommandIcon, Moon, Languages, MessageSquare, FolderOpen, List, BookOpen, Bot, Smartphone, Store, Settings, NotebookText, FileText, ListTree, Link2 } from 'lucide-react'
+import { MessageCircle, MessagesSquare, Plus, Command as CommandIcon, Moon, Languages, MessageSquare, FolderOpen, List, BookOpen, Bot, Smartphone, Store, Settings, NotebookText, FileText, ListTree, Link2, Search, Hash, Waypoints } from 'lucide-react'
 import { registerView, addCommand, addRibbonIcon, openCommandPalette, useWorkspace, getActiveSpace, recordNav } from './engine'
 import { registerSpaces } from './spaces'
 import { AccountCard } from './components/AccountCard'
@@ -12,6 +12,7 @@ import { FilesView, TocView, MemoryPanelView, SubchatsView } from './views/Right
 import { NewTabView } from './views/NewTabView'
 import { WeChatSpecialView, AgentsDetailSpecialView, WorkspaceDetailSpecialView } from './views/SpecialViews'
 import { AmadeusPagesView, AmadeusEditorView, AmadeusOutlineView, AmadeusBacklinksView } from './amadeusViews'
+import { AmadeusSearchView, AmadeusTagsView, AmadeusLocalGraphView } from './amadeusPanels'
 
 const ws = () => useWorkspace.getState()
 const app = () => useApp.getState()
@@ -55,10 +56,14 @@ export function installEngine(): void {
   // 与 market/feedback 的 window.tangu?.X 门控同纪律。否则视图挂载即 deref undefined amadeus 崩溃。
   if (window.amadeus) {
     registerView({ type: 'amadeus-pages', displayName: () => app().tr('amadeus.pages'), icon: NotebookText, factory: () => <AmadeusPagesView />, singleton: true, closable: false })
-    // 编辑器可关闭(主区命名 tab 才有 ×):关到主区最后一个 → 走 amadeusSpace.newPage 复位(见 spaces.tsx)。
-    registerView({ type: 'amadeus-editor', displayName: () => app().tr('amadeus.editor'), icon: FileText, factory: () => <AmadeusEditorView />, singleton: true })
+    // 编辑器 = 非 singleton 多实例(类 Obsidian 每笔记一个 tab,params.notePath 认领笔记并随布局持久化);
+    // 可关闭:关到主区最后一个 → 走 amadeusSpace.newPage 复位(见 spaces.tsx)。
+    registerView({ type: 'amadeus-editor', displayName: () => app().tr('amadeus.editor'), icon: FileText, factory: (props) => <AmadeusEditorView {...props} /> })
     registerView({ type: 'amadeus-outline', displayName: () => app().tr('amadeus.outline'), icon: ListTree, factory: () => <AmadeusOutlineView />, singleton: true })
     registerView({ type: 'amadeus-backlinks', displayName: () => app().tr('amadeus.backlinks'), icon: Link2, factory: () => <AmadeusBacklinksView />, singleton: true })
+    registerView({ type: 'amadeus-search', displayName: () => app().tr('amadeus.search'), icon: Search, factory: () => <AmadeusSearchView />, singleton: true })
+    registerView({ type: 'amadeus-tags', displayName: () => app().tr('amadeus.tags'), icon: Hash, factory: () => <AmadeusTagsView />, singleton: true })
+    registerView({ type: 'amadeus-graph', displayName: () => app().tr('amadeus.graph'), icon: Waypoints, factory: () => <AmadeusLocalGraphView />, singleton: true })
   }
 
   // Space:注册(注册序 = ribbon 顶部默认序,排在商店等功能图标之上;每个 Space 贡献一个可拖动的 ribbon 顶部图标)。

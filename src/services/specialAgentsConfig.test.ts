@@ -28,8 +28,19 @@ describe('normalizeConfig', () => {
     expect(c.historian.everyMemoryRounds).toBe(100); // max 100
     expect(c.muse.maxIterationsPerCycle).toBe(500); // max 500
     expect(c.muse.restartWindowHours).toBe(24); // max 24
-    expect(c.muse.compactAtRatio).toBe(0.8); // invalid ratio → default
     expect(c.muse.supervisorPollMinutes).toBe(1); // min 1
+  });
+  it('旧字段(muse.prompt / compactAtRatio)被静默丢弃(人格已迁入 agents/muse/ 文件夹)', () => {
+    const c = normalizeConfig({ muse: { prompt: 'custom', compactAtRatio: 0.5, enabled: true, modelId: 'm' } });
+    expect((c.muse as any).prompt).toBeUndefined();
+    expect((c.muse as any).compactAtRatio).toBeUndefined();
+    expect(c.muse.enabled).toBe(true); // 其余字段照常
+  });
+  it('historian.mode:缺省/非法 → independent,assist 保留', () => {
+    expect(normalizeConfig(undefined).historian.mode).toBe('independent');
+    expect(normalizeConfig({ historian: { mode: 'assist' } }).historian.mode).toBe('assist');
+    expect(normalizeConfig({ historian: { mode: 'weird' } }).historian.mode).toBe('independent');
+    expect(normalizeConfig({ historian: { mode: 42 } }).historian.mode).toBe('independent');
   });
   it('preserves valid values + allowedFolders filter', () => {
     const c = normalizeConfig({

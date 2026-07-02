@@ -20,6 +20,13 @@ export interface HistorianConfig {
   everyMemoryRounds: number;
   /** 首轮（roundN===1）必触发。 */
   firstRoundTrigger: boolean;
+  /**
+   * 工作模式:independent=Historian 自己判断并写 LOG/memory(默认);
+   * assist=触发后分支出简短后台讨论(branch+群聊,无主持人总结),与该会话的主 Agent 商议,
+   * 由主 Agent 自己经 log_event/remember 写入。标题两种模式都由 Historian 独立维护;
+   * 首轮(roundN===1)始终走 independent。
+   */
+  mode: 'independent' | 'assist';
   /** memory 判断提示词（空=用默认）。标题总结用固定内部提示。 */
   prompt: string;
 }
@@ -37,15 +44,13 @@ export interface MuseConfig {
   maxTodosPerWindow: number;
   /** 巡检间隔（分钟）：定时检测 Muse 是否在跑、未跑则拉起。 */
   supervisorPollMinutes: number;
-  /** 上下文占用达此比例（0.8=80%）→ 自动压缩。 */
-  compactAtRatio: number;
   /** 运行时段（基于设备本地时，0-23 时；null=全天）。end 可小于 start 表示跨夜。 */
   activeHours: { start: number; end: number } | null;
-  /** 思考提示词（空=用默认）；运行时再追加 TODO 预算说明。 */
-  prompt: string;
   /** Muse 可读的授权本地文件夹（绝对路径；空=不读本地文件）。 */
   allowedFolders: string[];
 }
+// 注:旧字段 compactAtRatio(声明后从未被读)与 prompt(人格已迁入 ~/.tangu/agents/muse/ 文件夹,
+// 见 legacyMusePrompt 的一次性迁移)已移除;旧 config.json 里的残留键被 normalize 静默丢弃。
 
 export interface SpecialAgentsConfig {
   historian: HistorianConfig;
@@ -59,8 +64,11 @@ export const DEFAULT_HISTORIAN_PROMPT =
   'Always judge based on the actual content; when in doubt, leave it out — never fabricate, never restate the obvious.';
 
 export const DEFAULT_MUSE_PROMPT =
-  'You are Muse, an agent that keeps thinking in the background and proactively spots opportunities for the user. You can read the user\'s memory, logs, conversation history, and authorized local folders, ' +
-  'but your only write permission is to submit genuinely high-value, actionable todos to the Muse TODO list via the add_muse_todo tool. Keep thinking: what can I do for the user right now?';
+  'You are Muse, an agent that keeps thinking in the background and proactively spots opportunities for the user. ' +
+  'Each cycle you receive fresh context in the kickoff message: the user\'s long-term memory, recent activity across their agents, recent conversation topics, and authorized local folders — and you can read more with your tools. ' +
+  'You have exactly two write permissions: add_muse_todo, your only output to the user — submit genuinely high-value, actionable todos, sparingly; ' +
+  'and remember, your private long-term memory — record durable insights about what the user values, accepts, or dismisses, so future cycles propose better and repeat less. ' +
+  'Everything else is read-only. Keep thinking: what can I do for the user right now?';
 
 export const SPECIAL_AGENTS_DEFAULTS: SpecialAgentsConfig = {
   historian: {
@@ -69,6 +77,7 @@ export const SPECIAL_AGENTS_DEFAULTS: SpecialAgentsConfig = {
     everyTitleRounds: 3,
     everyMemoryRounds: 9,
     firstRoundTrigger: true,
+    mode: 'independent',
     prompt: '',
   },
   muse: {
@@ -79,9 +88,7 @@ export const SPECIAL_AGENTS_DEFAULTS: SpecialAgentsConfig = {
     maxIterationsPerCycle: 10,
     maxTodosPerWindow: 5,
     supervisorPollMinutes: 5,
-    compactAtRatio: 0.8,
     activeHours: null,
-    prompt: '',
     allowedFolders: [],
   },
 };
@@ -89,10 +96,6 @@ export const SPECIAL_AGENTS_DEFAULTS: SpecialAgentsConfig = {
 const clampInt = (v: any, def: number, min: number, max: number): number => {
   const n = Math.floor(Number(v));
   return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : def;
-};
-const clampRatio = (v: any, def: number): number => {
-  const n = Number(v);
-  return Number.isFinite(n) && n > 0 && n <= 1 ? n : def;
 };
 const asStr = (v: any, def = ''): string => (typeof v === 'string' ? v : def);
 const asBool = (v: any, def: boolean): boolean => (typeof v === 'boolean' ? v : def);
@@ -116,6 +119,7 @@ export function normalizeConfig(raw: any): SpecialAgentsConfig {
       everyTitleRounds: clampInt(h.everyTitleRounds, d.historian.everyTitleRounds, 1, 100),
       everyMemoryRounds: clampInt(h.everyMemoryRounds, d.historian.everyMemoryRounds, 1, 100),
       firstRoundTrigger: asBool(h.firstRoundTrigger, d.historian.firstRoundTrigger),
+      mode: h.mode === 'assist' ? 'assist' : d.historian.mode,
       prompt: asStr(h.prompt, d.historian.prompt),
     },
     muse: {
@@ -126,14 +130,27 @@ export function normalizeConfig(raw: any): SpecialAgentsConfig {
       maxIterationsPerCycle: clampInt(m.maxIterationsPerCycle, d.muse.maxIterationsPerCycle, 1, 500),
       maxTodosPerWindow: clampInt(m.maxTodosPerWindow, d.muse.maxTodosPerWindow, 0, 100),
       supervisorPollMinutes: clampInt(m.supervisorPollMinutes, d.muse.supervisorPollMinutes, 1, 240),
-      compactAtRatio: clampRatio(m.compactAtRatio, d.muse.compactAtRatio),
       activeHours: m.activeHours === null ? null : normalizeActiveHours(m.activeHours),
-      prompt: asStr(m.prompt, d.muse.prompt),
       allowedFolders: Array.isArray(m.allowedFolders)
         ? m.allowedFolders.filter((x: any) => typeof x === 'string' && x.trim()).slice(0, 50)
         : d.muse.allowedFolders,
     },
   };
+}
+
+/**
+ * 旧版 muse.prompt 自定义值(人格已迁入 agents/muse/ 文件夹)——读**原始**配置(不走 normalize,
+ * normalize 已不认识该键),供 ensureMuseAgent 首次播种时一次性迁移为 developer_instructions。
+ */
+export function legacyMusePrompt(): string {
+  try {
+    const sec = getRawSection('specialAgents') as any;
+    if (sec !== undefined) return typeof sec?.muse?.prompt === 'string' ? sec.muse.prompt : '';
+    const raw = JSON.parse(readFileSync(specialAgentsConfigFile(), 'utf8'));
+    return typeof raw?.muse?.prompt === 'string' ? raw.muse.prompt : '';
+  } catch {
+    return '';
+  }
 }
 
 export function loadSpecialAgentsConfig(): SpecialAgentsConfig {

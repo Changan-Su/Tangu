@@ -1,9 +1,15 @@
 /**
- * Muse（后台常驻 Special Agent）—— 一直自动思考「现在能为用户做点什么」，唯一写权限是 add_muse_todo。
+ * Muse（后台常驻 Special Agent）—— 一直自动思考「现在能为用户做点什么」。
  *
- * 运行形态：每个周期 = 在隔离的 kind='muse' 会话里起一个 run（经 agentLoop），用 **planMode（只读）+
- * add_muse_todo** 实现「读全部 + 只写 TODO」；读权限含注入的用户记忆 + read_log/read_file（host，cwd/
- * 授权文件夹）+ 注入的近期会话标题。z=maxIterationsPerCycle 即 run 的 maxIterations。
+ * 身份 = 文件夹系统 agent `~/.tangu/agents/muse/`（config.toml developer_instructions + SOUL.md 人格 +
+ * 自己的 MEMORY.md/LOG，经 agentConfig.agentSlug 激活）：跨周期持久记忆，用户可像普通 agent 一样编辑其
+ * 人格与指令。每周期的**动态**上下文（TODO 预算、用户记忆快照、跨 agent 活动摘要、近期会话标题、授权
+ * 文件夹、TODO 去重提示）注入 kickoff 消息。
+ *
+ * 运行形态：每个周期 = 在隔离的 kind='muse' 会话里起一个 run（经 agentLoop），planMode（只读）下拥有
+ * 恰好两个写权限：add_muse_todo（对用户的唯一输出）+ remember（写自己的 MEMORY.md 做自我校准；用户对
+ * TODO 的处理会以 [feedback] 行进它的 LOG，见 routes/special.ts）。z=maxIterationsPerCycle 即 run 的
+ * maxIterations。
  *
  * 自重启=定时巡检拉起（每 supervisorPollMinutes 检测；没在跑且本窗口未超 maxRestartsPerWindow 即拉起）。
  * 受 activeHours（设备本地时）约束。仅本地形态（hostExec profile）；未启用/无模型/非本地 → 全 no-op。
@@ -14,7 +20,10 @@ import { query } from '../core/db.js';
 import { deps } from '../seams/runtime.js';
 import { createRun } from './runStore.js';
 import { enqueueRun } from './agentLoop.js';
-import { loadSpecialAgentsConfig, DEFAULT_MUSE_PROMPT, isWithinActiveHours, buildTodoDedupHint, type MuseConfig } from './specialAgentsConfig.js';
+import { loadSpecialAgentsConfig, legacyMusePrompt, isWithinActiveHours, buildTodoDedupHint, type MuseConfig } from './specialAgentsConfig.js';
+import { MUSE_AGENT_SLUG, ensureMuseAgent, listAgents, resolveMemorySlug } from '../agents/agentRegistry.js';
+import { runWithAgentSlug } from '../seams/runContext.js';
+import { DEFAULT_AGENT_SLUG } from '../core/tanguHome.js';
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let kickTimer: ReturnType<typeof setTimeout> | null = null;
@@ -128,14 +137,90 @@ async function recentSessionTitles(userId: string): Promise<string> {
   }
 }
 
+/** 用户长期记忆快照(默认 agent 的 MEMORY.md)。Muse 绑定自己的记忆域后,注入 run 的「长期记忆」
+ *  是 Muse 自己的,故用户画像须在此显式带入(runWithAgentSlug 临时切域读取)。 */
+async function userMemoryHint(userId: string): Promise<string> {
+  try {
+    const m = await runWithAgentSlug(DEFAULT_AGENT_SLUG, () => deps().brain.memory.getMemory(userId));
+    const content = String(m?.content || '').trim().slice(0, 3000);
+    return content ? `\n\n[User's long-term memory]\n${content}` : '';
+  } catch {
+    return '';
+  }
+}
+
+/** 本地日期(含今天)倒推 n 天的 YYYY-MM-DD 列表(新→旧)。 */
+function lastDates(n: number): string[] {
+  const out: string[] = [];
+  const p = (x: number): string => String(x).padStart(2, '0');
+  for (let i = 0; i < n; i++) {
+    const d = new Date(Date.now() - i * 86_400_000);
+    out.push(`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`);
+  }
+  return out;
+}
+
+/** 纯拼装:各记忆域 LOG 尾部截断(单域 ≤1200 字)+ 总量帽(≤4000 字)。抽出便于单测。 */
+export function buildActivityDigest(sections: Array<{ scope: string; text: string }>): string {
+  const parts: string[] = [];
+  let total = 0;
+  for (const s of sections) {
+    const t = s.text.trim().slice(-1200);
+    if (!t) continue;
+    if (total + t.length > 4000) break;
+    total += t.length;
+    parts.push(`--- agent:${s.scope} ---\n${t}`);
+  }
+  return parts.length
+    ? `\n\n[Recent activity across the user's agents (from their daily logs)]\n${parts.join('\n')}`
+    : '';
+}
+
+/** 跨 agent 近期活动摘要:遍历各 agent 的记忆域(resolveMemorySlug 去重、跳过 muse 自己),
+ *  临时切域读近 2 天 LOG。Historian 维护的用户日志与各 agent 的 log_event 都在这里被 Muse 看见。 */
+async function recentActivityHint(userId: string): Promise<string> {
+  try {
+    const defs = await listAgents();
+    const scopes: string[] = [];
+    for (const d of defs) {
+      const scope = resolveMemorySlug(d);
+      if (scope !== MUSE_AGENT_SLUG && !scopes.includes(scope)) scopes.push(scope);
+    }
+    const dates = lastDates(2);
+    const sections: Array<{ scope: string; text: string }> = [];
+    for (const scope of scopes.slice(0, 20)) {
+      let text = '';
+      for (const date of dates) {
+        try {
+          const l = await runWithAgentSlug(scope, () => deps().brain.memory.getLog(userId, date));
+          if (l?.content) text += l.content + '\n';
+        } catch { /* 单域读失败不阻断 */ }
+      }
+      if (text.trim()) sections.push({ scope, text });
+    }
+    return buildActivityDigest(sections);
+  } catch {
+    return '';
+  }
+}
+
 async function startCycle(cfg: MuseConfig): Promise<void> {
   const userId = museUserId();
   const sessionId = await ensureMuseSession(userId, cfg.modelId);
-  const hint = (await folderHint(cfg.allowedFolders)) + (await recentSessionTitles(userId)) + (await existingTodoHint(userId));
-  const system =
-    `${cfg.prompt || DEFAULT_MUSE_PROMPT}\n\n` +
-    `Constraint: add at most ${cfg.maxTodosPerWindow} TODOs this period; use the quota sparingly and only submit genuinely high-value, actionable suggestions. ` +
-    `You may only write via add_muse_todo; everything else is read-only.` + hint;
+  // 动态上下文全部进 kickoff 消息(每周期新鲜数据);静态身份(developer_instructions + SOUL + Muse 自己
+  // 的长期记忆)由 agentSlug 激活注入 system——不再内联 systemPrompt,否则会覆盖文件夹里的用户编辑。
+  const hint =
+    (await userMemoryHint(userId)) +
+    (await recentActivityHint(userId)) +
+    (await recentSessionTitles(userId)) +
+    (await folderHint(cfg.allowedFolders)) +
+    (await existingTodoHint(userId));
+  const message =
+    'Start this round of thinking: first use read_log to review your own recent cycles and the [feedback] entries showing how the user handled your previous todos. ' +
+    'Then combine your long-term memory with the context below to find the 1-3 most worthwhile things to do for the user right now. ' +
+    `Avoid the "TODOs you have already proposed" below; use add_muse_todo only for genuinely new, high-value todos (at most ${cfg.maxTodosPerWindow} this period — spend the quota sparingly). ` +
+    'You may use remember to record durable insights about the user (what they value, accept, or dismiss). When done, briefly explain your reasoning.' +
+    hint;
   const runId = uuidv4();
   await createRun({
     id: runId,
@@ -145,19 +230,17 @@ async function startCycle(cfg: MuseConfig): Promise<void> {
     modelId: cfg.modelId,
     assistantMessageId: uuidv4(),
     input: {
-      message:
-        'Start this round of thinking: first use read_log to review recent logs, then combine the injected memory, recent conversation topics, and authorized folders ' +
-        'to find the 1-3 most worthwhile things to do for the user right now. Be sure to avoid the "TODOs you have already proposed" below, and use only add_muse_todo to record genuinely new, high-value todos (use the quota sparingly). When done, briefly explain your reasoning.',
+      message,
       userMessageId: uuidv4(),
       attachments: [],
       agentConfig: {
         muse: true,
         planMode: true,
         execMode: 'host',
+        agentSlug: MUSE_AGENT_SLUG,
         cwd: cfg.allowedFolders[0] || undefined,
         approvalMode: 'full-auto',
         maxIterations: cfg.maxIterationsPerCycle,
-        systemPrompt: system,
       },
     },
   });
@@ -181,6 +264,8 @@ async function tick(): Promise<void> {
     const cfg = loadSpecialAgentsConfig().muse;
     if (!cfg.enabled) { lastRunning = false; return; }
     if (!cfg.modelId) { lastRunning = false; log('已启用但未选模型,跳过'); return; }
+    // 播种/自愈 Muse 系统 agent 文件夹(幂等;首次创建时一次性迁移旧自定义 prompt)。
+    await ensureMuseAgent(legacyMusePrompt()).catch((e: any) => log(`播种 muse agent 失败:${e?.message || e}`));
     if (!isWithinActiveHours(cfg, nowHour())) { log(`不在运行时段(当前 ${nowHour()} 时),跳过`); return; }
 
     const userId = museUserId();
@@ -242,17 +327,24 @@ export interface MuseStatus {
   sessionId: string | null;
 }
 
-export function museStatus(): MuseStatus {
+export async function museStatus(): Promise<MuseStatus> {
   let cfg;
   try { cfg = loadSpecialAgentsConfig().muse; } catch { cfg = null; }
+  // sessionId/running 从 DB 实查(进程内 flag 重启后漂移;工作视图的「当前思考」也靠 sessionId 复原)。
+  let sessionId = currentSessionId;
+  let running = lastRunning;
+  try {
+    sessionId = sessionId || (await getMuseSessionId(museUserId()));
+    running = sessionId ? await isRunning(sessionId) : false;
+  } catch { /* DB 不可用 → 回退进程内快照 */ }
   return {
     enabled: !!cfg?.enabled,
     hasModel: !!cfg?.modelId,
-    running: lastRunning,
+    running,
     restartsThisWindow,
     maxRestartsPerWindow: cfg?.maxRestartsPerWindow ?? 0,
     lastCycleAt: lastCycleAt || null,
     lastError,
-    sessionId: currentSessionId,
+    sessionId,
   };
 }
