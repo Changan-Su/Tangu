@@ -399,6 +399,14 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
   // 用户聊天记录里凭空消失,后续 run 也读不到)。运行时转向(steer)也复用它们做迭代边界的回合切分。
   let finalContent = '';
   let finalReasoning = '';
+  /** 把一段正文追加进终稿(空段 no-op)。finalize 只写 finalContent —— 中间迭代的 preamble
+   *  正文(模型「先说话、再调工具」)必须经此累积,否则落库时只剩末轮收尾词,已流式给用户
+   *  看过的话会凭空消失(实例:正文被一句 "NOTHING" 顶掉)。 */
+  const appendFinal = (text: string): void => {
+    const t = String(text || '').trim();
+    if (!t) return;
+    finalContent = finalContent.trim() ? `${finalContent.trimEnd()}\n\n${t}` : t;
+  };
   const allToolCalls: ToolCall[] = [];
   const allToolResults: any[] = [];
   // agent 在对话区展示给用户的文件(display_file/generate_image/表情包);函数级声明,使 catch(中止)路径也能持久化。
@@ -1003,15 +1011,16 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
           });
           continue;
         }
-        // 收尾:正文优先取兜底清理后的 res.content;为空(整条都是工具标记被剔空)时退回历史值,
-        // 仍为空则给一条可读提示,避免最终消息全空白。
-        finalContent = res.content || finalContent;
+        // 收尾:本轮正文追加进终稿(此前各中间迭代的 preamble 已累积在 finalContent 里);
+        // 本轮为空(整条都是工具标记被剔空)时保留已累积值,仍为空则给一条可读提示,避免最终消息全空白。
+        appendFinal(res.content || '');
         finalReasoning = res.reasoning || finalReasoning;
         // 运行时转向:模型本想收尾,但用户在这一轮里发了消息 → 续跑而非结束(最后一轮仍须收尾)。先把刚
-        // 产出的最终文本作为助手轮并入上下文,再切回合注入 U,continue 让下一迭代带着 U 继续。
+        // 产出的最终文本作为助手轮并入上下文(只灌本轮文本——preamble 已在 workingMessages 里,
+        // 全量灌 finalContent 会在模型上下文里重复),再切回合注入 U,continue 让下一迭代带着 U 继续。
         const steeredAtFinish = drainSteer(runId);
         if (steeredAtFinish.length && !lastIter) {
-          if (finalContent) workingMessages.push({ role: 'assistant', content: finalContent } as ChatMessage);
+          if (res.content) workingMessages.push({ role: 'assistant', content: res.content } as ChatMessage);
           await applySteering(steeredAtFinish);
           continue;
         }
@@ -1038,9 +1047,13 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
       // 配额扣减失败 → 停止（避免欠费继续烧）
       if (consumed && consumed.ok === false) {
         await publish(runId, 'error', { error: 'token_quota_exceeded' });
-        finalContent = res.content || finalContent || '(额度不足，已停止)';
+        appendFinal(res.content || '');
+        if (!finalContent.trim()) finalContent = '(额度不足，已停止)';
         break;
       }
+
+      // 中间迭代的 preamble 正文累积进终稿(工具标记样式的杂文除外,那是待纠正的假工具调用)。
+      if (res.content && !looksLikeToolCallText(res.content)) appendFinal(res.content);
 
       workingMessages.push({
         role: 'assistant',

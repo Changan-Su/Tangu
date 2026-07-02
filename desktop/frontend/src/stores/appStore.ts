@@ -999,6 +999,9 @@ export const useApp = create<AppState>((set, get) => ({
       implicitInit = path
         ? { ...draft, execMode: 'host', approvalMode: draft.approvalMode || 'auto-edit', cwd: path }
         : { ...draft, execMode: 'sandbox', cwd: undefined }
+      // 新会话生效的 agent 当场固化(默认兜底也算):不落库的话后续轮次会随易变的
+      // defaultAgentSlug 重新解析,同一会话可能「换人」。
+      if (!implicitInit.agentSlug && get().defaultAgentSlug) implicitInit.agentSlug = get().defaultAgentSlug
       set((st) => ({ configBySession: { ...st.configBySession, [s.id]: implicitInit! } }))
       void api.putSessionConfig(get().cfg, s.id, implicitInit).catch(() => {})
       if (get().newChatModel) {
@@ -1009,7 +1012,15 @@ export const useApp = create<AppState>((set, get) => ({
     }
     const sessionId = sid
     const agentConfig = { ...(implicitInit || get().configBySession[sessionId] || {}) }
-    if (!agentConfig.agentSlug && get().defaultAgentSlug) agentConfig.agentSlug = get().defaultAgentSlug
+    if (!agentConfig.agentSlug && get().defaultAgentSlug) {
+      // 会话没有显式选 agent → 用全局默认兜底,并**固化进会话配置**(本地 + 后端)。
+      // defaultAgentSlug 是易变全局(启动异步刷新/用户改默认),不固化的话同一会话前后两轮
+      // 可能解析出不同 agent(实例:turn1 qinche → turn2 xyra「换人」)。
+      agentConfig.agentSlug = get().defaultAgentSlug
+      const pinned = { ...(get().configBySession[sessionId] || {}), agentSlug: agentConfig.agentSlug }
+      set((st) => ({ configBySession: { ...st.configBySession, [sessionId]: pinned } }))
+      void api.putSessionConfig(get().cfg, sessionId, pinned).catch(() => {})
+    }
     if (skillIds?.length) agentConfig.requestedSkillIds = skillIds
     if (mentions?.priorityAgent) agentConfig.priorityAgent = mentions.priorityAgent
     if (mentions?.mentionAgents?.length) agentConfig.mentionedAgentSlugs = mentions.mentionAgents
