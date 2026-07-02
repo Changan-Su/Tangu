@@ -356,7 +356,9 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
     const stored = rawStored ? (typeof rawStored === 'string' ? JSON.parse(rawStored) : rawStored) : null;
     if (!agentConfig.agentSlug && stored?.agentSlug) {
       agentConfig.agentSlug = stored.agentSlug;
-    } else if (agentConfig.agentSlug && !stored?.agentSlug) {
+    } else if (agentConfig.agentSlug && stored?.agentSlug !== agentConfig.agentSlug) {
+      // 写穿(不只补空):run 带的 slug 是前端「此刻生效」的真值(显式选择都会同步 PUT),
+      // 存值缺失或不一致(如曾被竞速污染成默认 agent)都以 run 为准纠偏。
       await deps().state.setAgentConfig(
         sessionId,
         JSON.stringify({ ...(stored || {}), agentSlug: agentConfig.agentSlug }),

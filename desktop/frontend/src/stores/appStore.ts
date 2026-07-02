@@ -778,7 +778,9 @@ export const useApp = create<AppState>((set, get) => ({
       const base: AgentConfig = sess?.project_path
         ? { execMode: 'host', approvalMode: 'auto-edit', cwd: sess.project_path }
         : {}
-      set((s) => ({ configBySession: { ...s.configBySession, [sessionId]: { ...base, ...config } } }))
+      // 本地已有的键优先(local-wins):本地每次改配置都会同步 PUT,永远不旧于服务端;而这里的
+      // fetch 可能与「新会话初始配置 PUT」竞速,整体替换会把刚选好的 agentSlug/thinkingLevel 冲掉。
+      set((s) => ({ configBySession: { ...s.configBySession, [sessionId]: { ...base, ...config, ...(s.configBySession[sessionId] || {}) } } }))
       void api.getSessionUsage(c, sessionId)
         .then((base) => set((s) => ({ usageBySession: { ...s.usageBySession, [sessionId]: { ctx: s.usageBySession[sessionId]?.ctx || 0, base, live: 0 } } })))
         .catch(() => {})
@@ -904,8 +906,8 @@ export const useApp = create<AppState>((set, get) => ({
       const path = ws.kind === 'local' ? (ws.path || get().defaultWsDir || get().homeDir || null) : null
       const s = await api.createSession(get().cfg, path ? { project_path: path, project_name: ws.name } : undefined)
       set((st) => ({ sessions: [s, ...st.sessions] }))
+      loadedHistory.add(s.id) // 先标记再 setActiveId(其内部 loadSessionHistory 会拉空配置冲掉 init,同 send)
       get().setActiveId(s.id)
-      loadedHistory.add(s.id)
       const init: AgentConfig = path ? { execMode: 'host', approvalMode: 'auto-edit', cwd: path } : { execMode: 'sandbox' }
       set((st) => ({ messagesBySession: { ...st.messagesBySession, [s.id]: [] }, configBySession: { ...st.configBySession, [s.id]: init } }))
       void api.putSessionConfig(get().cfg, s.id, init).catch(() => {})
@@ -992,8 +994,11 @@ export const useApp = create<AppState>((set, get) => ({
       const s = await api.createSession(get().cfg, path ? { project_path: path, project_name: ws?.name || t('app.defaultWorkspace') } : undefined).catch(() => null)
       if (!s) { get().toast(t('app.cannotCreateSession'), true); return false }
       set((st) => ({ sessions: [s, ...st.sessions] }))
-      get().setActiveId(s.id)
+      // 必须先标记再 setActiveId:setActiveId 内部会 void loadSessionHistory,新会话此刻服务端
+      // 配置还是空的,拉回来会把下面刚写入的 implicitInit(含选中的 agentSlug/thinkingLevel)整体
+      // 冲掉 → 第二轮就「换人」。先标记使其 no-op。
       loadedHistory.add(s.id)
+      get().setActiveId(s.id)
       sid = s.id
       const draft = get().newChatCfg
       implicitInit = path
