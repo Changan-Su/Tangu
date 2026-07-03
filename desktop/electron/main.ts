@@ -7,6 +7,8 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, shell, nativeImage, Notifica
 import { basename, dirname, join } from 'path'
 import { pathToFileURL } from 'url'
 import { readFile, writeFile, mkdir, chmod, readdir, stat, rename, cp } from 'fs/promises'
+import { existsSync } from 'fs'
+import { ensureCliInstalled } from './cliInstall'
 import { execFile, spawn } from 'child_process'
 import { homedir } from 'os'
 import { BackendManager, bundledPythonBin, type BackendStatus } from './backendManager'
@@ -199,6 +201,15 @@ async function runEnvCheck(): Promise<EnvProbe[]> {
     const entry: EnvProbe = { tool: 'python3', found: true, version: `${v || 'Python'} · bundled`, installId: null, installCommand: null }
     if (idx >= 0) out[idx] = entry; else out.push(entry)
   }
+  // tangu CLI:App 启动时自装的终端命令(report-only,无安装按钮——ensureCliInstalled 每次启动自愈)。
+  const shim = join(tanguHomeDir(), 'bin', process.platform === 'win32' ? 'tangu.cmd' : 'tangu')
+  out.push({
+    tool: 'tangu',
+    found: existsSync(shim),
+    version: existsSync(shim) ? `CLI · v${app.getVersion()}` : null,
+    installId: null,
+    installCommand: null,
+  })
   return out
 }
 
@@ -528,6 +539,17 @@ app.whenReady().then(async () => {
   app.setAppUserModelId('com.forsion.tangu')
   await loadTanguEnvFile() // 先于一切 loadConfig(其 env 兜底读 TANGU_CLOUD_URL/TANGU_BACKEND_URL)
   await seedDefaultThemes(themesDir()) // 首次运行种入 soft 示例主题(themes/ 已存在则跳过;内部吞错不阻塞启动)
+  // tangu CLI 自动安装/自愈:shim 指向 App 内部资源(App 自动更新 → CLI 同步),幂等注入 PATH;吞错不阻塞。
+  void ensureCliInstalled({
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    execPath: process.execPath,
+    resourcesPath: process.resourcesPath,
+    appImagePath: process.env.APPIMAGE || null,
+    homeDir: app.getPath('home'),
+    tanguHome: tanguHomeDir(),
+    log: (m) => console.log(m),
+  }).catch(() => {})
 
   ipcMain.handle('config:get', () => effectiveConfig())
   ipcMain.handle('config:set', async (_e, patch: Partial<TanguStoredConfig>) => {
