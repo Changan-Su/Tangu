@@ -5,11 +5,11 @@
  */
 import React, { useEffect, useRef, useState } from 'react'
 import {
-  ArrowRight, ArrowLeft, Check, Cloud, KeyRound, Loader2, LogIn, ExternalLink,
-  MonitorCheck, Play, SkipForward, Sparkles, Palette, FolderOpen, Sun, Moon, X, FileText, RefreshCw,
+  ArrowRight, ArrowLeft, Bot, Check, Cloud, History, KeyRound, Loader2, LogIn, ExternalLink,
+  MonitorCheck, Play, Plus, SkipForward, Sparkles, Palette, FolderOpen, Sun, Moon, X, FileText, RefreshCw,
 } from 'lucide-react'
-import { listModels, testProviderConnection } from '../services/backendService'
-import type { EnvProbeResult, ModelsResponse } from '../types'
+import { listModels, testProviderConnection, listAgents, saveAgentDef, getSpecialConfig, saveSpecialConfig } from '../services/backendService'
+import type { EnvProbeResult, ModelsResponse, NormalAgentDef, SpecialAgentsConfig, TanguDesktopConfig } from '../types'
 import { useI18n } from '../i18n'
 import { listLanguages, listSkins } from '../theme/registry'
 import { applyTheme } from '../theme/loader'
@@ -22,8 +22,8 @@ export const ONBOARDING_DISMISS_KEY = 'forsion_tangu_onboarding_done'
 /** 上次完成引导时的应用版本号;与当前版本不同 → 版本更新后再进一次引导(展示 What's New)。 */
 export const ONBOARDING_VERSION_KEY = 'forsion_tangu_onboarding_version'
 
-type Step = 'welcome' | 'connect' | 'theme' | 'model' | 'workspace' | 'env' | 'done'
-const STEP_ORDER: Step[] = ['welcome', 'connect', 'theme', 'model', 'workspace', 'env', 'done']
+type Step = 'welcome' | 'connect' | 'theme' | 'model' | 'agents' | 'workspace' | 'env' | 'done'
+const STEP_ORDER: Step[] = ['welcome', 'connect', 'theme', 'model', 'agents', 'workspace', 'env', 'done']
 
 /** 订阅 provider 的友好名(id 见 src/llm/providerOAuth.ts OAUTH_PROVIDERS);未知 id 回退原值。 */
 const SUB_PROVIDER_LABELS: Record<string, string> = { claude: 'Claude', codex: 'Codex', xai: 'xAI · Grok' }
@@ -171,8 +171,62 @@ export const OnboardingWizard: React.FC<{
         .finally(() => setModelsLoading(false)),
     )
   }
+
+  // ── ④ 智能体(名册速览 + 快速新建 + Historian 后台智能体开关)──
+  const [agents, setAgents] = useState<NormalAgentDef[] | null>(null)
+  const [agName, setAgName] = useState('')
+  const [agPersona, setAgPersona] = useState('')
+  const [agBusy, setAgBusy] = useState(false)
+  const [agMsg, setAgMsg] = useState('')
+  const [special, setSpecial] = useState<SpecialAgentsConfig | null>(null)
+
+  const apiCfg = async (): Promise<TanguDesktopConfig> => {
+    const c = await window.tangu!.getConfig()
+    return { backendUrl: c.backendUrl, token: c.token, modelId: '' }
+  }
+  const loadAgentsStep = (): void => {
+    void apiCfg().then((cfg) => {
+      void listAgents(cfg).then(setAgents)
+      // 老/external 后端无 special 路由 → 静默隐藏 Historian 卡片。
+      void getSpecialConfig(cfg).then((r) => setSpecial(r.config)).catch(() => setSpecial(null))
+    })
+  }
+
+  const createQuickAgent = async (): Promise<void> => {
+    const name = agName.trim()
+    if (!name) return
+    setAgBusy(true)
+    setAgMsg('')
+    try {
+      const cfg = await apiCfg()
+      await saveAgentDef(cfg, { name, systemPrompt: agPersona.trim() })
+      setAgName('')
+      setAgPersona('')
+      setAgMsg(t('onboarding.agents.created', { name }))
+      void listAgents(cfg).then(setAgents)
+    } catch (e: any) {
+      setAgMsg(t('onboarding.agents.createFail', { e: e?.message || e }))
+    } finally {
+      setAgBusy(false)
+    }
+  }
+
+  const saveHistorian = (patch: Partial<SpecialAgentsConfig['historian']>): void => {
+    if (!special) return
+    const h = { ...special.historian, ...patch }
+    // 开启需要模型:沿用上一步选的默认模型(设置里可再改)。
+    if (h.enabled && !h.modelId) h.modelId = chosenModel
+    if (h.enabled && !h.modelId) {
+      setAgMsg(t('onboarding.agents.historianNeedModel'))
+      return
+    }
+    setSpecial({ ...special, historian: h })
+    void apiCfg().then((cfg) => saveSpecialConfig(cfg, { historian: h }).then(setSpecial).catch(() => {}))
+  }
+
   useEffect(() => {
     if (step === 'model') loadStepModels()
+    if (step === 'agents') loadAgentsStep()
     if (step === 'env') void doEnvCheck()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step])
@@ -495,6 +549,114 @@ export const OnboardingWizard: React.FC<{
                   </div>
                 )}
               </div>
+            </>
+          )}
+
+          {step === 'agents' && (
+            <>
+              <div className="field">
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Bot size={13} /> {t('onboarding.agents.stepLabel')}
+                </label>
+                <div className="hint">{t('onboarding.agents.intro')}</div>
+              </div>
+
+              {/* 名册速览(头像字母 chip;完整管理在主界面「智能体」页) */}
+              <div className="field">
+                <label>{t('onboarding.agents.rosterLabel')}</label>
+                {agents === null ? (
+                  <div className="hint">{t('common.loading')}</div>
+                ) : (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {agents.map((a) => (
+                      <span
+                        key={a.slug}
+                        title={a.description || a.slug}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px 3px 4px',
+                          border: 'var(--border-width, 1px) solid var(--border)', borderRadius: 999, fontSize: 12,
+                        }}
+                      >
+                        <i style={{
+                          fontStyle: 'normal', width: 18, height: 18, borderRadius: '50%', display: 'inline-flex',
+                          alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700,
+                          color: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 14%, transparent)',
+                        }}>{(a.name || '?').slice(0, 1).toUpperCase()}</i>
+                        {a.name}
+                        {a.createdBy === 'system' && (
+                          <em style={{ fontStyle: 'normal', fontSize: 10, color: 'var(--text-faint)' }}>{t('onboarding.agents.systemBadge')}</em>
+                        )}
+                      </span>
+                    ))}
+                    {!agents.length && <div className="hint">{t('onboarding.agents.rosterEmpty')}</div>}
+                  </div>
+                )}
+              </div>
+
+              {/* 快速新建(可选):名字 + 一句话人格 → 立即入名册 */}
+              <div className="field">
+                <label>{t('onboarding.agents.createLabel')}</label>
+                <div className="field-row">
+                  <div className="field">
+                    <input
+                      type="text"
+                      value={agName}
+                      onChange={(e) => setAgName(e.target.value)}
+                      placeholder={t('onboarding.agents.namePlaceholder')}
+                    />
+                  </div>
+                  <div className="field" style={{ flex: 2 }}>
+                    <input
+                      type="text"
+                      value={agPersona}
+                      onChange={(e) => setAgPersona(e.target.value)}
+                      placeholder={t('onboarding.agents.personaPlaceholder')}
+                    />
+                  </div>
+                  <button className="btn ghost sm" disabled={agBusy || !agName.trim()} onClick={() => void createQuickAgent()}>
+                    {agBusy ? <Loader2 size={12} className="spin" /> : <Plus size={12} />} {t('onboarding.agents.createBtn')}
+                  </button>
+                </div>
+                <div className="hint">{t('onboarding.agents.createHint')}</div>
+              </div>
+
+              {/* 后台智能体:Historian(老/external 后端不支持则整卡隐藏) */}
+              {special && (
+                <div className="field">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <History size={13} /> {t('onboarding.agents.historianTitle')}
+                  </label>
+                  <div className="hint" style={{ marginBottom: 6 }}>{t('onboarding.agents.historianDesc')}</div>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div className="seg seg-sm">
+                      <button className={!special.historian.enabled ? 'active' : ''} onClick={() => saveHistorian({ enabled: false })}>
+                        {t('settings.special.off')}
+                      </button>
+                      <button className={special.historian.enabled ? 'active' : ''} onClick={() => saveHistorian({ enabled: true })}>
+                        {t('settings.special.on')}
+                      </button>
+                    </div>
+                    {special.historian.enabled && (
+                      <div className="seg seg-sm">
+                        <button
+                          className={special.historian.mode !== 'assist' ? 'active' : ''}
+                          onClick={() => saveHistorian({ mode: 'independent' })}
+                        >
+                          {t('settings.special.h.modeIndependent')}
+                        </button>
+                        <button
+                          className={special.historian.mode === 'assist' ? 'active' : ''}
+                          onClick={() => saveHistorian({ mode: 'assist' })}
+                        >
+                          {t('settings.special.h.modeAssist')}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="hint" style={{ marginTop: 6 }}>{t('onboarding.agents.moreHint')}</div>
+                </div>
+              )}
+              {agMsg && <div className="hint" style={{ marginTop: 4 }}>{agMsg}</div>}
             </>
           )}
 
