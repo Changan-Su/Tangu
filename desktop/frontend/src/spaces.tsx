@@ -123,11 +123,9 @@ const amadeusSpace: SpaceDefinition = {
 
 /** 注册序 = ribbon 顶部默认序(在商店之上)。在 installEngine 内、商店图标注册之前调用。
  *  Amadeus 需 electron 的 window.amadeus 文件系统桥;Tangu Web(无 host)下不注册该 Space。
- *  Amadeus(Phase 4 融合中,未完工)暂对普通用户隐藏 —— 仅开发者模式(关于页连点版本号 10 次解锁,
- *  localStorage forsion_tangu_dev_mode='1')下注册其 Space + ribbon 入口;切换后需重开生效。 */
-export const AMADEUS_ENABLED = (() => {
-  try { return localStorage.getItem('forsion_tangu_dev_mode') === '1' } catch { return false }
-})()
+ *  2026-07-04 起对所有桌面用户开放(此前仅开发者模式 localStorage forsion_tangu_dev_mode='1');
+ *  唯一闸改为 window.amadeus(host 文件系统桥)—— 消费处仍写 `window.amadeus && AMADEUS_ENABLED`,故 Web 端照常不注册。 */
+export const AMADEUS_ENABLED = true // ponytail: 曾按 dev-mode 门控,现全量开放;闸只剩 window.amadeus(见各消费处的 && 前置)
 const SPACES: SpaceDefinition[] = [
   tanguSpace,
   // Inbox 与视图注册同门控(桌面壳;Tangu Web 的 webShim 无 backendStatus → 不注册)。
