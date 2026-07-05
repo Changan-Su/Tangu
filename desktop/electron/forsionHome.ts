@@ -12,9 +12,15 @@ import { existsSync, lstatSync, mkdirSync, renameSync, symlinkSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
-export const forsionHomeDir = (): string => process.env.TANGU_HOME || join(homedir(), '.forsion')
+/** dev 态(!app.isPackaged,main.ts 装载时注入):数据目录与正式版完全隔离,且永不触发迁移。
+ *  本模块刻意不 import electron(vitest 直测),由宿主注入。 */
+let devMode = false
+export function setDevMode(v: boolean): void { devMode = v }
+
+export const forsionHomeDir = (): string =>
+  process.env.TANGU_HOME || join(homedir(), devMode ? '.forsion-dev' : '.forsion')
 /** 默认本机工作区(会话 host 执行 cwd 兜底)。 */
-export const defaultWorkspaceDir = (): string => join(homedir(), 'Forsion')
+export const defaultWorkspaceDir = (): string => join(homedir(), devMode ? 'Forsion-Dev' : 'Forsion')
 
 const lstatOrNull = (p: string): ReturnType<typeof lstatSync> | null => {
   try { return lstatSync(p) } catch { return null }
@@ -50,6 +56,7 @@ export function migratePair(oldPath: string, newPath: string, opts: { ensureNew?
 /** App 启动最早期调用(先于一切读 config/env 文件)。 */
 export function migrateForsionHome(log: (m: string) => void = console.log): void {
   if (process.env.TANGU_HOME) return // 显式重定向 → 不迁
+  if (devMode) { log('[forsion-home] dev 模式:数据目录 ~/.forsion-dev(与正式版隔离),跳过迁移'); return }
   const home = homedir()
   migratePair(join(home, '.tangu'), join(home, '.forsion'), { ensureNew: true, log })
   migratePair(join(home, 'Tangu'), join(home, 'Forsion'), { log })

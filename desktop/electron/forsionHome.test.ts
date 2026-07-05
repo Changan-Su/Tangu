@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, lstatSync, realpathSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { migratePair } from './forsionHome'
+import { migratePair, setDevMode, forsionHomeDir, defaultWorkspaceDir } from './forsionHome'
 
 const noop = (): void => {}
 const setup = (): { old: string; nu: string } => {
@@ -49,5 +49,16 @@ describe('migratePair', () => {
     migratePair(old, nu, { ensureNew: true, log: noop })
     expect(lstatSync(old).isSymbolicLink()).toBe(true)
     expect(readFileSync(join(nu, 'z'), 'utf8')).toBe('3')
+  })
+})
+
+describe('dev 态目录隔离', () => {
+  it('setDevMode(true) → ~/.forsion-dev 与 ~/Forsion-Dev;关掉恢复', () => {
+    setDevMode(true)
+    expect(forsionHomeDir().endsWith('.forsion-dev')).toBe(true)
+    expect(defaultWorkspaceDir().endsWith('Forsion-Dev')).toBe(true)
+    setDevMode(false)
+    expect(forsionHomeDir().endsWith('.forsion')).toBe(true)
+    expect(defaultWorkspaceDir().endsWith('Forsion')).toBe(true)
   })
 })

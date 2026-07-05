@@ -10,7 +10,7 @@ import { readFile, writeFile, mkdir, chmod, readdir, stat, rename, cp, open as f
 import { existsSync } from 'fs'
 import { ensureCliInstalled } from './cliInstall'
 import { PRODUCT } from './product'
-import { forsionHomeDir, migrateForsionHome } from './forsionHome'
+import { forsionHomeDir, migrateForsionHome, setDevMode } from './forsionHome'
 import { execFile, spawn } from 'child_process'
 import { homedir } from 'os'
 import { BackendManager, bundledPythonBin, type BackendStatus } from './backendManager'
@@ -26,6 +26,7 @@ import { registerIpc as registerAmadeusIpc } from './amadeus/ipc'
 import { registerAssetSchemes as registerAmadeusAssetSchemes, registerAssetProtocol as registerAmadeusAssetProtocol } from './amadeus/assetProtocol'
 
 /** ~/.tangu(与包内 core/tanguHome.ts 同约定;TANGU_HOME 可整体重定向)。 */
+setDevMode(!app.isPackaged) // dev 数据目录 ~/.forsion-dev,与正式版隔离(模块装载即定,先于一切路径解析)
 const tanguHomeDir = forsionHomeDir // 品牌迁移后真身在 ~/.forsion(名字保留,少动 20+ 调用点)
 /** ~/.tangu/themes:拖入式主题目录(每主题一子目录:theme.json + theme.css)。 */
 const themesDir = (): string => join(tanguHomeDir(), 'themes')
