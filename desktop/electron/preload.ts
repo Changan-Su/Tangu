@@ -3,6 +3,7 @@
  * agent 调用 renderer 直连 HTTP,不经主进程。
  */
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { PRODUCT } from './product'
 import './amadeus/preload' // Amadeus Space:暴露 window.amadeus(vault IPC 桥),副作用导入
 
 export interface BackendStatus {
@@ -130,5 +131,21 @@ const api = {
     return () => ipcRenderer.removeListener('env:output', listener)
   },
 }
+
+// ── 产品档案收缩暴露面 ─────────────────────────────────────────────────────────
+// 渲染端遍布 window.tangu?.X 能力门控:删掉键 = 对应功能(Inbox/市场/设置 agent tab/账号…)自动隐藏,UI 零改动。
+const AGENT_KEYS = [
+  'backendStatus', 'backendLogs', 'backendRestart', 'onBackendStatus',
+  'notifyInbox', 'setInboxBadge', 'onInboxOpen',
+  'authStatus', 'forsionLogin', 'forsionLogout', 'authProviders', 'providerLogin', 'openAccountCenter', 'onAuthDevice',
+  'submitFeedback',
+  'listProviders', 'saveProvider', 'deleteProvider',
+  'readMcpConfig', 'writeMcpConfig',
+  'discoveryScan', 'discoveryImportSkills', 'discoveryImportMcp',
+  'openAgentDir', 'openSkillsDir',
+  'envCheck', 'envRun', 'onEnvOutput',
+] as const
+if (!PRODUCT.agentBackend) for (const k of AGENT_KEYS) delete (api as Record<string, unknown>)[k]
+if (!PRODUCT.market) for (const k of ['marketList', 'marketDetail', 'marketInstall', 'marketInstalled'] as const) delete (api as Record<string, unknown>)[k]
 
 contextBridge.exposeInMainWorld('tangu', api)

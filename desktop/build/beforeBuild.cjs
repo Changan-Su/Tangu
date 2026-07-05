@@ -7,6 +7,9 @@
 const { fetchPython } = require('./fetch-python.cjs');
 
 exports.default = async function beforeBuild(context) {
+  const productId = process.env.FORSION_PRODUCT || 'forsion';
+  const product = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, '..', 'products', `${productId}.json`), 'utf8'));
+  if (!product.agentBackend) return; // 本变体不捆后端 → 不拉内置 Python
   const platformName = context.platform.nodeName; // 'darwin' | 'win32' | 'linux'
   const archName = context.arch;                   // 'x64' | 'arm64' | 'armv7l'
   await fetchPython({ platformName, archName });

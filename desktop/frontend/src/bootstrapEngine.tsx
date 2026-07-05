@@ -6,6 +6,7 @@ import { registerSpaces } from './spaces'
 import { loadUserSpaces, saveCurrentAsSpace } from './userSpaces'
 import { AccountCard } from './components/AccountCard'
 import { useApp } from './stores/appStore'
+import { PRODUCT } from './product'
 import { useTheme } from './stores/themeStore'
 import { cycleLocale, useI18n } from './i18n'
 import { ChatView } from './views/ChatView'
@@ -55,14 +56,14 @@ export function installEngine(): void {
   // 统一「大纲」视图(合并 原目录/Amadeus 大纲):随活动主视图切换采集器。
   registerView({ type: 'outline', displayName: () => app().tr('view.outline'), icon: ListTree, factory: () => <OutlineView />, singleton: true })
   // chat 可关闭(浏览器式):关掉主区最后一个 view → 显示「新建标签页」启动器(见 workspaceStore.closeLeaf)。
-  registerView({ type: 'chat', displayName: () => app().tr('workbench.chat'), icon: MessageCircle, factory: (props) => <ChatView {...props} />, singleton: true })
+  if (PRODUCT.spaces.includes('tangu')) registerView({ type: 'chat', displayName: () => app().tr('workbench.chat'), icon: MessageCircle, factory: (props) => <ChatView {...props} />, singleton: true })
   // 右栏视图(可关,可重开)
-  registerView({ type: 'memory', displayName: () => app().tr('panel.tab.memory'), icon: BookOpen, factory: () => <MemoryPanelView />, singleton: true })
-  registerView({ type: 'subchats', displayName: () => app().tr('panel.tab.subchats'), icon: MessageCircle, factory: () => <SubchatsView />, singleton: true })
+  if (PRODUCT.spaces.includes('tangu')) registerView({ type: 'memory', displayName: () => app().tr('panel.tab.memory'), icon: BookOpen, factory: () => <MemoryPanelView />, singleton: true })
+  if (PRODUCT.spaces.includes('tangu')) registerView({ type: 'subchats', displayName: () => app().tr('panel.tab.subchats'), icon: MessageCircle, factory: () => <SubchatsView />, singleton: true })
   // 主区特殊视图(按需从侧栏打开,不进默认布局)
-  registerView({ type: 'wechat', displayName: () => app().tr('special.wechat.title'), icon: Smartphone, factory: () => <WeChatSpecialView />, singleton: true })
-  registerView({ type: 'agents-detail', displayName: () => app().tr('special.agents.title'), icon: Bot, factory: () => <AgentsDetailSpecialView />, singleton: true })
-  registerView({ type: 'workspace-detail', displayName: () => app().tr('app.workspace'), icon: FolderOpen, factory: () => <WorkspaceDetailSpecialView />, singleton: true })
+  if (PRODUCT.spaces.includes('tangu')) registerView({ type: 'wechat', displayName: () => app().tr('special.wechat.title'), icon: Smartphone, factory: () => <WeChatSpecialView />, singleton: true })
+  if (PRODUCT.spaces.includes('tangu')) registerView({ type: 'agents-detail', displayName: () => app().tr('special.agents.title'), icon: Bot, factory: () => <AgentsDetailSpecialView />, singleton: true })
+  if (PRODUCT.spaces.includes('tangu')) registerView({ type: 'workspace-detail', displayName: () => app().tr('app.workspace'), icon: FolderOpen, factory: () => <WorkspaceDetailSpecialView />, singleton: true })
   // 新建标签页(空白启动器):列出所有视图按 主区/侧区 分类,选中即在对应区打开。
   registerView({ type: 'launcher', displayName: () => app().tr('newtab.title'), icon: Plus, factory: (props) => <NewTabView {...props} /> })
   // 工作区文件预览标签页(多实例,params.path 随布局持久化;打开一律走 views/wsFileNav.openWsFile,
@@ -133,7 +134,7 @@ export function installEngine(): void {
   // 底部常驻(side:'bottom',不参与拖动排序),注册序即上下序:明暗/语言/反馈/命令 → 设置 → 账号(账号最底)。
   // 账号卡复用 AccountCard,随 ribbon 展开切换「完整卡 / 紧凑头像」;原聊天列表底部那份已移除,避免重复。
   addRibbonIcon({ id: 'rb-settings', side: 'bottom', icon: Settings, tooltip: () => app().tr('settings.title'), onClick: () => app().openSettings() })
-  addRibbonIcon({
+  if (PRODUCT.agentBackend) addRibbonIcon({
     id: 'rb-account',
     side: 'bottom',
     component: ({ expanded }) => (
@@ -146,13 +147,13 @@ export function installEngine(): void {
   })
 
   // commands
-  addCommand({ id: 'new-chat', title: () => app().tr('sidebar.newChat'), keywords: 'new chat 新对话', hotkey: 'mod+n', run: blankNewChat })
+  if (PRODUCT.spaces.includes('tangu')) addCommand({ id: 'new-chat', title: () => app().tr('sidebar.newChat'), keywords: 'new chat 新对话', hotkey: 'mod+n', run: blankNewChat })
   addCommand({ id: 'toggle-left', title: () => app().tr('command.toggleLeft'), keywords: 'sidebar 左栏', hotkey: 'mod+b', run: () => ws().toggleSidebar('left') })
   addCommand({ id: 'toggle-right', title: () => app().tr('command.toggleRight'), keywords: 'sidebar 右栏', run: () => ws().toggleSidebar('right') })
   addCommand({ id: 'theme-mode', title: () => app().tr('theme.changeMode'), keywords: 'theme dark 明暗', run: () => useTheme.getState().toggleMode() })
   addCommand({ id: 'theme-skin', title: () => app().tr('theme.changeSkin'), keywords: 'theme skin 配色', run: () => useTheme.getState().cycleSkin() })
   addCommand({ id: 'theme-lang', title: () => app().tr('theme.changeLanguage'), keywords: 'theme language lovable soft', run: () => useTheme.getState().cycleLang() })
-  addCommand({ id: 'split-right', title: () => app().tr('command.splitRight'), keywords: 'split 分屏', hotkey: 'mod+\\', run: splitChat })
+  if (PRODUCT.spaces.includes('tangu')) addCommand({ id: 'split-right', title: () => app().tr('command.splitRight'), keywords: 'split 分屏', hotkey: 'mod+\\', run: splitChat })
   // per-tab 前进/后退(Ctrl/⌘+{ 与 }):只走当前活动主 leaf 的历史栈;与主区左上角箭头同源。
   const navGo = (dir: 'back' | 'forward'): void => {
     const api = ws().api
@@ -177,9 +178,9 @@ export function installEngine(): void {
     const name = window.prompt(app().tr('layout.applyPrompt', { names: names.join(', ') }), names[0])?.trim()
     if (name && names.includes(name)) ws().applyNamed(name)
   } })
-  addCommand({ id: 'stop-run', title: () => app().tr('command.stop'), keywords: 'stop 停止', run: () => app().stop() })
-  addCommand({ id: 'compact', title: () => app().tr('command.compact'), keywords: 'compact 压缩', run: () => void app().compact() })
-  addCommand({ id: 'branch', title: () => app().tr('command.branch'), keywords: 'branch 分支', run: () => void app().branchFromMessage() })
+  if (PRODUCT.spaces.includes('tangu')) addCommand({ id: 'stop-run', title: () => app().tr('command.stop'), keywords: 'stop 停止', run: () => app().stop() })
+  if (PRODUCT.spaces.includes('tangu')) addCommand({ id: 'compact', title: () => app().tr('command.compact'), keywords: 'compact 压缩', run: () => void app().compact() })
+  if (PRODUCT.spaces.includes('tangu')) addCommand({ id: 'branch', title: () => app().tr('command.branch'), keywords: 'branch 分支', run: () => void app().branchFromMessage() })
   addCommand({ id: 'open-settings', title: () => app().tr('settings.title'), keywords: 'settings 设置 preferences', hotkey: 'mod+,', run: () => app().openSettings() })
 }
 

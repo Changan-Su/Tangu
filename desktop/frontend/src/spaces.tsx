@@ -5,6 +5,7 @@ import { Bot, Inbox, NotebookText } from 'lucide-react'
 import { registerSpace, addRibbonIcon, useSpaceStore, setActiveSpace, useWorkspace, deleteNamedLayout, clearLayout, label } from '@lcl/engine'
 import type { SpaceDefinition, PersistedPanel } from '@lcl/engine'
 import { useApp } from './stores/appStore'
+import { PRODUCT } from './product'
 import { useInbox } from './stores/inboxStore'
 import { installAmadeusCommands } from './amadeusCommands'
 
@@ -127,17 +128,25 @@ const amadeusSpace: SpaceDefinition = {
  *  2026-07-04 起对所有桌面用户开放(此前仅开发者模式 localStorage forsion_tangu_dev_mode='1');
  *  唯一闸改为 window.amadeus(host 文件系统桥)—— 消费处仍写 `window.amadeus && AMADEUS_ENABLED`,故 Web 端照常不注册。 */
 export const AMADEUS_ENABLED = true // ponytail: 曾按 dev-mode 门控,现全量开放;闸只剩 window.amadeus(见各消费处的 && 前置)
+// 产品档案过滤 × 运行时能力门控 叠加:档案没点名的 Space 直接不注册(单品变体);点名的仍受能力闸约束。
 const SPACES: SpaceDefinition[] = [
-  tanguSpace,
+  ...(PRODUCT.spaces.includes('tangu') ? [tanguSpace] : []),
   // Inbox 与视图注册同门控(桌面壳 backendStatus 或 移动端本地 inbox mobile;Tangu Web 两者皆无 → 不注册)。
-  ...((window.tangu?.backendStatus || window.tangu?.mobile) ? [inboxSpace] : []),
-  ...(window.amadeus && AMADEUS_ENABLED ? [amadeusSpace] : []),
+  ...(PRODUCT.spaces.includes('inbox') && (window.tangu?.backendStatus || window.tangu?.mobile) ? [inboxSpace] : []),
+  ...(PRODUCT.spaces.includes('amadeus') && window.amadeus && AMADEUS_ENABLED ? [amadeusSpace] : []),
 ]
 
 export function registerSpaces(): void {
   for (const sp of SPACES) {
     registerSpace(sp)
     addRibbonIcon({ id: `space:${sp.id}`, side: 'top', component: ({ expanded }) => <SpaceButton space={sp} expanded={expanded} /> })
+  }
+  // 活动 Space 不在本产品档案里 → 回落档案默认(单品变体首启:localStorage 可能存着全家桶的 'tangu')。
+  const activeId = useSpaceStore.getState().activeSpaceId
+  if (SPACES.length && !SPACES.some((sp) => sp.id === activeId)) {
+    const fallback = SPACES.some((sp) => sp.id === PRODUCT.defaultSpace) ? PRODUCT.defaultSpace : SPACES[0].id
+    useSpaceStore.setState({ activeSpaceId: fallback })
+    try { localStorage.setItem('forsion_tangu_active_space', fallback) } catch { /* ignore */ }
   }
   if (window.amadeus && AMADEUS_ENABLED) {
     installAmadeusCommands()

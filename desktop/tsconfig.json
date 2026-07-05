@@ -18,5 +18,5 @@
       "@amadeus-shared/*": ["shared/amadeus/*"]
     }
   },
-  "include": ["electron/**/*", "frontend/src/**/*", "shared/**/*", "../lcl/**/*"]
+  "include": ["electron/**/*", "frontend/src/**/*", "shared/**/*", "products/**/*", "../lcl/**/*"]
 }

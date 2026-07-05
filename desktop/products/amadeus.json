@@ -1,0 +1,11 @@
+{
+  "id": "amadeus",
+  "displayName": "Amadeus",
+  "appId": "com.forsion.amadeus",
+  "productName": "Amadeus",
+  "artifactPrefix": "Amadeus",
+  "defaultSpace": "amadeus",
+  "spaces": ["amadeus"],
+  "agentBackend": false,
+  "market": false
+}

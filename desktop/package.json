@@ -16,7 +16,10 @@
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "fetch-python": "node build/fetch-python.cjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dev:amadeus": "FORSION_PRODUCT=amadeus electron-vite dev --noSandbox",
+    "build:amadeus": "FORSION_PRODUCT=amadeus electron-vite build",
+    "pack:amadeus": "FORSION_PRODUCT=amadeus npm run build:amadeus && FORSION_PRODUCT=amadeus electron-builder --dir"
   },
   "dependencies": {
     "@codemirror/language-data": "^6.5.1",
@@ -72,97 +75,5 @@
     "typescript": "^5.7.0",
     "vitest": "^3.0.0",
     "yaml": "^2.9.0"
-  },
-  "build": {
-    "appId": "com.forsion.tangu-desktop2",
-    "productName": "Tangu Agent 2.0",
-    "beforeBuild": "build/beforeBuild.cjs",
-    "afterPack": "build/afterPack.cjs",
-    "publish": {
-      "provider": "github",
-      "owner": "Changan-Su",
-      "repo": "Tangu"
-    },
-    "artifactName": "Tangu-Agent-${version}-${arch}.${ext}",
-    "files": [
-      "out/**/*",
-      "node_modules/**/*",
-      "!node_modules/.bin",
-      "!node_modules/**/*.{d.ts,map,md,markdown}",
-      "!node_modules/typescript/**",
-      "!node_modules/vite/**",
-      "!node_modules/vitest/**",
-      "!node_modules/@vitest/**",
-      "!node_modules/@vitejs/**",
-      "!node_modules/electron/**",
-      "!node_modules/electron-builder/**",
-      "!node_modules/electron-vite/**",
-      "!node_modules/app-builder-lib/**",
-      "!node_modules/dmg-builder/**",
-      "!node_modules/esbuild/**",
-      "!node_modules/@esbuild/**",
-      "!node_modules/rollup/**",
-      "!node_modules/@rollup/**",
-      "!node_modules/@types/**"
-    ],
-    "extraResources": [
-      {
-        "from": "../tangu-agent/dist",
-        "to": "tangu-server/dist"
-      },
-      {
-        "from": "../tangu-agent/node_modules",
-        "to": "tangu-server/node_modules"
-      },
-      {
-        "from": "../tangu-agent/package.json",
-        "to": "tangu-server/package.json"
-      },
-      {
-        "from": "../tangu-agent/skills",
-        "to": "tangu-server/skills"
-      },
-      {
-        "from": "build/python",
-        "to": "python"
-      }
-    ],
-    "linux": {
-      "target": "AppImage",
-      "icon": "build/icon.png"
-    },
-    "mac": {
-      "target": "dmg",
-      "icon": "build/icon.icns",
-      "identity": null
-    },
-    "dmg": {
-      "window": {
-        "width": 560,
-        "height": 440
-      },
-      "contents": [
-        {
-          "x": 150,
-          "y": 200
-        },
-        {
-          "x": 410,
-          "y": 200,
-          "type": "link",
-          "path": "/Applications"
-        },
-        {
-          "x": 280,
-          "y": 372,
-          "type": "file",
-          "path": "build/打不开请先读我.txt"
-        }
-      ]
-    },
-    "win": {
-      "target": "nsis",
-      "icon": "build/icon.ico"
-    }
   }
 }

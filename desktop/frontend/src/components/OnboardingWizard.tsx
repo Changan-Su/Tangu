@@ -11,7 +11,7 @@ import {
 import { listModels, testProviderConnection, listAgents, saveAgentDef, getSpecialConfig, saveSpecialConfig } from '../services/backendService'
 import type { EnvProbeResult, ModelsResponse, NormalAgentDef, SpecialAgentsConfig, TanguDesktopConfig } from '../types'
 import { useI18n } from '../i18n'
-import { PRODUCT_DISPLAY_NAME } from '../product'
+import { PRODUCT, PRODUCT_DISPLAY_NAME } from '../product'
 import { listLanguages, listSkins } from '../theme/registry'
 import { applyTheme } from '../theme/loader'
 import { ThemeCard } from './ThemeCard'
@@ -24,7 +24,9 @@ export const ONBOARDING_DISMISS_KEY = 'forsion_tangu_onboarding_done'
 export const ONBOARDING_VERSION_KEY = 'forsion_tangu_onboarding_version'
 
 type Step = 'welcome' | 'connect' | 'theme' | 'model' | 'agents' | 'workspace' | 'env' | 'done'
-const STEP_ORDER: Step[] = ['welcome', 'connect', 'theme', 'model', 'agents', 'workspace', 'env', 'done']
+const STEP_ORDER: Step[] = PRODUCT.agentBackend
+  ? ['welcome', 'connect', 'theme', 'model', 'agents', 'workspace', 'env', 'done']
+  : ['welcome', 'theme', 'done'] // 无 agent 后端的单品变体:只留通用步(connect/model/agents/workspace/env 均属 agent)
 
 /** 订阅 provider 的友好名(id 见 src/llm/providerOAuth.ts OAUTH_PROVIDERS);未知 id 回退原值。 */
 const SUB_PROVIDER_LABELS: Record<string, string> = { claude: 'Claude', codex: 'Codex', xai: 'xAI · Grok' }

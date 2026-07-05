@@ -17,8 +17,13 @@ const { execFileSync } = require('node:child_process');
 exports.default = async function afterPack(context) {
   const { appOutDir, packager, electronPlatformName, arch } = context;
 
-  // ① better-sqlite3 → Electron ABI 重建
-  if (process.env.TANGU_SKIP_NATIVE_REBUILD) {
+  const productId = process.env.FORSION_PRODUCT || 'forsion';
+  const product = JSON.parse(require('fs').readFileSync(path.join(__dirname, '..', 'products', `${productId}.json`), 'utf8'));
+
+  // ① better-sqlite3 → Electron ABI 重建(仅捆 agent 后端的变体需要 —— 它随 tangu-server/node_modules 进包)
+  if (!product.agentBackend) {
+    console.log('[afterPack] 产品档案无 agent 后端 → 跳过 better-sqlite3 重建');
+  } else if (process.env.TANGU_SKIP_NATIVE_REBUILD) {
     console.log('[afterPack] TANGU_SKIP_NATIVE_REBUILD set → 跳过 better-sqlite3 重建');
   } else {
     const { rebuild } = require('@electron/rebuild');

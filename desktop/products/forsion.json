@@ -1,0 +1,11 @@
+{
+  "id": "forsion",
+  "displayName": "Forsion",
+  "appId": "com.forsion.tangu-desktop2",
+  "productName": "Tangu Agent 2.0",
+  "artifactPrefix": "Tangu-Agent",
+  "defaultSpace": "tangu",
+  "spaces": ["tangu", "inbox", "amadeus"],
+  "agentBackend": true,
+  "market": true
+}

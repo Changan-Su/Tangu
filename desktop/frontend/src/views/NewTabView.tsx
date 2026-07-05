@@ -5,6 +5,7 @@
 import { type ReactNode } from 'react'
 import { Plus, SquarePen, Smartphone, Bot, MessageCircle, FileText, CalendarDays, Mail } from 'lucide-react'
 import { useApp } from '../stores/appStore'
+import { PRODUCT } from '../product'
 import { openSpecial } from './SpecialViews'
 import { useWorkspace, useSpaceStore, getActiveSpace, getView, label } from '@lcl/engine'
 import { AMADEUS_ENABLED } from '../spaces'
@@ -53,7 +54,7 @@ export function NewTabView({ leaf }: ViewProps) {
 
   // 主区视图跨 Space 全量列出(主视图没有注册表级的归属声明,此处是唯一清单)。
   const main: Item[] = [
-    { key: 'chat', icon: <MessageCircle size={20} />, label: t('sidebar.newChat'), run: newChat, show: true },
+    { key: 'chat', icon: <MessageCircle size={20} />, label: t('sidebar.newChat'), run: newChat, show: PRODUCT.spaces.includes('tangu') },
     { key: 'new-note', icon: <SquarePen size={20} />, label: t('newtab.newNote'), run: newNote, show: amadeusOn },
     { key: 'daily', icon: <CalendarDays size={20} />, label: t('newtab.today'), run: () => { ensureEditor(); void openDailyNote() }, show: amadeusOn && !!vaultRoot },
     { key: 'inbox', icon: <Mail size={20} />, label: t('inbox.reader'), run: () => ws().openView('inbox-reader', {}, 'main'), show: hasBackend },

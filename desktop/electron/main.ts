@@ -9,6 +9,7 @@ import { pathToFileURL } from 'url'
 import { readFile, writeFile, mkdir, chmod, readdir, stat, rename, cp, open as fsOpen, unlink, rm } from 'fs/promises'
 import { existsSync } from 'fs'
 import { ensureCliInstalled } from './cliInstall'
+import { PRODUCT } from './product'
 import { execFile, spawn } from 'child_process'
 import { homedir } from 'os'
 import { BackendManager, bundledPythonBin, type BackendStatus } from './backendManager'
@@ -446,6 +447,7 @@ async function effectiveConfig(): Promise<TanguStoredConfig & { backendState: Ba
 // 排队执行,避免并发 start() 双 spawn/端口竞争。
 let ensureChain: Promise<void> = Promise.resolve()
 function ensureBackend(): Promise<void> {
+  if (!PRODUCT.agentBackend) return Promise.resolve() // 产品档案:本变体不捆 agent 托管后端
   ensureChain = ensureChain.then(async () => {
     const stored = await loadConfig()
     if (stored.mode !== 'managed') {
@@ -564,7 +566,7 @@ app.whenReady().then(async () => {
   await loadTanguEnvFile() // 先于一切 loadConfig(其 env 兜底读 TANGU_CLOUD_URL/TANGU_BACKEND_URL)
   await seedDefaultThemes(themesDir()) // 首次运行种入 soft 示例主题(themes/ 已存在则跳过;内部吞错不阻塞启动)
   // tangu CLI 自动安装/自愈:shim 指向 App 内部资源(App 自动更新 → CLI 同步),幂等注入 PATH;吞错不阻塞。
-  void ensureCliInstalled({
+  if (PRODUCT.agentBackend) void ensureCliInstalled({
     isPackaged: app.isPackaged,
     platform: process.platform,
     execPath: process.execPath,

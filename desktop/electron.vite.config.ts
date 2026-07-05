@@ -1,20 +1,30 @@
 import { resolve } from 'path'
+import { readFileSync } from 'fs'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 
+// 产品档案:FORSION_PRODUCT 选 products/<id>.json(缺省 forsion=全家桶),define 注入三端。
+const PRODUCT_ID = process.env.FORSION_PRODUCT || 'forsion'
+const PRODUCT = JSON.parse(readFileSync(resolve(`products/${PRODUCT_ID}.json`), 'utf8'))
+if (PRODUCT.id !== PRODUCT_ID) throw new Error(`products/${PRODUCT_ID}.json 的 id 与文件名不一致`)
+const DEFINE = { __FORSION_PRODUCT__: JSON.stringify(PRODUCT) }
+
 export default defineConfig({
   main: {
+    define: DEFINE,
     plugins: [externalizeDepsPlugin()],
     build: { lib: { entry: resolve('electron/main.ts') } },
     resolve: { alias: { '@amadeus-shared': resolve('shared/amadeus') } },
   },
   preload: {
+    define: DEFINE,
     plugins: [externalizeDepsPlugin()],
     build: { lib: { entry: resolve('electron/preload.ts') } },
     resolve: { alias: { '@amadeus-shared': resolve('shared/amadeus') } },
   },
   renderer: {
     root: resolve('frontend'),
+    define: DEFINE,
     plugins: [react()],
     // 允许 ?raw 读取 desktop 根目录的 CHANGELOG.md(位于 renderer root=frontend 之外)。
     // 端口避开 Amadeus(5173)/老 desktop dev。
