@@ -175,6 +175,28 @@ export async function deletePluginFile(id: string, scope: Scope, name: string): 
   await fsp.rm(path.join(filesDirOf(id, scope), sanitizeFileName(name)), { force: true });
 }
 
+/** 卸载清理:删全局设置(config 段 + legacy 目录)、每-agent 覆盖与 blob、内存缓存。插件文件夹删除与重启由调用方负责。 */
+export async function clearPluginData(id: string): Promise<void> {
+  sanitizeId(id);
+  const sec = (getRawSection('plugins') as any) || {};
+  if (sec.global && id in sec.global) {
+    const { [id]: _omit, ...rest } = sec.global;
+    saveSection('plugins', { ...sec, global: rest });
+  }
+  await fsp.rm(path.join(tanguHome(), 'plugins-config', id), { recursive: true, force: true });
+  let slugs: string[] = [];
+  try {
+    slugs = (await fsp.readdir(agentsDir(), { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name);
+  } catch { /* 无 agents 目录 */ }
+  for (const slug of slugs) {
+    await fsp.rm(path.join(agentsDir(), slug, 'plugins', `${id}.json`), { force: true }).catch(() => {});
+    await fsp.rm(path.join(agentsDir(), slug, 'plugins', `${id}-files`), { recursive: true, force: true }).catch(() => {});
+  }
+  for (const k of [...cache.keys()]) {
+    if (k === id || k.startsWith(`${id}:`)) cache.delete(k);
+  }
+}
+
 /** 路由层解析 ?scope=global|agent:<slug> → Scope。 */
 export function parseScope(raw: string | undefined): Scope {
   const s = String(raw || 'global');

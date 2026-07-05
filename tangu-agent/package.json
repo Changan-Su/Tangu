@@ -22,7 +22,8 @@
   ],
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && node scripts/sync-plugin-api.mjs --check",
+    "sync:plugin-api": "node scripts/sync-plugin-api.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "tui": "node dist/tui/main.js",

@@ -52,6 +52,12 @@ export function registerPlugin(meta: PluginMeta): void {
   if (m.toolProvider) registerToolProvider(m.toolProvider);
 }
 
+/** 注销插件元数据(卸载用)。tool provider 无法反注册 —— 完整移除需重启;删 meta 后 isPluginEnabledSync 不再落回 defaultEnabled,工具门禁即刻失效。 */
+export function unregisterPlugin(id: string): boolean {
+  pluginsNeedingRestart.delete(id);
+  return REGISTRY.delete(id);
+}
+
 export function listPluginMetas(): PluginMeta[] {
   return [...REGISTRY.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }

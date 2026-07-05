@@ -5,10 +5,10 @@
 import { Router } from 'express';
 import { authMiddleware, AuthRequest } from '../core/http.js';
 import { deps } from '../seams/runtime.js';
-import { listPluginMetas, getPluginMeta, pluginsNeedingRestart } from '../plugins/registry.js';
+import { listPluginMetas, getPluginMeta, pluginsNeedingRestart, unregisterPlugin } from '../plugins/registry.js';
 import {
   isPluginEnabledSync, setPluginEnabled, getScopeSettings, setScopeSettings,
-  listPluginFiles, readPluginFile, writePluginFile, deletePluginFile, parseScope,
+  listPluginFiles, readPluginFile, writePluginFile, deletePluginFile, parseScope, clearPluginData,
 } from '../plugins/settingsStore.js';
 import { resolveReplySegment, splitMessage } from '../services/replySegment.js';
 
@@ -62,6 +62,17 @@ router.post('/agent/plugins/rescan', authMiddleware, async (_req: AuthRequest, r
     const { addedIds, needsRestart } = await activateNewPlugins();
     res.json({ ok: true, addedIds, needsRestart, plugins: listPluginMetas().map(pluginView) });
   } catch (e: any) { res.status(400).json({ detail: e?.message || 'rescan failed' }); }
+});
+
+// 卸载数据清理:注销 meta + 清全局/每-agent 设置与 blob。插件文件夹删除与后端重启由桌面端负责。
+// 故意不查 meta 是否存在 —— 也用于清理「加载失败插件」的孤儿设置。
+router.delete('/agent/plugins/:id', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    unregisterPlugin(req.params.id); // 先注销:清完设置后 isPluginEnabledSync 不会落回 defaultEnabled=true
+    await clearPluginData(req.params.id);
+    res.json({ ok: true, restartRequired: true });
+  } catch (e: any) { res.status(400).json({ detail: e?.message || 'uninstall failed' }); }
 });
 
 router.put('/agent/plugins/:id/enabled', authMiddleware, async (req: AuthRequest, res) => {

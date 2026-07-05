@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { registerPlugin } from './registry.js';
 import {
   isPluginEnabledSync, setPluginEnabled, getScopeSettings, setScopeSettings,
   getPluginSettingsSync, resolveImageListScope, parseScope,
-  writePluginFile, readPluginFile, listPluginFiles, deletePluginFile,
+  writePluginFile, readPluginFile, listPluginFiles, deletePluginFile, clearPluginData,
 } from './settingsStore.js';
 
 const PID = 'test-plugin';
@@ -72,5 +72,16 @@ describe('plugin settingsStore', () => {
     expect(parseScope(undefined)).toBe('global');
     expect(parseScope('agent:xyra')).toEqual({ agentSlug: 'xyra' });
     expect(() => parseScope('bogus')).toThrow();
+  });
+
+  it('clearPluginData wipes global + per-agent settings, blobs and cache', async () => {
+    await writePluginFile(PID, 'global', 'sticker.png', Buffer.from('x')); // 留一个 blob 待清
+    expect(isPluginEnabledSync(PID)).toBe(true); // 前序用例已开启
+    await clearPluginData(PID);
+    expect(isPluginEnabledSync(PID)).toBe(false); // __enabled 没了,落回 defaultEnabled(未设=false)
+    expect(getScopeSettings(PID, 'global')).toEqual({ flag: true, delay: 100, memes: [] }); // 回到 schema 默认
+    expect(getPluginSettingsSync(PID, { agentSlug: 'xyra' })).toEqual({ flag: true, delay: 100, memes: [] }); // agent 覆盖也没了
+    expect(existsSync(path.join(dir, 'plugins-config', PID))).toBe(false);
+    expect(existsSync(path.join(dir, 'agents', 'xyra', 'plugins', `${PID}.json`))).toBe(false);
   });
 });
