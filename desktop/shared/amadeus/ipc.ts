@@ -39,16 +39,50 @@ export const IPC = {
   revealInFileManager: 'shell:reveal',
   dbRead: 'db:read',
   dbWrite: 'db:write',
+  setPageFrontmatter: 'page:set-frontmatter',
+  listPageProps: 'vault:page-props',
+  renamePageFile: 'page:rename-file',
 } as const
 
-/** A user plugin discovered under the vault's .amadeus/plugins/ folder. */
+/** Plugin API version the host implements. Manifests without apiVersion are treated as 1 (back-compat). */
+export const AMADEUS_PLUGIN_API = 1
+
+/** A user plugin discovered under <vault>/.amadeus/plugins/ or the global ~/.forsion/amadeus/plugins/. */
 export interface ExternalPluginSource {
   id: string
   name: string
   version: string
   description?: string
-  /** The plugin's main JS source; evaluated in the renderer with a `ctx` argument. */
+  /** The plugin's main JS source; evaluated in the renderer with a `ctx` argument. '' when blocked (never evaluated). */
   code: string
+  /** Manifest apiVersion (missing → 1). */
+  apiVersion: number
+  minAppVersion?: string
+  source: 'vault' | 'global'
+  /** Present → listed but not loadable: 'api' = apiVersion mismatch, 'minApp' = app too old. */
+  blocked?: 'api' | 'minApp'
+}
+
+/** Semver-ish comparator (copied from lcl/spaces/userSpaces.core.ts — main process has no @lcl alias). */
+export function cmpVersion(a: string, b: string): number {
+  const pa = String(a).replace(/^v/i, '').split('.').map((x) => parseInt(x, 10) || 0)
+  const pb = String(b).replace(/^v/i, '').split('.').map((x) => parseInt(x, 10) || 0)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0)
+    if (d) return d < 0 ? -1 : 1
+  }
+  return 0
+}
+
+/** Gate a plugin manifest: apiVersion mismatch → 'api'; app older than minAppVersion → 'minApp'; ok → null. */
+export function gatePluginManifest(
+  m: { apiVersion?: unknown; minAppVersion?: unknown },
+  appVersion: string | null,
+): 'api' | 'minApp' | null {
+  const api = m.apiVersion === undefined ? 1 : m.apiVersion
+  if (api !== AMADEUS_PLUGIN_API) return 'api'
+  if (typeof m.minAppVersion === 'string' && m.minAppVersion && appVersion && cmpVersion(appVersion, m.minAppVersion) < 0) return 'minApp'
+  return null
 }
 
 /** A full-text search hit (computed by the main-process vault index). */
@@ -93,6 +127,13 @@ export type DbReadResult =
   | { status: 'ok'; path: string; data: DbFile } // path = 解析后的 vault 相对路径,后续写回用它
   | { status: 'missing' }
   | { status: 'corrupt'; path: string; message: string }
+
+/** 「笔记视图」一行的原料:笔记路径 + 标题(= Page Name) + 解析后的 frontmatter 对象。 */
+export interface PageProps {
+  path: string
+  title: string
+  fm: Record<string, unknown>
+}
 
 /** A tag and how many notes use it. */
 export interface TagCount {
@@ -196,6 +237,12 @@ export interface AmadeusApi {
   readDatabase(pagePath: string, ref: string): Promise<DbReadResult>
   /** 按 `db:read` 返回的确切 vault 相对路径原子写回(主进程 schema 校验,坏数据拒写)。 */
   writeDatabase(dbPath: string, data: DbFile): Promise<void>
+  /** 「笔记视图」:列出 folder 直属子级笔记的 path/title/frontmatter(行的实时数据源)。 */
+  listPageProps(folder: string): Promise<PageProps[]>
+  /** 外科式写笔记 frontmatter(值 = undefined 删该键):保留 amadeus_* 与正文,原子写。 */
+  setPageFrontmatter(pagePath: string, patch: Record<string, unknown>): Promise<void>
+  /** 同目录纯重命名笔记文件(不加载/不落 v3,外来 .md 不被收编);返回新 vault 相对路径。 */
+  renamePageFile(oldPath: string, newBaseName: string): Promise<string>
 }
 
 declare global {

@@ -1,14 +1,17 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { dialog, ipcMain, shell, type BrowserWindow } from 'electron'
-import { IPC, type DbReadResult, type ExternalPluginSource } from '@amadeus-shared/ipc'
-import { dbFileSchema, parseDb, serializeDb } from '@amadeus-shared/db/schema'
+import { app, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
+import { IPC, gatePluginManifest, type DbReadResult, type ExternalPluginSource, type PageProps } from '@amadeus-shared/ipc'
+import { dbFileSchema, parseDb, serializeDb, seedCalendarDb } from '@amadeus-shared/db/schema'
+import { parseFmObject, setFmExtraOnSource } from '@amadeus-shared/db/pageFrontmatter'
+import { extractFrontmatterExtra } from '@amadeus-shared/compiler/split'
 import { loadPage, newPage, pageFileName, savePage } from '@amadeus-shared/compiler'
 import type { PageManifest } from '@amadeus-shared/compiler'
 import { VaultManager } from './fs/vaultManager'
 import { VaultWatcher } from './fs/watcher'
 import { VaultIndex } from './fs/vaultIndex'
 import { readConfig, writeConfig } from './settings'
+import { defaultWorkspaceDir, forsionHomeDir } from '../forsionHome'
 
 const nowIso = (): string => new Date().toISOString()
 
@@ -16,6 +19,7 @@ const SAMPLE_MANIFEST = `{
   "id": "hello-amadeus",
   "name": "Hello Amadeus",
   "version": "1.0.0",
+  "apiVersion": 1,
   "description": "示例插件：演示命令、slash 项与主题三种贡献点。",
   "main": "main.js"
 }
@@ -71,6 +75,23 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
   )
   const rememberPage = (pagePath: string): Promise<void> => writeConfig({ lastPage: pagePath })
 
+  /** 首启无 lastVault:自带默认工作区 ~/Forsion/Amadeus(dev→~/Forsion-Dev/Amadeus)+ 种子 Calendar.db。
+   *  幂等:目录已存在不动,Calendar.db 已存在不覆盖(用户后来选过别的 vault 则走不到这里)。 */
+  const ensureDefaultVault = async (): Promise<{ root: string; pages: string[]; folders: string[] }> => {
+    const root = path.join(defaultWorkspaceDir(), 'Amadeus')
+    await fs.mkdir(root, { recursive: true })
+    vault.setRoot(root)
+    try {
+      await fs.access(path.join(root, 'Calendar.db'))
+    } catch {
+      await vault.writeTextFile('Calendar.db', serializeDb(seedCalendarDb()))
+    }
+    watcher.start(root)
+    await writeConfig({ lastVault: root, lastPage: undefined })
+    await index.build()
+    return { root, pages: await vault.listPages(), folders: await vault.listFolders() }
+  }
+
   ipcMain.handle(IPC.openVault, async () => {
     const root = await vault.openDialog()
     if (!root) return null
@@ -82,7 +103,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
 
   ipcMain.handle(IPC.restoreVault, async () => {
     const { lastVault, lastPage } = await readConfig()
-    if (!lastVault) return null
+    if (!lastVault) return ensureDefaultVault() // 首启:自带默认工作区 + 种子多维表(不再落欢迎页)
     try {
       const stat = await fs.stat(lastVault)
       if (!stat.isDirectory()) return null
@@ -238,6 +259,53 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
     await vault.writeTextFile(dbPath, serializeDb(parsed))
   })
 
+  // 「笔记视图」(Bases):行 = 目标文件夹直属笔记,frontmatter 是唯一真源。
+  ipcMain.handle(IPC.listPageProps, async (_e, folder: string): Promise<PageProps[]> => {
+    if (!vault.getRoot()) return []
+    const prefix = folder.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+    const inFolder = (await vault.listPages()).filter((p) => {
+      if (prefix === '') return !p.includes('/') // 整库:仅顶层笔记
+      if (!p.startsWith(`${prefix}/`)) return false
+      return !p.slice(prefix.length + 1).includes('/') // 仅直属子级,不递归子文件夹
+    })
+    const out: PageProps[] = []
+    for (const p of inFolder) {
+      let raw: string
+      try {
+        raw = await fs.readFile(vault.absPath(p), 'utf8')
+      } catch {
+        continue
+      }
+      out.push({ path: p, title: path.basename(p).replace(/\.md$/i, ''), fm: parseFmObject(extractFrontmatterExtra(raw)) })
+    }
+    return out
+  })
+
+  ipcMain.handle(IPC.setPageFrontmatter, async (_e, pagePath: string, patch: Record<string, unknown>) => {
+    let raw: string
+    try {
+      raw = await fs.readFile(vault.absPath(pagePath), 'utf8')
+    } catch {
+      return // 笔记不在(已被删)→ 静默跳过
+    }
+    await vault.writeTextFile(pagePath, setFmExtraOnSource(raw, patch)) // 原子写 + 自写账本 → watcher 不回声
+    await index.update(pagePath)
+  })
+
+  ipcMain.handle(IPC.renamePageFile, async (_e, oldPath: string, newBaseName: string): Promise<string> => {
+    const dir = path.dirname(oldPath)
+    let base = newBaseName.trim().replace(/[\\/]/g, '')
+    if (!base) throw new Error('笔记名不能为空')
+    if (base.toLowerCase().endsWith('.md')) base = base.slice(0, -3)
+    const newPath = dir === '.' ? `${base}.md` : `${dir}/${base}.md`
+    if (newPath === oldPath) return oldPath
+    if (await vault.pathExists(newPath)) throw new Error('目标笔记已存在')
+    await vault.moveEntry(oldPath, newPath) // 纯移动:不落 v3,外来 .md 不被收编
+    index.remove(oldPath)
+    await index.update(newPath)
+    return newPath
+  })
+
   ipcMain.handle(IPC.search, (_e, query: string) => index.search(query))
   ipcMain.handle(IPC.backlinks, (_e, pagePath: string) => index.backlinks(pagePath))
   ipcMain.handle(IPC.reindex, () => index.build())
@@ -307,46 +375,65 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
     const root = vault.getRoot()
     return root ? path.join(root, '.amadeus', 'plugins') : null
   }
+  /** 全局插件目录(跨 vault 生效;market type='amadeus-plugin' 装到同目录)。 */
+  const globalPluginsDir = (): string => path.join(forsionHomeDir(), 'amadeus', 'plugins')
 
   ipcMain.handle(IPC.listPlugins, async (): Promise<ExternalPluginSource[]> => {
-    const dir = pluginsDir()
-    if (!dir) return []
-    let entries: import('node:fs').Dirent[]
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true })
-    } catch {
-      return []
-    }
+    // 双根扫描,vault 优先(同 id vault 覆盖全局 = Obsidian 式开发覆盖;先扫先得,照 tangu-agent loader 的纪律)。
+    const vaultDir = pluginsDir()
+    const roots: Array<{ dir: string; source: 'vault' | 'global' }> = [
+      ...(vaultDir ? [{ dir: vaultDir, source: 'vault' as const }] : []),
+      { dir: globalPluginsDir(), source: 'global' as const },
+    ]
+    const seen = new Set<string>()
     const out: ExternalPluginSource[] = []
-    for (const e of entries) {
-      if (!e.isDirectory() || e.name.startsWith('.')) continue
-      const pdir = path.join(dir, e.name)
+    for (const root of roots) {
+      let entries: import('node:fs').Dirent[]
       try {
-        const m = JSON.parse(await fs.readFile(path.join(pdir, 'manifest.json'), 'utf8')) as {
-          id?: string
-          name?: string
-          version?: string
-          description?: string
-          main?: string
-        }
-        const code = await fs.readFile(path.join(pdir, m.main || 'main.js'), 'utf8')
-        out.push({
-          id: m.id || e.name,
-          name: m.name || e.name,
-          version: m.version || '0.0.0',
-          description: m.description,
-          code,
-        })
+        entries = await fs.readdir(root.dir, { withFileTypes: true })
       } catch {
-        /* skip malformed plugin */
+        continue
+      }
+      for (const e of entries) {
+        if (!e.isDirectory() || e.name.startsWith('.')) continue
+        const pdir = path.join(root.dir, e.name)
+        try {
+          const m = JSON.parse(await fs.readFile(path.join(pdir, 'manifest.json'), 'utf8')) as {
+            id?: string
+            name?: string
+            version?: string
+            description?: string
+            main?: string
+            apiVersion?: number
+            minAppVersion?: string
+          }
+          const id = m.id || e.name
+          if (seen.has(id)) continue
+          seen.add(id)
+          // 门禁:apiVersion 不匹配 / 应用太旧 → 列出但不可加载(blocked 徽章),code 不读不发。
+          const blocked = gatePluginManifest(m, app.getVersion())
+          const code = blocked ? '' : await fs.readFile(path.join(pdir, m.main || 'main.js'), 'utf8')
+          out.push({
+            id,
+            name: m.name || e.name,
+            version: m.version || '0.0.0',
+            description: m.description,
+            code,
+            apiVersion: typeof m.apiVersion === 'number' ? m.apiVersion : 1,
+            minAppVersion: typeof m.minAppVersion === 'string' ? m.minAppVersion : undefined,
+            source: root.source,
+            blocked: blocked ?? undefined,
+          })
+        } catch {
+          /* skip malformed plugin */
+        }
       }
     }
     return out
   })
 
   ipcMain.handle(IPC.openPluginsFolder, async () => {
-    const dir = pluginsDir()
-    if (!dir) throw new Error('请先打开 Vault')
+    const dir = pluginsDir() ?? globalPluginsDir() // 无 vault → 打开全局目录
     await fs.mkdir(dir, { recursive: true })
     await shell.openPath(dir)
   })
@@ -359,8 +446,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
   })
 
   ipcMain.handle(IPC.scaffoldPlugin, async () => {
-    const dir = pluginsDir()
-    if (!dir) throw new Error('请先打开 Vault')
+    const dir = pluginsDir() ?? globalPluginsDir() // 无 vault → 脚手架落全局目录
     const pdir = path.join(dir, 'hello-amadeus')
     await fs.mkdir(pdir, { recursive: true })
     await fs.writeFile(path.join(pdir, 'manifest.json'), SAMPLE_MANIFEST, 'utf8')

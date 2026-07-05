@@ -5,6 +5,11 @@
 // sidebar, and status bar all be extended uniformly.
 
 import type { ComponentType } from 'react'
+import type { PropertyTypeDef } from '../blocks/database/propertyTypes'
+
+/** A custom multi-dimensional-table (Database) property/column type a plugin can register.
+ *  Provides render+edit + a primitive baseType for storage; see blocks/database/propertyTypes. */
+export type PropertyTypeContribution = PropertyTypeDef
 
 /** A slash-menu entry a plugin can contribute. */
 export interface SlashContribution {
@@ -73,6 +78,8 @@ export interface PluginContext {
   registerTheme(theme: ThemeContribution): void
   registerPanel(panel: PanelContribution): void
   registerStatusItem(item: StatusItemContribution): void
+  /** Register a custom Database property/column type (Obsidian-style open extension point). */
+  registerPropertyType(def: PropertyTypeContribution): void
 }
 
 export interface AmadeusPlugin {
@@ -82,6 +89,13 @@ export interface AmadeusPlugin {
   description?: string
   /** Built-in plugins ship with the app and can't be uninstalled (only disabled). */
   builtin?: boolean
+  /** External plugin origin: vault-local (.amadeus/plugins) or global (~/.forsion/amadeus/plugins). */
+  source?: 'vault' | 'global'
+  /** Manifest apiVersion (missing → 1). */
+  apiVersion?: number
+  minAppVersion?: string
+  /** Present → gated out by the host: 'api' = apiVersion mismatch, 'minApp' = app too old. Never activated. */
+  blocked?: 'api' | 'minApp'
   /** Wire up contributions; optionally return a disposer for teardown on disable. */
   setup(ctx: PluginContext): void | (() => void)
 }

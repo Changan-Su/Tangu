@@ -26,18 +26,21 @@ import { useI18n } from '../i18n'
 import { LocaleToggle } from './LocaleToggle'
 import { CHANGELOG } from '../changelog'
 import { Markdown } from './Markdown'
+import { UpdateActions } from './UpdateActions'
+import { openChangelogTab } from '../views/ChangelogView'
 import { ModelGroupList } from './ModelGroupList'
 import { AgentsSettings } from './AgentsSettings'
 import { TtsVoiceStudio } from './TtsVoiceStudio'
 import { previewTts } from '../services/ttsService'
 import { ShortcutsTab } from './ShortcutsTab'
 import { PluginsTab } from './PluginsTab'
+import { AmadeusPluginsTab } from './AmadeusPluginsTab'
 import { HooksTab } from './HooksTab'
 import { PluginSettingsPage } from './PluginSettingsPage'
 import { AgentClisTab } from './AgentClisTab'
 import { QrImage } from './QrImage'
 
-type StaticTab = 'general' | 'connection' | 'forsion' | 'model' | 'mcp' | 'hooks' | 'skills' | 'agents' | 'plugins' | 'agent-clis' | 'browser' | 'wechat' | 'notes' | 'theme' | 'shortcuts' | 'advanced' | 'developer' | 'about'
+type StaticTab = 'general' | 'connection' | 'forsion' | 'model' | 'mcp' | 'hooks' | 'skills' | 'agents' | 'plugins' | 'amadeus-plugins' | 'agent-clis' | 'browser' | 'wechat' | 'notes' | 'theme' | 'shortcuts' | 'advanced' | 'developer' | 'about'
 // 动态插件设置页用 `plugin:<id>`(Obsidian 式一级入口)。
 export type Tab = StaticTab | `plugin:${string}`
 
@@ -157,6 +160,9 @@ export const SettingsModal: React.FC<{
   // 高级→导出日志:把当前会话的全部对话 + 后端运行日志打包成一个 JSON,便于开发者排障。
   const [exporting, setExporting] = useState(false)
   const [exportMsg, setExportMsg] = useState('')
+  // 清空数据(应用内卸载/重置):默认勾 Tangu 数据,不默认勾桌面设置。
+  const [clearTangu, setClearTangu] = useState(true)
+  const [clearDesktop, setClearDesktop] = useState(false)
   const [wechatStatus, setWechatStatus] = useState<WechatStatusResponse | null>(null)
   const [wechatBusy, setWechatBusy] = useState(false)
   const [wechatMsg, setWechatMsg] = useState('')
@@ -601,7 +607,7 @@ export const SettingsModal: React.FC<{
     // 技能云端可用:desktop 或 Tangu Web 都显示(保持 desktop 原有顺序:agents→skills→mcp…)。
     ...((isDesktop || cloudWeb) ? ([['skills', t('settings.tab.skills')]] as Array<[Tab, string]>) : []),
     ...(isDesktop ? ([['mcp', 'MCP'], ['hooks', 'Hooks'], ['wechat', t('settings.tab.wechat')], ['browser', t('settings.tab.browser')], ['plugins', t('settings.tab.plugins')]] as Array<[Tab, string]>) : []),
-    ...(isDesktop && !!window.amadeus ? ([['notes', t('settings.tab.notes')]] as Array<[Tab, string]>) : []),
+    ...(isDesktop && !!window.amadeus ? ([['notes', t('settings.tab.notes')], ['amadeus-plugins', t('settings.tab.amadeusPlugins')]] as Array<[Tab, string]>) : []),
     ['theme', t('settings.tab.theme')],
     ['shortcuts', t('settings.tab.shortcuts')],
     ['advanced', t('settings.tab.advanced')],
@@ -617,7 +623,7 @@ export const SettingsModal: React.FC<{
     { key: 'options', label: t('settings.group.options'), tabs: ['general', 'theme', 'shortcuts', 'advanced', 'developer', 'about'] },
     { key: 'ai', label: t('settings.group.ai'), tabs: ['model', 'agents', 'skills', 'mcp', 'hooks'] },
     { key: 'core', label: t('settings.group.corePlugins'), tabs: ['wechat', 'browser', 'notes'] },
-    { key: 'community', label: t('settings.group.communityPlugins'), tabs: ['plugins'] },
+    { key: 'community', label: t('settings.group.communityPlugins'), tabs: ['plugins', 'amadeus-plugins'] },
   ]
 
   if (!p.open) return null
@@ -1647,6 +1653,7 @@ export const SettingsModal: React.FC<{
                     onOpenSettings={(id) => setTab(`plugin:${id}` as Tab)}
                   />
                 )}
+                {tab === 'amadeus-plugins' && <AmadeusPluginsTab />}
                 {tab.startsWith('plugin:') && (() => {
                   const pid = tab.slice('plugin:'.length)
                   const pl = (plugins || []).find((x) => x.id === pid)
@@ -2169,6 +2176,37 @@ export const SettingsModal: React.FC<{
                       {!p.activeSession && <div className="hint" style={{ marginTop: 6 }}>{t('settings.advanced.exportNoSession')}</div>}
                       {exportMsg && <div className="hint" style={{ marginTop: 6, wordBreak: 'break-all' }}>{exportMsg}</div>}
                     </div>
+
+                    {window.tangu?.clearAppData && (
+                      <div className="field" style={{ marginTop: 18, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+                        <label style={{ color: 'var(--danger)' }}>{t('settings.clearData.label')}</label>
+                        <div className="hint" style={{ marginBottom: 8 }}>{t('settings.clearData.hint')}</div>
+                        <label className="inline-check">
+                          <input type="checkbox" checked={clearTangu} onChange={(e) => setClearTangu(e.target.checked)} />
+                          {t('settings.clearData.tangu')}
+                        </label>
+                        <label className="inline-check" style={{ marginTop: 4 }}>
+                          <input type="checkbox" checked={clearDesktop} onChange={(e) => setClearDesktop(e.target.checked)} />
+                          {t('settings.clearData.desktop')}
+                        </label>
+                        <div style={{ marginTop: 10 }}>
+                          <button
+                            className="btn danger sm"
+                            disabled={!clearTangu && !clearDesktop}
+                            onClick={() => {
+                              if (!clearTangu && !clearDesktop) return
+                              if (!window.confirm(t('settings.clearData.confirm'))) return
+                              void window.tangu?.clearAppData?.({ tangu: clearTangu, desktop: clearDesktop })
+                            }}
+                          >
+                            <Trash2 size={13} /> {t('settings.clearData.btn')}
+                          </button>
+                        </div>
+                        {window.tangu?.platform === 'darwin' && (
+                          <div className="hint" style={{ marginTop: 6 }}>{t('settings.clearData.macNote')}</div>
+                        )}
+                      </div>
+                    )}
                   </>
                 )}
 
@@ -2199,6 +2237,15 @@ export const SettingsModal: React.FC<{
                         {t('settings.developer.showSystemPrompt')}
                       </label>
                       <div className="hint">{t('settings.developer.showSystemPromptHint')}</div>
+                    </div>
+                    <div className="field">
+                      <label>{t('settings.developer.testUpdateLabel')}</label>
+                      <div>
+                        <button className="btn ghost sm" onClick={() => { openChangelogTab(); p.onClose() }}>
+                          <RefreshCw size={12} /> {t('settings.developer.testUpdate')}
+                        </button>
+                      </div>
+                      <div className="hint">{t('settings.developer.testUpdateHint')}</div>
                     </div>
                     <div className="field">
                       <button
@@ -2253,33 +2300,7 @@ export const SettingsModal: React.FC<{
                         ) : null}
                       </div>
                       <span className="grow" />
-                      {(() => {
-                        const isMac = window.tangu?.platform === 'darwin'
-                        const releasesUrl = 'https://github.com/Changan-Su/Tangu/releases/latest'
-                        // 无 IPC(浏览器/旧 preload)→ 回退打开站点(保持原行为)。
-                        const check = (): void => {
-                          if (window.tangu?.checkForUpdates) void window.tangu.checkForUpdates()
-                          else window.open('https://forsion.net', '_blank')
-                        }
-                        switch (upd.phase) {
-                          case 'checking':
-                            return <button className="btn ghost sm" disabled><Loader2 size={12} className="spin" /> {t('about.update.checking')}</button>
-                          case 'available':
-                            return isMac
-                              ? <button className="btn primary sm" onClick={() => window.open(releasesUrl, '_blank')}><ExternalLink size={12} /> {t('about.update.goToDownload')}</button>
-                              : <button className="btn primary sm" onClick={() => window.tangu?.downloadUpdate?.()}><Download size={12} /> {t('about.update.download')}</button>
-                          case 'downloading':
-                            return <button className="btn ghost sm" disabled><Loader2 size={12} className="spin" /> {t('about.update.downloading', { percent: upd.percent ?? 0 })}</button>
-                          case 'downloaded':
-                            return <button className="btn primary sm" onClick={() => window.tangu?.installUpdate?.()}><RefreshCw size={12} /> {t('about.update.install')}</button>
-                          case 'not-available':
-                            return <button className="btn ghost sm" onClick={check}><Check size={12} /> {t('about.update.upToDate')}</button>
-                          case 'unsupported':
-                            return <span className="hint">{t('about.update.unsupported')}</span>
-                          default:
-                            return <button className="btn ghost sm" onClick={check}><RefreshCw size={12} /> {t('about.update.check')}</button>
-                        }
-                      })()}
+                      <UpdateActions upd={upd} />
                     </div>
                     {(upd.phase === 'available' || upd.phase === 'downloaded') && (
                       <div className="field">

@@ -12,12 +12,14 @@ import { useUiStore } from '../store/uiStore'
 import { setTheme as applyAccent, toggleMode } from '../theme/ThemeManager'
 import { amadeus } from '../api'
 import { BUILTIN_PLUGINS } from './builtins'
+import { registerPropertyType as registerPropType, unregisterPropertyType as unregisterPropType } from '../blocks/database/propertyTypes'
 import type {
   AmadeusPlugin,
   CommandContribution,
   PanelContribution,
   PluginAppApi,
   PluginContext,
+  PropertyTypeContribution,
   SlashContribution,
   StatusItemContribution,
   ThemeContribution,
@@ -42,6 +44,7 @@ interface PluginState {
   themes: Owned<ThemeContribution>[]
   panels: Owned<PanelContribution>[]
   statusItems: Owned<StatusItemContribution>[]
+  propertyTypes: Owned<PropertyTypeContribution>[]
   disposers: Record<string, (() => void) | undefined>
   initialized: boolean
   /** 注册并按偏好启用一组插件;缺省 = 全部 builtins(独立版);桌面壳传自己的选择性子集。 */
@@ -110,6 +113,10 @@ function toPlugin(src: ExternalPluginSource): AmadeusPlugin {
     version: src.version,
     description: src.description,
     builtin: false,
+    source: src.source,
+    apiVersion: src.apiVersion,
+    minAppVersion: src.minAppVersion,
+    blocked: src.blocked,
     setup: (ctx) => {
       const fn = new Function('ctx', src.code) as (c: PluginContext) => unknown
       const d = fn(ctx)
@@ -132,6 +139,10 @@ export const usePluginStore = create<PluginState>((set, get) => {
     registerPanel: (panel) => set((s) => ({ panels: [...s.panels, { pluginId, item: panel }] })),
     registerStatusItem: (item) =>
       set((s) => ({ statusItems: [...s.statusItems, { pluginId, item }] })),
+    registerPropertyType: (def) => {
+      registerPropType(def)
+      set((s) => ({ propertyTypes: [...s.propertyTypes, { pluginId, item: def }] }))
+    },
   })
 
   /** Run disposer + drop contributions + mark inactive, WITHOUT touching the preference. */
@@ -142,6 +153,7 @@ export const usePluginStore = create<PluginState>((set, get) => {
       console.error(`[amadeus] plugin "${id}" dispose failed`, e)
     }
     for (const o of get().themes) if (o.pluginId === id) removeThemeStyle(o.item.id)
+    for (const o of get().propertyTypes) if (o.pluginId === id) unregisterPropType(o.item.type)
     set((s) => ({
       activeIds: s.activeIds.filter((x) => x !== id),
       slashItems: s.slashItems.filter((o) => o.pluginId !== id),
@@ -149,6 +161,7 @@ export const usePluginStore = create<PluginState>((set, get) => {
       themes: s.themes.filter((o) => o.pluginId !== id),
       panels: s.panels.filter((o) => o.pluginId !== id),
       statusItems: s.statusItems.filter((o) => o.pluginId !== id),
+      propertyTypes: s.propertyTypes.filter((o) => o.pluginId !== id),
       disposers: { ...s.disposers, [id]: undefined },
     }))
   }
@@ -166,6 +179,7 @@ export const usePluginStore = create<PluginState>((set, get) => {
     themes: [],
     panels: [],
     statusItems: [],
+    propertyTypes: [],
     disposers: {},
     initialized: false,
 
@@ -181,6 +195,8 @@ export const usePluginStore = create<PluginState>((set, get) => {
       if (get().activeIds.includes(id)) return
       const plugin = get().plugins.find((p) => p.id === id)
       if (!plugin) return
+      if (plugin.blocked) return // 门禁挡下的插件(apiVersion/minAppVersion 不符)任何路径都不得激活
+      // 注:DISABLED_KEY 是按 id 的单一全局列表;listPlugins 已按 vault 优先去重,每 id 只有一实例,一位开关即正确。
       let dispose: (() => void) | undefined
       try {
         const r = plugin.setup(makeContext(id))
@@ -188,12 +204,14 @@ export const usePluginStore = create<PluginState>((set, get) => {
       } catch (e) {
         console.error(`[amadeus] plugin "${id}" setup failed`, e)
         useUiStore.getState().notify(`插件「${plugin.name}」加载失败`)
+        for (const o of get().propertyTypes) if (o.pluginId === id) unregisterPropType(o.item.type)
         set((s) => ({
           slashItems: s.slashItems.filter((o) => o.pluginId !== id),
           commands: s.commands.filter((o) => o.pluginId !== id),
           themes: s.themes.filter((o) => o.pluginId !== id),
           panels: s.panels.filter((o) => o.pluginId !== id),
           statusItems: s.statusItems.filter((o) => o.pluginId !== id),
+          propertyTypes: s.propertyTypes.filter((o) => o.pluginId !== id),
         }))
         return
       }
