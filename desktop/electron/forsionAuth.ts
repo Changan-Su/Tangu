@@ -8,6 +8,7 @@ import { shell } from 'electron'
 import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { forsionHomeDir } from './forsionHome'
 
 export interface TanguCreds {
   cloudUrl?: string
@@ -15,7 +16,7 @@ export interface TanguCreds {
   model?: string
 }
 
-const credsFile = (): string => join(homedir(), '.tangu', 'auth.json')
+const credsFile = (): string => join(forsionHomeDir(), 'auth.json')
 
 export function loadTanguCreds(): TanguCreds {
   try {
@@ -26,7 +27,7 @@ export function loadTanguCreds(): TanguCreds {
 }
 
 export function saveTanguCreds(c: TanguCreds): void {
-  mkdirSync(join(homedir(), '.tangu'), { recursive: true })
+  mkdirSync(forsionHomeDir(), { recursive: true })
   writeFileSync(credsFile(), JSON.stringify(c, null, 2), 'utf8')
   try { chmodSync(credsFile(), 0o600) } catch { /* best-effort */ }
 }

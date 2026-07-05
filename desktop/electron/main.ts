@@ -10,6 +10,7 @@ import { readFile, writeFile, mkdir, chmod, readdir, stat, rename, cp, open as f
 import { existsSync } from 'fs'
 import { ensureCliInstalled } from './cliInstall'
 import { PRODUCT } from './product'
+import { forsionHomeDir, migrateForsionHome } from './forsionHome'
 import { execFile, spawn } from 'child_process'
 import { homedir } from 'os'
 import { BackendManager, bundledPythonBin, type BackendStatus } from './backendManager'
@@ -25,7 +26,7 @@ import { registerIpc as registerAmadeusIpc } from './amadeus/ipc'
 import { registerAssetSchemes as registerAmadeusAssetSchemes, registerAssetProtocol as registerAmadeusAssetProtocol } from './amadeus/assetProtocol'
 
 /** ~/.tangu(与包内 core/tanguHome.ts 同约定;TANGU_HOME 可整体重定向)。 */
-const tanguHomeDir = (): string => process.env.TANGU_HOME || join(app.getPath('home'), '.tangu')
+const tanguHomeDir = forsionHomeDir // 品牌迁移后真身在 ~/.forsion(名字保留,少动 20+ 调用点)
 /** ~/.tangu/themes:拖入式主题目录(每主题一子目录:theme.json + theme.css)。 */
 const themesDir = (): string => join(tanguHomeDir(), 'themes')
 
@@ -563,6 +564,7 @@ registerAmadeusAssetSchemes()
 app.whenReady().then(async () => {
   // Windows 系统通知前提(无 AppUserModelId 时 Notification 可能不弹);mac/linux 无副作用。
   app.setAppUserModelId('com.forsion.tangu')
+  migrateForsionHome() // 品牌迁移 ~/.tangu→~/.forsion + ~/Tangu→~/Forsion(改名+兼容软链;最早期,先于一切读盘)
   await loadTanguEnvFile() // 先于一切 loadConfig(其 env 兜底读 TANGU_CLOUD_URL/TANGU_BACKEND_URL)
   await seedDefaultThemes(themesDir()) // 首次运行种入 soft 示例主题(themes/ 已存在则跳过;内部吞错不阻塞启动)
   // tangu CLI 自动安装/自愈:shim 指向 App 内部资源(App 自动更新 → CLI 同步),幂等注入 PATH;吞错不阻塞。
@@ -1150,7 +1152,7 @@ app.whenReady().then(async () => {
       const ids: string[] = Object.keys(m.OAUTH_PROVIDERS || {})
       const logged = new Set<string>()
       try {
-        const credsPath = join(app.getPath('home'), '.tangu', 'provider-auth.json')
+        const credsPath = join(forsionHomeDir(), 'provider-auth.json')
         const raw = JSON.parse(await readFile(credsPath, 'utf8'))
         for (const k of Object.keys(raw || {})) logged.add(k)
       } catch { /* 未登录过 */ }

@@ -695,16 +695,16 @@ registerMessages({
     "en": "Tangu default workspace directory"
   },
   "settings.workspace.placeholder": {
-    "zh": "~/Tangu(默认,首启自动创建)",
-    "en": "~/Tangu (default, created on first launch)"
+    "zh": "~/Forsion(默认,首启自动创建)",
+    "en": "~/Forsion (default, created on first launch)"
   },
   "settings.workspace.pick": {
     "zh": "选择…",
     "en": "Choose…"
   },
   "settings.workspace.hint": {
-    "zh": "侧栏「Tangu 默认工作区」新建会话用的本机目录;留空用 ~/Tangu。改后关闭设置即刷新侧栏工作区。",
-    "en": "Local directory used by the sidebar \"Tangu default workspace\" for new sessions; leave empty to use ~/Tangu. After changing, close Settings to refresh the sidebar workspace."
+    "zh": "侧栏「Tangu 默认工作区」新建会话用的本机目录;留空用 ~/Forsion。改后关闭设置即刷新侧栏工作区。",
+    "en": "Local directory used by the sidebar \"Tangu default workspace\" for new sessions; leave empty to use ~/Forsion. After changing, close Settings to refresh the sidebar workspace."
   },
   "settings.token.label": {
     "zh": "手动 token(高级,可选;覆盖登录凭证)",
@@ -795,8 +795,8 @@ registerMessages({
     "en": " · Logged in (re-login)"
   },
   "settings.provider.loginHintPrefix": {
-    "zh": "OAuth 浏览器登录,凭证存 ~/.tangu/provider-auth.json(与 `tangu login <provider>` 通用);托管后端会自动重启加载,之后用 ",
-    "en": "OAuth browser login; credentials are stored in ~/.tangu/provider-auth.json (shared with `tangu login <provider>`). The managed backend restarts to load them automatically, after which you can use "
+    "zh": "OAuth 浏览器登录,凭证存 ~/.forsion/provider-auth.json(与 `tangu login <provider>` 通用);托管后端会自动重启加载,之后用 ",
+    "en": "OAuth browser login; credentials are stored in ~/.forsion/provider-auth.json (shared with `tangu login <provider>`). The managed backend restarts to load them automatically, after which you can use "
   },
   "settings.provider.loginHintSuffix": {
     "zh": "(如 xai/grok-3)即可。",
@@ -811,8 +811,8 @@ registerMessages({
     "en": "Custom provider (BYO-key direct connection; same as adding a Forsion model: base_URL + api key)"
   },
   "settings.customProvider.introPrefix": {
-    "zh": "配置存 ~/.tangu/providers.json,与 CLI ",
-    "en": "Config is stored in ~/.tangu/providers.json, same format as the CLI "
+    "zh": "配置存 ~/.forsion/providers.json,与 CLI ",
+    "en": "Config is stored in ~/.forsion/providers.json, same format as the CLI "
   },
   "settings.customProvider.introMid": {
     "zh": " 同格式;托管模式保存后自动重启后端加载。模型用 ",
@@ -883,12 +883,12 @@ registerMessages({
     "en": "Saved; managed backend is restarting to reload…"
   },
   "settings.customProvider.externalWarning": {
-    "zh": "⚠ 当前为外部后端模式:这里编辑的是本机 ~/.tangu/providers.json,远程 tangu-server 不会读到。",
-    "en": "⚠ Currently in external backend mode: this edits the local ~/.tangu/providers.json, which the remote tangu-server won't read."
+    "zh": "⚠ 当前为外部后端模式:这里编辑的是本机 ~/.forsion/providers.json,远程 tangu-server 不会读到。",
+    "en": "⚠ Currently in external backend mode: this edits the local ~/.forsion/providers.json, which the remote tangu-server won't read."
   },
   "settings.mcp.label": {
-    "zh": "MCP Server(配置存 ~/.tangu/mcp.json;保存后托管后端重启重连)",
-    "en": "MCP Server (config stored in ~/.tangu/mcp.json; managed backend restarts and reconnects after saving)"
+    "zh": "MCP Server(配置存 ~/.forsion/mcp.json;保存后托管后端重启重连)",
+    "en": "MCP Server (config stored in ~/.forsion/mcp.json; managed backend restarts and reconnects after saving)"
   },
   "settings.mcp.introPrefix": {
     "zh": "工具以 ",
@@ -1104,8 +1104,8 @@ registerMessages({
     "en": "Import from other agents (Claude Code / Codex / Hermes)"
   },
   "settings.discovery.hint": {
-    "zh": "扫描本机 ~/.claude、~/.codex、~/.hermes 的技能与 MCP 配置,勾选后导入 ~/.tangu。导入的 MCP 一律默认停用,不会自动运行外来命令。",
-    "en": "Scans local ~/.claude, ~/.codex, ~/.hermes for skills and MCP configs; selected items are imported into ~/.tangu. Imported MCP servers are always disabled by default and won't auto-run external commands."
+    "zh": "扫描本机 ~/.claude、~/.codex、~/.hermes 的技能与 MCP 配置,勾选后导入 ~/.forsion。导入的 MCP 一律默认停用,不会自动运行外来命令。",
+    "en": "Scans local ~/.claude, ~/.codex, ~/.hermes for skills and MCP configs; selected items are imported into ~/.forsion. Imported MCP servers are always disabled by default and won't auto-run external commands."
   },
   "settings.discovery.scan": {
     "zh": "扫描本机",
@@ -1489,7 +1489,7 @@ registerMessages({
   "onboarding.connect.benefitFreeQuota": { "zh": "每日免费 AI 额度 —— 注册即送,无需付费即可开始", "en": "Free daily AI quota — included on sign-up, start without paying" },
   "onboarding.connect.modeSub": { "zh": "订阅登录", "en": "Subscription" },
   "onboarding.connect.subDesc": { "zh": "用你的 Claude / ChatGPT / xAI 订阅账号直连,跑各自的订阅额度(不计 Forsion 额度)。", "en": "Connect with your Claude / ChatGPT / xAI subscription account and run on its own quota (doesn't count against Forsion quota)." },
-  "onboarding.connect.subHint": { "zh": "OAuth 浏览器登录,凭证只存本机 ~/.tangu/provider-auth.json;登录后用 provider/model(如 claude/claude-opus-4-8)选模型。", "en": "OAuth browser login; credentials stay on your machine in ~/.tangu/provider-auth.json. After login, pick a model with provider/model (e.g. claude/claude-opus-4-8)." },
+  "onboarding.connect.subHint": { "zh": "OAuth 浏览器登录,凭证只存本机 ~/.forsion/provider-auth.json;登录后用 provider/model(如 claude/claude-opus-4-8)选模型。", "en": "OAuth browser login; credentials stay on your machine in ~/.forsion/provider-auth.json. After login, pick a model with provider/model (e.g. claude/claude-opus-4-8)." },
   "onboarding.connect.subUnavailable": { "zh": "当前环境不支持订阅登录(仅桌面端)。", "en": "Subscription login isn't available here (desktop only)." },
   "onboarding.connect.subLoginOk": { "zh": "订阅账号已连接", "en": "Subscription account connected" },
 })

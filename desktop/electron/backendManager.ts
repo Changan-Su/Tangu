@@ -16,6 +16,7 @@ import { existsSync, readFileSync, statSync, writeFileSync, mkdirSync, chmodSync
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { forsionHomeDir, defaultWorkspaceDir } from './forsionHome'
 
 export type BackendState = 'stopped' | 'starting' | 'ready' | 'crashed'
 
@@ -123,7 +124,7 @@ export class BackendManager {
   getToken(): string {
     if (this.token) return this.token
     try {
-      const creds = JSON.parse(readFileSync(join(homedir(), '.tangu', 'auth.json'), 'utf8'))
+      const creds = JSON.parse(readFileSync(join(forsionHomeDir(), 'auth.json'), 'utf8'))
       if (creds.token) return String(creds.token)
     } catch { /* 无 auth.json → 回退本地令牌 */ }
     return this.localToken()
@@ -134,7 +135,7 @@ export class BackendManager {
   private cachedLocalToken: string | null = null
   private localToken(): string {
     if (this.cachedLocalToken) return this.cachedLocalToken
-    const f = join(homedir(), '.tangu', 'desktop-local-token')
+    const f = join(forsionHomeDir(), 'desktop-local-token')
     try {
       const v = readFileSync(f, 'utf8').trim()
       if (v) { this.cachedLocalToken = v; return v }
@@ -184,7 +185,7 @@ export class BackendManager {
         '--port', String(this.port),
         '--host', '127.0.0.1',
         // 与 TUI/standalone 默认同指 ~/.tangu/state.db,SQLite WAL 多进程共享 → 桌面与 TUI 会话互通。
-        '--data-dir', join(homedir(), '.tangu', 'state.db'),
+        '--data-dir', join(forsionHomeDir(), 'state.db'),
         '--sandbox', s.sandbox,
       ]
       if (s.cloudUrl) args.push('--cloud-url', s.cloudUrl)
@@ -202,6 +203,7 @@ export class BackendManager {
       else delete env.ELECTRON_RUN_AS_NODE
       // 凭证走 env,不出现在 ps 输出。用 getToken()(config.cloudToken > auth.json > 本地回退令牌)——
       // **始终非空**,保证后端 validate(强制要 token)通过、无 Forsion 登录也能独立启动(BYOK/订阅可用)。
+      env.TANGU_HOME = forsionHomeDir() // 三重保险之③:软链被删也不分脑(包内 tanguHome 认此 env)
       env.TANGU_TOKEN = this.getToken()
       env.TANGU_BROWSER_ENABLED = s.browserEnabled === false ? '0' : '1'
       env.TANGU_BROWSER_ENGINE = s.browserEngine || 'auto'
@@ -212,7 +214,7 @@ export class BackendManager {
       env.TANGU_WECHAT_REMOTE_APPROVAL_MODE = s.wechatRemoteApprovalMode || 'readonly'
       if (s.wechatStateDir) env.TANGU_WECHAT_STATE_DIR = s.wechatStateDir
       // 让后端的微信远程会话落到桌面默认工作区(host 执行 cwd);兜底 ~/Tangu。
-      env.TANGU_DEFAULT_WORKSPACE = s.defaultWorkspaceDir?.trim() || join(homedir(), 'Tangu')
+      env.TANGU_DEFAULT_WORKSPACE = s.defaultWorkspaceDir?.trim() || defaultWorkspaceDir()
 
       // 内置 Python:bundled(默认)+ 拿得到内置解释器 → 前置 PATH + TANGU_PYTHON_BIN,
       // 让 run_bash 里的 python/pip 落到隔离的内置解释器(免装、不与用户 python 冲突);'system' 用系统 PATH。
