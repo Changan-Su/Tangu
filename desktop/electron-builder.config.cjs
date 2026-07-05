@@ -16,7 +16,7 @@ module.exports = {
   afterPack: 'build/afterPack.cjs',
   // 更新 feed:仅全家桶(M2 给各单品建独立 release 仓后按档案配置;无 publish 则不产 latest*.yml)。
   ...(product.id === 'forsion'
-    ? { publish: { provider: 'github', owner: 'Changan-Su', repo: 'Tangu' } }
+    ? { publish: { provider: 'github', owner: 'Changan-Su', repo: 'Forsion' } }
     : {}),
   artifactName: product.artifactPrefix + '-${version}-${arch}.${ext}',
   files: [

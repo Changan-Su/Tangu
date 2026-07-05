@@ -16,7 +16,7 @@ import { isNewer, notesToString } from './updaterUtil'
 const { autoUpdater } = electronUpdater
 
 const GH_OWNER = 'Changan-Su'
-const GH_REPO = 'Tangu'
+const GH_REPO = 'Forsion' // 2026-07-05 GitHub 仓已改名(旧名 Tangu 经重定向仍可达,老客户端不断链)
 
 export type UpdaterPhase =
   | 'idle' | 'checking' | 'available' | 'not-available'
