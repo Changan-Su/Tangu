@@ -11,6 +11,7 @@ import {
 import { listModels, testProviderConnection, listAgents, saveAgentDef, getSpecialConfig, saveSpecialConfig } from '../services/backendService'
 import type { EnvProbeResult, ModelsResponse, NormalAgentDef, SpecialAgentsConfig, TanguDesktopConfig } from '../types'
 import { useI18n } from '../i18n'
+import { PRODUCT_DISPLAY_NAME } from '../product'
 import { listLanguages, listSkins } from '../theme/registry'
 import { applyTheme } from '../theme/loader'
 import { ThemeCard } from './ThemeCard'
@@ -304,7 +305,7 @@ export const OnboardingWizard: React.FC<{
       <div className="ob-hero-wrap">
         <div className="ob-hero">
           <div className="ob-hero-mark"><BrandLogo size={56} /></div>
-          <h1 className="ob-hero-title">{t('onboarding.welcome.title')}</h1>
+          <h1 className="ob-hero-title">{t('onboarding.welcome.title', { name: PRODUCT_DISPLAY_NAME })}</h1>
           <div className="ob-hero-ver">{t('onboarding.welcome.version', { v: appVer || CHANGELOG[0]?.version || '' })}</div>
           <div className="ob-hero-actions">
             <button className="btn primary" onClick={() => setStep('connect')}>
@@ -342,7 +343,7 @@ export const OnboardingWizard: React.FC<{
       {/* 无边设计:与欢迎页一致,无卡片;key={step} 让每步重新触发入场动画 */}
       <div className="ob-step" key={step}>
         <div className="ob-step-head">
-          <Sparkles size={14} /> <span className="grow">{t('onboarding.title')}</span>
+          <Sparkles size={14} /> <span className="grow">{t('onboarding.title', { name: PRODUCT_DISPLAY_NAME })}</span>
           <span className="ob-step-count">{stepIdx} / {STEP_ORDER.length - 1}</span>
         </div>
         <div className="ob-step-body">

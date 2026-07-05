@@ -1144,8 +1144,8 @@ registerMessages({
     "en": "Session-level settings (skill/tool enablement, execution environment, approval level) are adjusted in the right panel and input bar. Shortcuts: Ctrl/Cmd+N for a new session, Ctrl/Cmd+, to open Settings."
   },
   "onboarding.title": {
-    "zh": "欢迎使用 Tangu Agent",
-    "en": "Welcome to Tangu Agent"
+    "zh": "欢迎使用 {name}",
+    "en": "Welcome to {name}"
   },
   "onboarding.connect.stepLabel": {
     "zh": "第一步:连接模型",
@@ -1477,7 +1477,7 @@ registerMessages({
 
 // ── 引导欢迎页 + 更新日志抽屉 + Forsion 登录权益(2026-06-28)──
 registerMessages({
-  "onboarding.welcome.title": { "zh": "欢迎使用 Tangu", "en": "Welcome to Tangu" },
+  "onboarding.welcome.title": { "zh": "欢迎使用 {name}", "en": "Welcome to {name}" },
   "onboarding.welcome.version": { "zh": "版本 {v}", "en": "Version {v}" },
   "onboarding.welcome.continue": { "zh": "继续", "en": "Continue" },
   "onboarding.welcome.viewChangelog": { "zh": "查看更新内容", "en": "What's New" },
