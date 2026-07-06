@@ -287,7 +287,7 @@ npm test            # vitest
 第三方插件 = 一个含 `tangu-plugin.json`（`apiVersion` 须等于核心的 `TANGU_PLUGIN_API`，见 `src/plugins/types.ts`）+ 预构建 ESM 入口的文件夹，放进 `~/.forsion/plugins/<id>/` 即被动态加载（或经 Forsion Market 分发）。
 
 - **类型契约**：[`plugin-api/tangu-agent.d.ts`](./plugin-api/tangu-agent.d.ts) 是稳定公开 API 的单一真源——插件用 tsconfig `paths` 把 `@forsion/tangu-agent` 映射到它的拷贝，**只允许 `import type`**（运行时能力全走 `activate(ctx)` 传入的 `ctx.sdk`，否则会复制核心单例）。改契约后跑 `npm run sync:plugin-api`；与真类型的兼容由 `src/plugins/apiContract.ts` 随 typecheck 双向断言。
-- **上手模板**：独立示例仓 [tangu-sample-plugin](https://github.com/Changan-Su/tangu-sample-plugin)（工具 + 设置 schema + promptSection 全演示）；`plugins/` 下的 stickers / reply-segment 是真实案例。
+- **上手模板**：独立示例仓 [tangu-sample-plugin](https://github.com/Changan-Su/tangu-sample-plugin)（工具 + 设置 schema + promptSection 全演示）；`plugins/` 下的 stickers / reply-segment 是真实案例。纯数据扩展另有各自模板仓：[tangu-sample-theme](https://github.com/Changan-Su/tangu-sample-theme)（主题包）、[tangu-sample-space](https://github.com/Changan-Su/tangu-sample-space)（Space 配方）、[tangu-sample-agent](https://github.com/Changan-Su/tangu-sample-agent)（智能体）。
 - 注意：编辑器（Amadeus 笔记）插件是另一套系统——`manifest.json + main.js` 放 vault 的 `.amadeus/plugins/` 或全局 `~/.forsion/amadeus/plugins/`，见桌面端设置 → 笔记插件。
 
 ---
