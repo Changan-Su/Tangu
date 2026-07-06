@@ -409,10 +409,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
           }
           const id = m.id || e.name
           if (seen.has(id)) continue
-          seen.add(id)
           // 门禁:apiVersion 不匹配 / 应用太旧 → 列出但不可加载(blocked 徽章),code 不读不发。
           const blocked = gatePluginManifest(m, app.getVersion())
           const code = blocked ? '' : await fs.readFile(path.join(pdir, m.main || 'main.js'), 'utf8')
+          // seen 只在成功列出后占位:vault 副本坏了(如 main.js 缺失)不该把同 id 的全局副本也藏掉。
+          seen.add(id)
           out.push({
             id,
             name: m.name || e.name,

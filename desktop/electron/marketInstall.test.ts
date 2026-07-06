@@ -69,12 +69,14 @@ describe('readInstalledVersion(theme/amadeus-plugin)', () => {
 })
 
 describe('readUserPluginDirs', () => {
-  it('manifest id → 目录名映射(id 可 ≠ 目录名);无/坏 manifest 与点目录跳过;根缺失 → 空', async () => {
+  it('manifest id → 目录名映射(id 可 ≠ 目录名);无/坏 manifest、非 kebab id 与点目录跳过;根缺失 → 空', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mk-up-'))
     mkdirSync(join(root, 'my-dir'), { recursive: true })
     writeFileSync(join(root, 'my-dir', 'tangu-plugin.json'), JSON.stringify({ id: 'real-id', version: '1.0.0' }))
     mkdirSync(join(root, 'broken'))
     writeFileSync(join(root, 'broken', 'tangu-plugin.json'), '{oops')
+    mkdirSync(join(root, 'bad-id'))
+    writeFileSync(join(root, 'bad-id', 'tangu-plugin.json'), JSON.stringify({ id: 'MyPlugin' })) // loader 也不会加载它
     mkdirSync(join(root, 'no-manifest'))
     mkdirSync(join(root, '.hidden'))
     expect(await readUserPluginDirs(root)).toEqual([{ id: 'real-id', slug: 'my-dir' }])

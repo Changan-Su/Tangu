@@ -77,6 +77,12 @@ export function discoverPlugins(): DiscoveredPlugin[] {
         console.warn(`[tangu] 插件 ${name} manifest 缺 id/entry，跳过`);
         continue;
       }
+      // id 必须 kebab:settings 存储(sanitizeId)与桌面卸载(isSafeSlug)都只认这个字符集,
+      // 放进来就是「能装不能卸、设置永远清不掉」的孤儿,入口处直接挡。
+      if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(manifest.id)) {
+        console.warn(`[tangu] 插件 ${name} id "${manifest.id}" 非法(须 kebab-case),跳过`);
+        continue;
+      }
       if (manifest.apiVersion !== TANGU_PLUGIN_API) {
         console.warn(`[tangu] 插件 ${manifest.id} apiVersion=${manifest.apiVersion} 与宿主 ${TANGU_PLUGIN_API} 不兼容，跳过`);
         continue;

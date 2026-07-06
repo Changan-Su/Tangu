@@ -77,7 +77,8 @@ export async function readUserPluginDirs(pluginsRoot: string): Promise<Array<{ i
     if (!e.isDirectory() || e.name.startsWith('.')) continue
     try {
       const m = JSON.parse(await readFile(join(pluginsRoot, e.name, 'tangu-plugin.json'), 'utf8'))
-      if (typeof m?.id === 'string' && m.id) out.push({ id: m.id, slug: e.name })
+      // 只认 kebab id(与 loader/settings/卸载 IPC 同一字符集):非法 id 的插件 loader 也不会加载,不给卸载按钮。
+      if (isSafeSlug(m?.id)) out.push({ id: m.id, slug: e.name })
     } catch { /* 无/坏 manifest → 跳过 */ }
   }
   return out
