@@ -1,0 +1,16 @@
+{
+  "id": "lovable-plus",
+  "name": "Lovable Plus · Astryx",
+  "description": "astryx(Meta 开源设计系统)neutral 主题的大面积试装:炭黑单强调 + 白面灰底 + astryx 半径/阴影体系。自带整套 28 色(压过配色轴,任意配色下都呈现 astryx 中性观感;custom 配色的 seed 会穿透,可用来换强调色)。与 EventCard 组件试点同属一次 astryx 评估。",
+  "version": "0.1.0",
+  "author": "Forsion",
+  "supportsDarkMode": true,
+  "tags": ["astryx", "neutral", "pilot"],
+  "preview": {
+    "background": { "light": "#f1f1f1", "dark": "#1b1b1b" },
+    "accent": "#262626",
+    "title": { "text": "A+" },
+    "tagline": "astryx neutral 大面积试装",
+    "swatches": ["#262626", "#ffffff", "#737373", "#ebebeb"]
+  }
+}

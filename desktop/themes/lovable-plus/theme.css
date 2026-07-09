@@ -1,0 +1,96 @@
+/**
+ * Lovable Plus · Astryx — astryx neutral 主题的大面积试装(与 EventCard 组件试点同属一次评估)。
+ * 色值/半径/阴影全部取自 @astryxdesign/theme-neutral dist/theme.css 的 light-dark() 两侧原值,
+ * 手工展开到 LCL 契约(应用不设 color-scheme,不能直接用 light-dark())。
+ * 照 kami 先例破例「语言自带整套 28 色」:用 :root[data-theme][data-skin](0,3,0)
+ * 压过 skins.css 的配色轴;唯 custom 配色的 9 个内联 seed 变量会穿透(可借此换强调色)。
+ *
+ * ⚠ 暗色块必须与亮色块 28/28 逐键对称:漏声明的键会在暗色下拿到本文件的亮色值。
+ */
+
+/* ─── 结构层:astryx 半径(inner 6 / element 10 / container 12)+ shadow-low/high 体系,系统字 ─── */
+[data-theme='lovable-plus'] {
+  --border-width: 1px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-chat-surface: 16px;
+  --radius-chat-card: 12px;
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --panel-blur: none;
+  /* astryx --shadow-low 亮侧展开 */
+  --card-shadow: 0 2px 4px rgba(0, 0, 0, 0.05), 0 4px 8px rgba(0, 0, 0, 0.1);
+  --btn-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --icon-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+.dark[data-theme='lovable-plus'] {
+  /* astryx --shadow-low 暗侧展开(含 1px 内描边提层) */
+  --card-shadow: 0 2px 4px rgba(0, 0, 0, 0.25), 0 4px 8px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --btn-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --icon-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+/* ─── 亮色颜色层:body #f1f1f1 / surface #fff / 炭黑单强调 #262626(astryx neutral 亮侧原值) ─── */
+:root[data-theme='lovable-plus'][data-skin] {
+  --bg: #f1f1f1;
+  --bg-card: #ffffff;
+  --bg-glass: rgba(255, 255, 255, 0.9);
+  --sidebar-bg: #ececec;
+  --text: #171717;
+  --text-light: #404040;
+  --text-muted: #737373;
+  --text-faint: #a3a3a3;
+  --text-ghost: rgba(23, 23, 23, 0.28);
+  /* astryx border #ebebeb 只配白面;LCL 单 border 键还要在 #f1f1f1 底上画发丝线,取中 #dedede */
+  --border: #dedede;
+  --shadow: rgba(0, 0, 0, 0.1);
+  --accent: #262626;
+  --accent-hover: #171717;
+  --accent-light: rgba(38, 38, 38, 0.08);
+  --accent-rgb: 38, 38, 38;
+  --on-accent: #ffffff;
+  --green: #0c5700;
+  --danger: #89001a;
+  --danger-light: rgba(137, 0, 26, 0.08);
+  --overlay-subtle: rgba(0, 0, 0, 0.03);
+  --overlay-light: rgba(0, 0, 0, 0.05);
+  --overlay-medium: rgba(0, 0, 0, 0.08);
+  --overlay-strong: rgba(0, 0, 0, 0.15);
+  --overlay-scrim: rgba(0, 0, 0, 0.4);
+  --user-bg: rgba(38, 38, 38, 0.06);
+  --tool-bg: rgba(0, 0, 0, 0.03);
+  --tool-text: #737373;
+  --glow: radial-gradient(120% 80% at 82% -12%, rgba(0, 0, 0, 0.035), transparent 58%);
+}
+
+/* ─── 暗色颜色层:body #1b1b1b / surface #262626 / 月色强调 #ebebeb(astryx neutral 暗侧原值) ─── */
+:root.dark[data-theme='lovable-plus'][data-skin] {
+  --bg: #1b1b1b;
+  --bg-card: #262626;
+  --bg-glass: rgba(27, 27, 27, 0.9);
+  --sidebar-bg: #171717;
+  --text: #fafafa;
+  --text-light: rgba(250, 250, 250, 0.82);
+  --text-muted: #a3a3a3;
+  --text-faint: rgba(250, 250, 250, 0.42);
+  --text-ghost: rgba(250, 250, 250, 0.3);
+  --border: rgba(255, 255, 255, 0.1);
+  --shadow: rgba(0, 0, 0, 0.5);
+  --accent: #ebebeb;
+  --accent-hover: #ffffff;
+  --accent-light: rgba(235, 235, 235, 0.1);
+  --accent-rgb: 235, 235, 235;
+  --on-accent: #171717;
+  --green: #9fe59b;
+  --danger: #ff6f6c;
+  --danger-light: rgba(255, 111, 108, 0.12);
+  --overlay-subtle: rgba(255, 255, 255, 0.03);
+  --overlay-light: rgba(255, 255, 255, 0.05);
+  --overlay-medium: rgba(255, 255, 255, 0.08);
+  --overlay-strong: rgba(255, 255, 255, 0.15);
+  --overlay-scrim: rgba(0, 0, 0, 0.55);
+  --user-bg: rgba(235, 235, 235, 0.08);
+  --tool-bg: rgba(255, 255, 255, 0.04);
+  --tool-text: #a3a3a3;
+  --glow: radial-gradient(120% 80% at 82% -12%, rgba(255, 255, 255, 0.03), transparent 58%);
+}
