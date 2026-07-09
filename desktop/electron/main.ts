@@ -349,19 +349,22 @@ const configPath = (): string => join(app.getPath('userData'), 'tangu-desktop-co
 async function readShellConfig(): Promise<Partial<TanguStoredConfig>> {
   let cur: Partial<TanguStoredConfig> = {}
   try { cur = JSON.parse(await readFile(configPath(), 'utf8')) } catch { /* 无文件 → 空 */ }
-  // 首启从旧 desktop 迁移:本端 shell 配置无 mode(从未初始化)→ 继承 desktop1.0 的连接设置
-  // (mode=managed + 云 token + 同步/工作区等),与「兼容旧本地记录」一致;无旧 desktop 则回落默认(external + 引导)。
+  // 首启从旧 desktop 迁移:本端 shell 配置无 mode(从未初始化)→ 依次尝试旧目录继承连接设置
+  // (mode=managed + 云 token + 同步/工作区等)。tangu-agent-desktop2 = 2.4.0 包名 Forsion 化前的
+  // dev userData 目录(打包版 userData 走 productName「Forsion」,不受包名影响);tangu-agent-desktop = 1.0。
   if (!cur.mode) {
-    try {
-      const v1Path = join(app.getPath('userData'), '..', 'tangu-agent-desktop', 'tangu-desktop-config.json')
-      const v1 = JSON.parse(await readFile(v1Path, 'utf8')) as Partial<TanguStoredConfig>
-      if (v1.mode) {
-        const seeded = { ...v1, ...cur } // 本端已显式设的键优先
-        await mkdir(app.getPath('userData'), { recursive: true }).catch(() => {})
-        await writeFile(configPath(), JSON.stringify(seeded, null, 2), 'utf8') // 落盘一次,此后与 1.0 解耦
-        return seeded
-      }
-    } catch { /* 无旧 desktop 配置 → 默认 */ }
+    for (const legacyDir of ['tangu-agent-desktop2', 'tangu-agent-desktop']) {
+      try {
+        const legacyPath = join(app.getPath('userData'), '..', legacyDir, 'tangu-desktop-config.json')
+        const legacy = JSON.parse(await readFile(legacyPath, 'utf8')) as Partial<TanguStoredConfig>
+        if (legacy.mode) {
+          const seeded = { ...legacy, ...cur } // 本端已显式设的键优先
+          await mkdir(app.getPath('userData'), { recursive: true }).catch(() => {})
+          await writeFile(configPath(), JSON.stringify(seeded, null, 2), 'utf8') // 落盘一次,此后与旧目录解耦
+          return seeded
+        }
+      } catch { /* 该旧目录无配置 → 试下一个 */ }
+    }
   }
   return cur
 }
