@@ -300,12 +300,13 @@ export const SidebarPane: React.FC<SidebarPaneProps> = (p) => {
                         />
                       </div>
                     ) : ws.kind === 'wechat' ? (
-                      <button className={`t2s-group-toggle${p.specialView === 'wechat' ? ' active' : ''}`} onClick={() => { p.onOpenSpecial?.('wechat'); accordion(ws.key) }} title={t('sidebar.wechat.openHint')}>
+                      <button className={`t2s-group-toggle${p.specialView === 'wechat' ? ' active' : ''}`} onClick={() => { p.onOpenSpecial?.('wechat'); isCollapsed ? accordion(ws.key) : toggleGroup(ws.key) }} title={t('sidebar.wechat.openHint')}>
                         <span className="t2s-chev" onClick={(e) => { e.stopPropagation(); toggleGroup(ws.key) }}>{isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}</span>
                         <span className="t2s-group-name"><Smartphone size={12} /><span className="t2s-group-label">{ws.name}</span><span className={`t2s-mini-dot${wechatConnected ? ' ok' : ''}`} /><span className="t2s-count">{items.length}</span></span>
                       </button>
                     ) : (
-                      <button className="t2s-group-toggle" onClick={() => { p.onOpenWorkspace(ws.key); accordion(ws.key) }} title={ws.path || undefined}>
+                      // 已展开再点 = 折叠(toggleGroup 不动 activeWorkspaceKey,不会被联动 effect 弹回);收起时点 = 手风琴展开。
+                      <button className="t2s-group-toggle" onClick={() => { p.onOpenWorkspace(ws.key); isCollapsed ? accordion(ws.key) : toggleGroup(ws.key) }} title={ws.path || undefined}>
                         <span className="t2s-chev" onClick={(e) => { e.stopPropagation(); toggleGroup(ws.key) }}>{isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}</span>
                         <span className="t2s-group-name">{ws.kind === 'cloud' ? <Cloud size={12} /> : <Folder size={12} />}<span className="t2s-group-label">{ws.name}</span><span className="t2s-count">{items.length}</span></span>
                       </button>

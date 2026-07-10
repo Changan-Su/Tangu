@@ -130,6 +130,12 @@ html[data-flat='1'][data-mode] {
   --icon-shadow: none;
 }
 
+/* color-scheme 按 LCL 的 data-mode 声明:滚动条/原生控件随明暗,且 astryx 传送到 body 的浮层
+ * (dropdown/popover)靠它解析 light-dark()。astryx reset 映射的是 html[data-theme=light|dark],
+ * 而 LCL 用 data-theme 存语言名 → 那条永远不匹配,必须在这里补。 */
+:root[data-mode='light'] { color-scheme: light; }
+:root[data-mode='dark'] { color-scheme: dark; }
+
 /* ─── 重置 ─── */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #root { height: 100%; }
