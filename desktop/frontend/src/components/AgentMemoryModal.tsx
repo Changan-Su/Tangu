@@ -161,7 +161,7 @@ export const AgentMemoryModal: React.FC<{
               <button className="btn primary sm" disabled={memBusy} onClick={() => void saveMem()}>
                 {memBusy ? <Loader2 size={13} className="spin" /> : null} {t('common.save')}
               </button>
-              {memSaved && <span style={{ fontSize: 12, color: 'var(--accent)' }}>{t('settings.agents.memSaved')}</span>}
+              {memSaved && <span style={{ fontSize: 12, color: 'var(--accent-ink)' }}>{t('settings.agents.memSaved')}</span>}
             </div>
           </div>
         )}
@@ -181,7 +181,7 @@ export const AgentMemoryModal: React.FC<{
                     <button className="btn primary sm" disabled={logBusy} onClick={() => void saveLog()}>
                       {logBusy ? <Loader2 size={13} className="spin" /> : null} {t('common.save')}
                     </button>
-                    {logSaved && <span style={{ fontSize: 12, color: 'var(--accent)' }}>{t('settings.agents.memSaved')}</span>}
+                    {logSaved && <span style={{ fontSize: 12, color: 'var(--accent-ink)' }}>{t('settings.agents.memSaved')}</span>}
                   </div>
                 </>
               )}

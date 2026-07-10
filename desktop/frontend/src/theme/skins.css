@@ -23,6 +23,7 @@
   --border: #eae9e7;
   --shadow: rgba(0, 0, 0, 0.05);
   --accent: #f8f7f6;
+  --accent-ink: rgb(124, 124, 123); /* = customSkinVars 亮输出:纸白过浅,前景压深为中灰 */
   --accent-hover: #d5d4d4;
   --accent-light: rgba(248, 247, 246, 0.1);
   --accent-rgb: 248, 247, 246;
@@ -52,6 +53,7 @@
   --border: #34302a;
   --shadow: rgba(0, 0, 0, 0.4);
   --accent: #f8f7f6;
+  --accent-ink: #f8f7f6; /* 暗底上纸白本就可读(=customSkinVars 暗输出);暗块须显式声明防亮块的灰泄漏 */
   --accent-hover: #f9f8f8;
   --accent-light: rgba(248, 247, 246, 0.16);
   --accent-rgb: 248, 247, 246;

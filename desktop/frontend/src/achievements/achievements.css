@@ -18,7 +18,7 @@
   animation: ach-t-wrap 4.6s var(--ease-out) both;
 }
 /* 系列徽章配色:本体底色 --medal-bg / 光效色 --medal-fx(未定级用 accent,灰色闪光太丧) */
-.ach-toast[data-tier='off']    { --medal-bg: var(--bg-card); --medal-fx: var(--accent); --medal-ink: var(--text-muted); }
+.ach-toast[data-tier='off']    { --medal-bg: var(--bg-card); --medal-fx: var(--accent-ink); --medal-ink: var(--text-muted); }
 .ach-toast[data-tier='bronze'] { --medal-bg: #b87333; --medal-fx: #c98a4b; --medal-ink: #fff; }
 .ach-toast[data-tier='silver'] { --medal-bg: #a9a9a9; --medal-fx: #c4c4c4; --medal-ink: #fff; }
 .ach-toast[data-tier='gold']   { --medal-bg: #d4af37; --medal-fx: #e2c35b; --medal-ink: #fff; }
@@ -200,7 +200,7 @@
 .ach-tier-tag[data-tier='silver'] { background: #a9a9a9; }
 .ach-tier-tag[data-tier='gold'] { background: #d4af37; }
 .ach-progressbar { height: 6px; border-radius: 3px; background: var(--overlay-light); overflow: hidden; }
-.ach-progressbar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); transition: width var(--duration-slow) var(--ease-out); }
+.ach-progressbar i { display: block; height: 100%; border-radius: 3px; background: var(--accent-ink); transition: width var(--duration-slow) var(--ease-out); }
 
 /* 每系列一枚勋章(占位=单色奖杯圆徽):随等级变色 灰→铜→银→金;title 提示下一级阈值 */
 .ach-medal { width: 46px; height: 46px; flex: none; border-radius: 50%; display: grid; place-items: center; color: #fff; border: 1px solid var(--border); transition: background var(--duration-slow) var(--ease-out); }
@@ -219,7 +219,7 @@
 .ach-row-title { font-size: 13px; font-weight: 600; color: var(--text); }
 .ach-row-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 .ach-row-pts, .ach-row-prog { font-size: 12px; color: var(--text-faint); font-variant-numeric: tabular-nums; flex: none; }
-.ach-row-got { color: var(--accent); display: grid; place-items: center; width: 26px; flex: none; }
+.ach-row-got { color: var(--accent-ink); display: grid; place-items: center; width: 26px; flex: none; }
 .ach-claim {
   height: 26px; padding: 0 12px; flex: none;
   border: 1px solid var(--accent); border-radius: var(--radius-sm);

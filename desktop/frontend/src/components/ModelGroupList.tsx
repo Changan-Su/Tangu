@@ -99,10 +99,10 @@ export const ModelGroupList: React.FC<{
                     className={`file-row${m.id === selectedId ? ' active' : ''}`}
                     onClick={() => onSelect(m.id)}
                   >
-                    <span className="file-name" style={{ color: m.id === selectedId ? 'var(--accent)' : undefined }}>
+                    <span className="file-name" style={{ color: m.id === selectedId ? 'var(--accent-ink)' : undefined }}>
                       {m.name}
                     </span>
-                    {m.id === selectedId && <Check size={12} style={{ color: 'var(--accent)' }} />}
+                    {m.id === selectedId && <Check size={12} style={{ color: 'var(--accent-ink)' }} />}
                   </button>
                 ))}
               </div>

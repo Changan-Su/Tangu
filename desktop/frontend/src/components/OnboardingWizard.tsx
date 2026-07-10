@@ -396,7 +396,7 @@ export const OnboardingWizard: React.FC<{
                   <div className="ob-benefits">
                     <div className="ob-benefits-title"><Cloud size={13} /> {t('onboarding.connect.benefitsTitle')}</div>
                     <ul>
-                      <li><strong style={{ color: 'var(--accent)' }}>{t('onboarding.connect.benefitFreeQuota')}</strong></li>
+                      <li><strong style={{ color: 'var(--accent-ink)' }}>{t('onboarding.connect.benefitFreeQuota')}</strong></li>
                       <li>{t('onboarding.connect.benefitSync')}</li>
                       <li>{t('onboarding.connect.benefitModels')}</li>
                     </ul>
@@ -575,7 +575,7 @@ export const OnboardingWizard: React.FC<{
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     {models.models.map((m) => (
                       <button key={`${m.source}-${m.id}`} className="file-row" onClick={() => setChosenModel(m.id)}>
-                        <span className="file-name" style={{ color: m.id === chosenModel ? 'var(--accent)' : undefined }}>
+                        <span className="file-name" style={{ color: m.id === chosenModel ? 'var(--accent-ink)' : undefined }}>
                           {m.id === chosenModel ? '● ' : ''}{m.name}
                         </span>
                         <span className="file-size">{m.source === 'direct' ? t('onboarding.model.directSource', { provider: m.provider }) : m.provider}</span>
@@ -615,7 +615,7 @@ export const OnboardingWizard: React.FC<{
                         <i style={{
                           fontStyle: 'normal', width: 18, height: 18, borderRadius: '50%', display: 'inline-flex',
                           alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700,
-                          color: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 14%, transparent)',
+                          color: 'var(--accent-ink)', background: 'color-mix(in srgb, var(--accent-ink) 14%, transparent)',
                         }}>{(a.name || '?').slice(0, 1).toUpperCase()}</i>
                         {a.name}
                         {a.createdBy === 'system' && (
@@ -745,7 +745,7 @@ export const OnboardingWizard: React.FC<{
                   <span>{t('settings.mirror.toggle')}</span>
                 </div>
                 {likelyMainlandChina() && mirror !== 'china' && (
-                  <div className="hint" style={{ marginTop: 6, color: 'var(--accent)' }}>{t('settings.mirror.recommend')}</div>
+                  <div className="hint" style={{ marginTop: 6, color: 'var(--accent-ink)' }}>{t('settings.mirror.recommend')}</div>
                 )}
                 <div className="hint" style={{ marginTop: 6 }}>{t('settings.mirror.hint')}</div>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>

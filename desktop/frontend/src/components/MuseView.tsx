@@ -62,7 +62,7 @@ export const MuseView: React.FC<{
         <Sparkles size={16} /> {t('special.muse.title')}
         <span style={{ flex: 1 }} />
         <span className="conn-pill" style={{ fontSize: 12 }}>
-          <span className="dot" style={{ background: running ? 'var(--accent)' : 'var(--text-muted)' }} />
+          <span className="dot" style={{ background: running ? 'var(--accent-ink)' : 'var(--text-muted)' }} />
           {!status?.enabled ? t('special.muse.disabled') : running ? t('special.muse.running') : t('special.muse.idle')}
         </span>
         <button className="icon-btn" onClick={() => void load()}><RefreshCw size={13} /></button>

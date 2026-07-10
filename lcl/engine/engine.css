@@ -104,7 +104,7 @@
 /* 落点提示:目标上方间隙里一道插入线(与左栏分组拖动同款,见 sidebar2.css .t2s-group.drag-over::before)。 */
 .rb-slot.drag-over::before {
   content: ''; position: absolute; left: 4px; right: 4px; top: -3px;
-  height: 3px; border-radius: 999px; background: var(--accent); z-index: 3;
+  height: 3px; border-radius: 999px; background: var(--accent-ink); z-index: 3;
 }
 .rb-label { font-size: 13px; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rb { transition: width var(--duration-fast, 0.15s) ease; }
@@ -239,12 +239,12 @@
   --dv-tab-divider-color: transparent;
   --dv-separator-border: transparent; /* 组间分割线去掉 → 改为间隙 + 圆角浮卡(见 .dv-groupview) */
   --dv-active-sash-color: transparent; /* 满铺高亮弃用 → 换 1px 中线渐显(见下方「Resize divider」段) */
-  --dv-paneview-active-outline-color: var(--accent);
+  --dv-paneview-active-outline-color: var(--accent-ink);
   --dv-icon-hover-background-color: var(--overlay-light, rgba(127, 127, 127, 0.1));
   --dv-floating-box-shadow: var(--card-shadow, 0 8px 24px rgba(0, 0, 0, 0.2));
   --dv-tabs-container-scrollbar-color: var(--overlay-medium, rgba(127, 127, 127, 0.3));
   --dv-drag-over-background-color: var(--accent-light, rgba(127, 127, 127, 0.12));
-  --dv-drag-over-border: 1px solid var(--accent); /* Dockview 用的是 border 简写(非 -color),落点框描边 */
+  --dv-drag-over-border: 1px solid var(--accent-ink); /* Dockview 用的是 border 简写(非 -color),落点框描边 */
   --dv-tab-close-icon-color: var(--text-faint, var(--text-muted));
   --dv-border-radius: var(--radius-md, 12px);
 }
@@ -292,7 +292,7 @@
 }
 .dockview-theme-lcl .dv-sash-container .dv-sash:hover::after,
 .dockview-theme-lcl .dv-sash-container .dv-sash:active::after {
-  background: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent-ink) 55%, var(--border));
 }
 /* 邻侧为主区浮卡时线与热区贴到卡缘(±8px 与主区卡 padding 同步;data-lcl-shift 由 sashAffordance 校准,
    end=浮卡在右/下,start=浮卡在左/上;热区只扩到卡缘为止,不侵入卡内滚动条)。 */
@@ -317,7 +317,7 @@
   width: 12px;
   height: 3px;
   border-radius: 2px;
-  background: color-mix(in srgb, var(--accent) 60%, var(--border));
+  background: color-mix(in srgb, var(--accent-ink) 60%, var(--border));
   transform: translate(-50%, -50%);
   opacity: 0;
   pointer-events: none;
@@ -399,15 +399,15 @@
  * 故由 WorkspaceHost 按指针在 tab 条里算插入位置、画这根 accent 竖线(tab / 侧栏图标 任意 view 都适用)。 */
 .wb-drop-line {
   position: fixed; width: 2px; border-radius: 1px;
-  background: var(--accent); opacity: 0.55; /* 低调:去掉发光晕(高亮感来源),用主题色 + 半透明收成一根安静的插入光标 */
+  background: var(--accent-ink); opacity: 0.55; /* 低调:去掉发光晕(高亮感来源),用主题色 + 半透明收成一根安静的插入光标 */
   pointer-events: none; z-index: 9999; display: none;
 }
 /* 面板内分屏落点:半屏 accent 磨砂高亮(低调),盖在目标组正文对应半边。pointer-events:none 免挡 computeDropTarget 的 elementFromPoint。
  * transition 让高亮在上下左右半边之间平滑滑移。z-index 略低于竖线。 */
 .wb-drop-zone {
   position: fixed; border-radius: var(--radius-md, 10px);
-  background: var(--accent); opacity: 0.14;
-  outline: 1.5px solid var(--accent); outline-offset: -1.5px;
+  background: var(--accent-ink); opacity: 0.14;
+  outline: 1.5px solid var(--accent-ink); outline-offset: -1.5px;
   pointer-events: none; z-index: 9998; display: none;
   transition: left 0.12s ease, top 0.12s ease, width 0.12s ease, height 0.12s ease;
 }
@@ -505,7 +505,7 @@ html[data-dv-dragging] .t2s-side { -webkit-app-region: no-drag; }
 }
 /* 激活态只用 accent 着色,不填方块底 —— 融入背景,不突兀(去掉之前的胶囊底)。 */
 .dockview-theme-lcl .dv-tab.dv-active-tab .wb-tab--icon {
-  color: var(--accent);
+  color: var(--accent-ink);
   background: transparent;
 }
 
@@ -531,6 +531,6 @@ html[data-dv-dragging] .t2s-side { -webkit-app-region: no-drag; }
   background: var(--bg-card); color: var(--text); font: inherit; font-size: 13px; cursor: pointer;
   transition: border-color var(--duration-fast, .15s), background var(--duration-fast, .15s), transform var(--duration-fast, .15s);
 }
-.wb-home-new:hover { border-color: var(--accent); background: var(--overlay-light); transform: translateY(-1px); }
+.wb-home-new:hover { border-color: var(--accent-ink); background: var(--overlay-light); transform: translateY(-1px); }
 .wb-home-new:active { transform: translateY(0) scale(.98); }
-.wb-home-new > svg { color: var(--accent); }
+.wb-home-new > svg { color: var(--accent-ink); }

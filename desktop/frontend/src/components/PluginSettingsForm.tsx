@@ -195,7 +195,7 @@ export const PluginSettingsForm: React.FC<{
       <input ref={upRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => void onUpload(e)} />
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', minHeight: 18 }}>
         {err && <span style={{ fontSize: 12, color: 'var(--danger)' }}>{err}</span>}
-        {saved && <span style={{ fontSize: 12, color: 'var(--accent)' }}>{t('settings.plugins.saved')}</span>}
+        {saved && <span style={{ fontSize: 12, color: 'var(--accent-ink)' }}>{t('settings.plugins.saved')}</span>}
       </div>
     </div>
   )

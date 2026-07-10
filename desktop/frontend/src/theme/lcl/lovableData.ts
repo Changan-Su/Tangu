@@ -26,6 +26,8 @@ export function customSkinVars(color: string, dark: boolean): Record<string, str
   if (dark) {
     return {
       '--accent': color,
+      // 可读强调色:accent 作前景(文字/图标/选中高亮/聚焦边)时用;过深 seed 在暗底自动提亮,正常色恒等于 accent。
+      '--accent-ink': lum < 0.35 ? mix(c, [255, 255, 255], 0.5) : color,
       '--accent-hover': mix(c, [255, 255, 255], 0.18),
       '--accent-light': `rgba(${rgb},0.16)`,
       '--accent-rgb': rgb,
@@ -38,6 +40,8 @@ export function customSkinVars(color: string, dark: boolean): Record<string, str
   }
   return {
     '--accent': color,
+    // 同上:过浅 seed(如纸白)在亮底自动压深,免得选中文字/高亮与背景融为一体。
+    '--accent-ink': lum > 0.72 ? mix(c, [0, 0, 0], 0.5) : color,
     '--accent-hover': mix(c, [0, 0, 0], 0.14),
     '--accent-light': `rgba(${rgb},0.10)`,
     '--accent-rgb': rgb,

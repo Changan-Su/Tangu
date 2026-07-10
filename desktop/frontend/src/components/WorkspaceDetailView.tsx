@@ -82,7 +82,7 @@ export const WorkspaceDetailView: React.FC<{
           onClick={(e) => e.stopPropagation()}
           style={{
             width: '100%', minWidth: 0, background: 'var(--bg-card)', fontSize: 13, color: 'var(--text)',
-            border: 'var(--border-width) solid var(--accent)', borderRadius: 'var(--radius-sm)',
+            border: 'var(--border-width) solid var(--accent-ink)', borderRadius: 'var(--radius-sm)',
             padding: '1px 5px', outline: 'none',
           }}
         />

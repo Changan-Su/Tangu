@@ -49,7 +49,7 @@ export const ShortcutsTab: React.FC = () => {
     <div className="field">
       <div className="settings-sec">{t('settings.tab.shortcuts')}</div>
       <div className="hint" style={{ marginBottom: 10 }}>{t('settings.shortcuts.desc')}</div>
-      {note && <div className="hint" style={{ marginBottom: 8, color: 'var(--accent)' }}>{note}</div>}
+      {note && <div className="hint" style={{ marginBottom: 8, color: 'var(--accent-ink)' }}>{note}</div>}
       <div className="shortcut-list">
         {rows.map((r) => {
           const eff = effOf(r)

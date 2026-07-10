@@ -69,7 +69,7 @@ export const FeedbackModal: React.FC<{
             {activeSession ? t('feedback.logAttached', { name: sessionLogFilename(activeSession) }) : t('feedback.noSession')}
           </div>
           {msg ? (
-            <div style={{ fontSize: 12, marginTop: 8, color: done ? 'var(--accent)' : 'var(--danger)' }}>{msg}</div>
+            <div style={{ fontSize: 12, marginTop: 8, color: done ? 'var(--accent-ink)' : 'var(--danger)' }}>{msg}</div>
           ) : null}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
             <button className="btn" onClick={onClose} disabled={busy}>{t('settings.btn.cancel')}</button>

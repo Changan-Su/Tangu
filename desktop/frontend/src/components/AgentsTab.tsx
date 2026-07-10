@@ -324,13 +324,13 @@ export const AgentsTab: React.FC<{ cfg: TanguDesktopConfig; onEditingChange?: (e
               <GripVertical size={13} style={{ color: 'var(--text-faint)', flexShrink: 0 }} />
               <span className="file-name" style={{ flex: 1 }}>
                 <b>{a.name}</b>
-                {a.slug === defaultSlug && <span style={{ color: 'var(--accent)', marginLeft: 8, fontSize: 11 }}>· {t('settings.agents.isDefault')}</span>}
+                {a.slug === defaultSlug && <span style={{ color: 'var(--accent-ink)', marginLeft: 8, fontSize: 11 }}>· {t('settings.agents.isDefault')}</span>}
                 {a.createdBy === 'agent' && <span style={{ color: 'var(--text-muted)', marginLeft: 8, fontSize: 11 }}>· {t('settings.agents.byAgent')}</span>}
                 {a.createdBy === 'system' && <span style={{ color: 'var(--text-muted)', marginLeft: 8, fontSize: 11 }}>· {t('agent.badge.system')}</span>}
                 {a.description && <span style={{ color: 'var(--text-muted)', marginLeft: 8, fontSize: 12 }}>{a.description.length > 60 ? `${a.description.slice(0, 60)}…` : a.description}</span>}
               </span>
               <button className="icon-btn" title={a.cloudSync ? t('settings.agents.cloudSyncOn') : t('settings.agents.cloudSyncOff')}
-                onClick={() => toggleCloudSync(a)} style={a.cloudSync ? { color: 'var(--accent)' } : { opacity: 0.5 }}><Cloud size={13} /></button>
+                onClick={() => toggleCloudSync(a)} style={a.cloudSync ? { color: 'var(--accent-ink)' } : { opacity: 0.5 }}><Cloud size={13} /></button>
               {a.slug !== defaultSlug && <button className="icon-btn" title={t('settings.agents.setDefault')} onClick={() => setDefault(a.slug)}><Star size={13} /></button>}
               <button className="icon-btn" title={t('settings.agents.viewMem')} onClick={() => setViewing(a)}><BookOpen size={13} /></button>
               <button className="icon-btn" title={t('common.edit')} onClick={() => startEdit(a)}><Pencil size={13} /></button>

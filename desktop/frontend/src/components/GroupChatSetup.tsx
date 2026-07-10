@@ -172,10 +172,10 @@ export const GroupChatSetup: React.FC<{
                     return (
                       <button key={a.slug} onClick={() => toggleSaved(a.slug)} style={{
                         display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', padding: '8px 10px', borderRadius: 8,
-                        border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`,
+                        border: `1px solid ${on ? 'var(--accent-ink)' : 'var(--border)'}`,
                         background: on ? 'var(--accent-soft)' : 'transparent', color: 'inherit', cursor: 'pointer',
                       }}>
-                        <span style={{ width: 16, height: 16, borderRadius: 4, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`, background: on ? 'var(--accent)' : 'transparent' }}>
+                        <span style={{ width: 16, height: 16, borderRadius: 4, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${on ? 'var(--accent-ink)' : 'var(--border)'}`, background: on ? 'var(--accent-ink)' : 'transparent' }}>
                           {on && <Check size={12} color="var(--on-accent)" />}
                         </span>
                         <span style={{ flex: 1, minWidth: 0 }}>
@@ -194,7 +194,7 @@ export const GroupChatSetup: React.FC<{
             {tempAgents.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
                 {tempAgents.map((a) => (
-                  <div key={a.slug} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--accent)', background: 'var(--accent-soft)' }}>
+                  <div key={a.slug} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--accent-ink)', background: 'var(--accent-soft)' }}>
                     <UserPlus size={14} style={{ flexShrink: 0, opacity: 0.8 }} />
                     <span style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ fontSize: 13, fontWeight: 600 }}>{a.name}</span>

@@ -293,7 +293,7 @@ export const WeChatView: React.FC<{
               <div className="special-panel-card" style={{ maxHeight: 340, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 11 }}>
                 {convo.map((m) => (
                   <div key={m.id} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: m.role === 'user' ? 'var(--accent)' : 'var(--text-muted)' }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: m.role === 'user' ? 'var(--accent-ink)' : 'var(--text-muted)' }}>
                       {m.role === 'user' ? t('special.wechat.roleUser') : 'Tangu'}
                     </span>
                     <span style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', color: m.is_error ? 'var(--danger)' : 'var(--text)' }}>

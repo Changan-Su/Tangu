@@ -53,9 +53,9 @@
 }
 .ibx-chip:hover { color: var(--text); }
 .ibx-chip.on {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--accent-ink) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent-ink) 45%, transparent);
+  color: var(--accent-ink);
 }
 
 /* 两行邮件行(t2s-srow 是 28px 单行,不够放 发件人+标题+摘要) */
@@ -74,7 +74,7 @@
 }
 .ibx-row:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
 .ibx-row.active {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-ink) 12%, transparent);
 }
 .ibx-row.active::before {
   content: '';
@@ -84,7 +84,7 @@
   bottom: 8px;
   width: 2.5px;
   border-radius: 2px;
-  background: var(--accent);
+  background: var(--accent-ink);
 }
 .ibx-dotcol {
   width: 8px;
@@ -111,8 +111,8 @@
   justify-content: center;
   font-size: 12px;
   font-weight: 700;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent-ink) 14%, transparent);
   margin-top: 1px;
 }
 .ibx-main { flex: 1; min-width: 0; }
@@ -202,8 +202,8 @@
   gap: 5px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent-ink) 12%, transparent);
   border-radius: 999px;
   padding: 3px 10px;
 }

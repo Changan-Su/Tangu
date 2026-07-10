@@ -91,6 +91,8 @@ export function customSkinVars(color: string, dark: boolean): Record<string, str
   if (dark) {
     return {
       '--accent': color,
+      // 可读强调色(与 theme/lcl/lovableData.ts 保持同步):前景场景用,过深在暗底提亮,正常色恒等。
+      '--accent-ink': lum < 0.35 ? mix(c, [255, 255, 255], 0.5) : color,
       '--accent-hover': mix(c, [255, 255, 255], 0.18),
       '--accent-light': `rgba(${rgb},0.16)`,
       '--accent-rgb': rgb,
@@ -103,6 +105,8 @@ export function customSkinVars(color: string, dark: boolean): Record<string, str
   }
   return {
     '--accent': color,
+    // 同上:过浅 seed 在亮底压深(选中文字/高亮可读)。
+    '--accent-ink': lum > 0.72 ? mix(c, [0, 0, 0], 0.5) : color,
     '--accent-hover': mix(c, [0, 0, 0], 0.14),
     '--accent-light': `rgba(${rgb},0.10)`,
     '--accent-rgb': rgb,

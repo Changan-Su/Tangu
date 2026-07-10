@@ -460,7 +460,7 @@ export const Composer2: React.FC<{
                 <span className="attach-chip" key={`ws-${a.name}-${i}`} title={t('input.wsUploadTitle', { name: a.name })}>
                   {a.mimeType.startsWith('image/')
                     ? <img src={`data:${a.mimeType};base64,${a.data}`} alt={a.name} />
-                    : <FileText size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />}
+                    : <FileText size={14} style={{ color: 'var(--accent-ink)', flexShrink: 0 }} />}
                   <span>{a.name}</span>
                   <span style={{ fontSize: 10, color: 'var(--text-faint)', flexShrink: 0 }}>{t('input.toWorkspace')}</span>
                   <button title={t('input.remove')} onClick={() => setWsFiles(wsFiles.filter((_, j) => j !== i))}><X size={12} /></button>
@@ -472,7 +472,7 @@ export const Composer2: React.FC<{
             <div className="t2c-chiprow">
               {pinnedSkills.map((s) => (
                 <span className="attach-chip" key={`skill-${s.id}`} title={t('input.skillChipTitle')}>
-                  <Sparkles size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                  <Sparkles size={13} style={{ color: 'var(--accent-ink)', flexShrink: 0 }} />
                   <span>{s.name}</span>
                   <button title={t('input.remove')} onClick={() => setPinnedSkills(pinnedSkills.filter((x) => x.id !== s.id))}><X size={12} /></button>
                 </span>

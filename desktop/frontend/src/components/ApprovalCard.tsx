@@ -29,7 +29,7 @@ export const ApprovalCard: React.FC<{
   return (
     <div className={`approval-card${resolved ? ' resolved' : ''}`}>
       <div className="approval-title">
-        <ShieldQuestion size={15} style={{ color: 'var(--accent)' }} />
+        <ShieldQuestion size={15} style={{ color: 'var(--accent-ink)' }} />
         {t('approval.requestExec', { name: req.name })}
         {resolved && (
           <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-faint)' }}>

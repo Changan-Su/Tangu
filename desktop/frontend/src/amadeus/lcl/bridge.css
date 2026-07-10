@@ -16,7 +16,7 @@
   --text: var(--ink);
   --text-sec: var(--ink-soft);
   --text-muted: var(--ink-faint);
-  --primary: var(--accent);
+  --primary: var(--accent-ink);
   --primary-2: var(--accent-hover);
   --on-primary: var(--on-accent);
   --selection: var(--accent-soft);
@@ -41,7 +41,7 @@
   --surface-2: var(--bg-card);
   --border-strong: var(--overlay-strong);
   --text-sec: var(--text-light);
-  --primary: var(--accent);
+  --primary: var(--accent-ink);
   --primary-2: var(--accent-hover);
   --on-primary: var(--on-accent);
   --selection: var(--accent-light);
