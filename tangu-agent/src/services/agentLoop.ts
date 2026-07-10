@@ -975,7 +975,7 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
       }
       if (!skipCompact && modelId && estPrompt > CONTEXT_WINDOW_TOKENS * FORCE_COMPACT_RATIO) {
         void publish(runId, 'status', { phase: 'compacting', forced: true, iteration });
-        const cr = await compactSession(sessionId, modelId);
+        const cr = await compactSession(sessionId, modelId, appId);
         if (cr.ok && cr.summary) {
           foldWorkingWithSummary(workingMessages, cr.summary);
           lastRealPromptTokens = 0;

@@ -129,7 +129,9 @@ async function complete(label: string, modelId: string, system: string, transcri
     const payload = await deps().brain.llm.buildProviderPayload({
       model, apiModelId,
       messages: [{ role: 'system', content: system }, { role: 'user', content: transcript }] as ChatMessage[],
-      projectSource: '', temperature: 0.3, maxTokens, stream: true,
+      projectSource: '', // 不叠项目层提示词
+      usageSource: 'tangu', // 记账归进 Tangu 桶(本地特性,恒 tangu;否则云端兜底记 tangu-brain)
+      temperature: 0.3, maxTokens, stream: true,
       provider: (model as any)?.provider,
     } as any);
     const res = await deps().brain.llm.streamProviderCompletion({ apiKey, baseUrl, payload, provider: (model as any)?.provider });

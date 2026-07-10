@@ -27,6 +27,9 @@ export interface BuildPayloadOpts {
   apiModelId: string;
   messages: ChatMessage[];
   projectSource?: string;
+  /** 记账归因(api_usage_logs.project_source),与提示词分层解耦:后台任务(压缩/Historian)传 appId
+   *  归进应用桶而 projectSource 留空保持指令干净。缺省时云端盖印回退 projectSource。 */
+  usageSource?: string;
   temperature?: number;
   maxTokens?: number;
   tools?: Tool[];

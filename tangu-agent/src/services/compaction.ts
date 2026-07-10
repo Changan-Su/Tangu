@@ -52,7 +52,7 @@ export async function getLatestSummary(
  * 已有检查点 → 增量压缩（已有摘要 + 其后新消息），写一条更晚 through_timestamp 的新行。
  * 无可压缩内容 / 总结失败 → {ok:false}。绝不抛。
  */
-export async function compactSession(sessionId: string, modelId: string): Promise<CompactResultPersisted> {
+export async function compactSession(sessionId: string, modelId: string, appId = 'tangu'): Promise<CompactResultPersisted> {
   if (!sessionId || !modelId) return { ok: false, reason: 'missing session or model' };
 
   let rows: any[];
@@ -94,7 +94,8 @@ export async function compactSession(sessionId: string, modelId: string): Promis
         { role: 'system', content: COMPACT_SYSTEM_PROMPT },
         { role: 'user', content: transcript },
       ] as ChatMessage[],
-      projectSource: '',
+      projectSource: '', // 不叠项目层提示词
+      usageSource: appId, // 但记账归进应用桶(否则云端兜底记 tangu-brain)
       temperature: 0.3,
       maxTokens: SUMMARY_MAX_TOKENS,
       stream: true,

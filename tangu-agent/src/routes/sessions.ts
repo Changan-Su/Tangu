@@ -281,7 +281,7 @@ router.post('/agent/sessions/:id/compact', authMiddleware, async (req: AuthReque
     if (!s) return res.status(404).json({ detail: 'Session not found' });
     const modelId = (typeof req.body?.model_id === 'string' && req.body.model_id) || s.model_id || '';
     if (!modelId) return res.status(400).json({ detail: '需要 model_id 才能压缩（会话未设模型）' });
-    const r = await compactSession(req.params.id, modelId);
+    const r = await compactSession(req.params.id, modelId, (s as any).app_id || 'tangu');
     if (!r.ok) return res.json({ ok: false, reason: r.reason });
     res.json({ ok: true, summarizedCount: r.summarizedCount, throughTimestamp: r.throughTimestamp });
   } catch (e: any) {
