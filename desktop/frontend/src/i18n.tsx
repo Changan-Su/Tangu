@@ -233,6 +233,11 @@ const zh: Dict = {
   'achievements.a.special-agent.desc': '开启 Muse 或 Historian 后台智能体',
   'achievements.a.first-image.title': '妙笔生花',
   'achievements.a.first-image.desc': '让 agent 生成第一张图片',
+  'achievements.a.debug-toast.title': '秘密按钮',
+  'achievements.a.debug-toast.desc': '？？？',
+  'settings.developer.achToastLabel': '成就弹窗',
+  'settings.developer.achToast': '触发成就弹窗',
+  'settings.developer.achToastHint': '调试成就达成动画,可重复触发;它本身也是一个隐藏成就(奖励只发一次)。',
   // ── Forsion 应用市场 ──
   'market.title': '应用市场',
   'market.subtitle': '浏览并安装社区的技能、智能体与插件',
@@ -1031,6 +1036,11 @@ const en: Dict = {
   'achievements.a.special-agent.desc': 'Enable Muse or Historian',
   'achievements.a.first-image.title': 'Picture This',
   'achievements.a.first-image.desc': 'Have an agent generate an image',
+  'achievements.a.debug-toast.title': 'Secret Button',
+  'achievements.a.debug-toast.desc': '???',
+  'settings.developer.achToastLabel': 'Achievement toast',
+  'settings.developer.achToast': 'Fire achievement toast',
+  'settings.developer.achToastHint': 'Debug the unlock animation, repeatable; secretly an achievement itself (reward granted once).',
   // ── Forsion Market ──
   'market.title': 'Market',
   'market.subtitle': 'Browse and install community skills, agents and plugins',

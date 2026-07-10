@@ -7,7 +7,7 @@
  */
 import type { LucideIcon } from 'lucide-react'
 import {
-  Bookmark, Bot, Compass, Crown, Database, FileText, Files, Image, Layers, Library,
+  Bookmark, Bot, Bug, Compass, Crown, Database, FileText, Files, Image, Layers, Library,
   LogIn, MessageCircle, MessagesSquare, Palette, Send, Sparkles, Store, Users,
 } from 'lucide-react'
 
@@ -35,12 +35,14 @@ export interface SeriesDef {
 
 export const OFFICIAL_SERIES: SeriesDef[] = [
   {
-    id: 'starter', icon: Compass, medals: { bronze: 10, silver: 25, gold: 50 },
+    id: 'starter', icon: Compass, medals: { bronze: 10, silver: 25, gold: 55 },
     achievements: [
       { id: 'first-login', event: 'account.login', goal: 1, points: 10, icon: LogIn },
       { id: 'theme-change', event: 'theme.change', goal: 1, points: 10, icon: Palette },
       { id: 'market-install', event: 'market.install', goal: 1, points: 15, icon: Store },
       { id: 'space-save', event: 'space.save', goal: 1, points: 15, icon: Bookmark },
+      // 隐藏彩蛋:开发者模式的「触发成就弹窗」调试按钮(可重复弹 toast,奖励只发一次;desc 恒 ???)
+      { id: 'debug-toast', event: 'debug.toast', goal: 1, points: 5, icon: Bug },
     ],
   },
   {

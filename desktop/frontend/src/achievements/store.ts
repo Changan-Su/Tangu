@@ -129,6 +129,12 @@ export function registerPluginSeries(pluginId: string, def: PluginSeriesInput): 
   }
 }
 
+/** 开发者模式「触发成就弹窗」:首次跨线正常得成就(奖励一次),之后每次调用都重放 toast(队列去重防叠播)。 */
+export function debugFireToast(): void {
+  track('debug.toast')
+  useAchievements.setState((s) => (s.queue.includes('debug-toast') ? s : { queue: [...s.queue, 'debug-toast'] }))
+}
+
 /** 插件停用时由宿主 teardown 调用。 */
 export function unregisterPluginAchievements(pluginId: string): void {
   useAchievements.setState((s) => (s.pluginSeries.some((x) => x.pluginId === pluginId)
