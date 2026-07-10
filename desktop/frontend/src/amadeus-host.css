@@ -143,7 +143,8 @@
 .t2s-srow.dragging { opacity: 0.4; }
 
 /* ── 右栏面板(原生 Tangu token,不在 .am-app 内) ── */
-.amx-panel { height: 100%; overflow: auto; background: var(--bg); color: var(--text); padding: 4px 6px 12px; }
+/* 透明融入:侧栏视图不自刷纸面色,透 dockview 侧栏底(--sidebar-bg,与 ribbon 统一 chrome)。 */
+.amx-panel { height: 100%; overflow: auto; background: transparent; color: var(--text); padding: 4px 6px 12px; }
 .amx-panel-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint, var(--text-muted)); padding: 10px 8px 6px; }
 .amx-panel-empty { padding: 14px 10px; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
 .amx-list { display: flex; flex-direction: column; gap: 1px; }
@@ -581,7 +582,7 @@
 .amx-cal-mcell .amx-cal-chip-ev { cursor: grab; }
 
 /* Calendar 侧栏配置视图 */
-.amx-calcfg { height: 100%; overflow-y: auto; background: var(--bg); color: var(--text); padding: 10px 12px; }
+.amx-calcfg { height: 100%; overflow-y: auto; background: transparent; color: var(--text); padding: 10px 12px; } /* 透明融入侧栏底 */
 .amx-calcfg-head { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
 .amx-calcfg-empty { font-size: 12.5px; color: var(--text-faint, var(--text-muted)); padding: 8px 2px; }
 .amx-calcfg-list { display: flex; flex-direction: column; gap: 2px; }
@@ -597,7 +598,7 @@
 .amx-calcfg-hint { margin-top: 10px; font-size: 11px; color: var(--text-faint, var(--text-muted)); line-height: 1.5; }
 
 /* Calendar 右栏竖向分屏:mini 月历(auto)在上,配置列表(可滚)在下。 */
-.amx-calside { display: flex; flex-direction: column; height: 100%; background: var(--bg); color: var(--text); }
+.amx-calside { display: flex; flex-direction: column; height: 100%; background: transparent; color: var(--text); } /* 透明融入侧栏底 */
 .amx-calside .amx-calcfg { flex: 1; min-height: 0; height: auto; }
 
 /* mini 月历 */
@@ -624,7 +625,7 @@
 .amx-cal-nowlabel { position: absolute; right: 4px; transform: translateY(-50%); font-size: 10px; font-weight: 600; color: var(--accent, #6c5ce7); background: var(--bg); padding: 0 3px; border-radius: 3px; white-space: nowrap; pointer-events: none; }
 
 /* ── ToDo List View ── */
-.amx-todo { height: 100%; overflow-y: auto; background: var(--bg); color: var(--text); padding: 6px 0; }
+.amx-todo { height: 100%; overflow-y: auto; background: transparent; color: var(--text); padding: 6px 0; } /* 透明融入侧栏底 */
 .amx-todo-empty { padding: 18px; color: var(--text-faint, var(--text-muted)); font-size: 13px; text-align: center; }
 .amx-todo-group { border-bottom: 1px solid var(--border); }
 .amx-todo-ghead { width: 100%; display: flex; align-items: center; gap: 8px; border: none; background: transparent; color: var(--text); font: inherit; padding: 8px 12px; cursor: pointer; }

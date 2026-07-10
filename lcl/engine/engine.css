@@ -221,8 +221,10 @@
 /* ===== Dockview 的 LCL 皮肤:把 --dv-* 别名到 LCL token(叠在 dockview-theme-light|dark 之上) ===== */
 .dockview-theme-lcl {
   --dv-tabs-and-actions-container-height: 36px;
-  --dv-background-color: var(--bg);
-  --dv-group-view-background-color: var(--bg);
+  /* 2026-07-10:侧栏去掉「第二层纸面底」——组底/空区一律 --sidebar-bg 与 ribbon/tab 栏连成统一 chrome,
+     纸面(--bg)只由中心主区的 .dv-react-part 圆角卡自己画(见下方主区卡片规则)。 */
+  --dv-background-color: var(--sidebar-bg);
+  --dv-group-view-background-color: var(--sidebar-bg);
   --dv-tabs-and-actions-container-background-color: var(--sidebar-bg);
   /* 透明:激活组的激活 tab 底由内层 .wb-tab 圆角胶囊提供;若给本变量上色,Dockview 通用高优先级规则
      会把方形底铺到外层 .dv-tab(radius:0)上 → 焦点在主区时 tab 变方。见 .wb-tab 激活规则。 */
