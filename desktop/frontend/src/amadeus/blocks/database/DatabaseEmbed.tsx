@@ -373,9 +373,9 @@ function Cell({
   const openLink = (raw: string): void => {
     const t = linkTarget(raw)
     const st = usePageStore.getState()
-    if (resolvePageName(t, st.pages)) return void st.openWikiLink(t.replace(/\.md$/i, ''))
+    if (resolvePageName(t, st.pages, pagePath)) return void st.openWikiLink(t.replace(/\.md$/i, ''), pagePath)
     if (/\.[a-z0-9]{1,8}$/i.test(t) && !/\.md$/i.test(t)) return void amadeus.openAttachment(pagePath, t)
-    st.openWikiLink(t.replace(/\.md$/i, ''))
+    st.openWikiLink(t.replace(/\.md$/i, ''), pagePath) // 未解析 → 询问创建(源 = 本 .db 所在处)
   }
 
   // 自定义注册类型:交给注册表的 Cell(value 已按 baseType 折算)。

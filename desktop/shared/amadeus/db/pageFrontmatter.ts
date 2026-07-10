@@ -56,6 +56,29 @@ export function setFmExtraOnSource(raw: string, patch: Record<string, unknown>):
   return body ? `${fmBlock}\n\n${body}` : `${fmBlock}\n`
 }
 
+/** 在 fmExtra(manifest 里的外来 frontmatter 文本)上应用 patch(值 = undefined 删键),返回新文本。
+ *  与 setFmExtraOnSource 同一往返(stringifyYaml);区别:fmExtra 非空但 YAML 解析失败 → 返回 null
+ *  拒改(内存路径守住用户手写内容;外科路径保持既有的按-{} 折算语义,两者不对称是有意的)。 */
+export function patchFmExtraText(fmExtra: string, patch: Record<string, unknown>): string | null {
+  let obj: Record<string, unknown>
+  if (!fmExtra.trim()) obj = {}
+  else {
+    try {
+      const v: unknown = parseYaml(fmExtra)
+      if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+      obj = v as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }
+  for (const [k, v] of Object.entries(patch)) {
+    if (isReserved(k)) continue
+    if (v === undefined) delete obj[k]
+    else obj[k] = v
+  }
+  return Object.keys(obj).length ? stringifyYaml(obj).replace(/\n+$/, '') : ''
+}
+
 /** 导入/列发现:按一个 YAML frontmatter 值推断列类型。 */
 export function inferColumnType(value: unknown): ColumnType {
   if (typeof value === 'boolean') return 'checkbox'

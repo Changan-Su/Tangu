@@ -83,13 +83,44 @@ export function pageKey(pathOrName: string): string {
   return seg.replace(/\.md$/i, '').trim().toLowerCase()
 }
 
+const normSep = (p: string): string => p.replace(/\\/g, '/')
+
+/** Full-path key: separators normalized, .md stripped, lowercased (path-qualified link matching). */
+const pathKey = (p: string): string => normSep(p).replace(/\.md$/i, '').trim().toLowerCase()
+
 /**
- * Resolve a link/name to an existing page path by basename, case-insensitively —
- * the same rule the store uses to open a [[wikilink]]. Returns null when no page matches.
+ * Resolve a link/name to an existing page path — the one rule every consumer shares
+ * (editor click / autocomplete / graph / backlinks / server vendor copy).
+ *
+ * - Path-qualified name (contains '/'): exact path match (case-insensitive, .md implied)
+ *   or null — it deliberately does NOT fall back to basename, so `[[a/Foo]]` can never
+ *   silently bind to `b/Foo.md`.
+ * - Bare name, with `sourcePath` context: same-folder sibling → the source's own
+ *   `<base>.fd/` children → vault-wide first match.
+ * - Bare name, no context: vault-wide first match (callers pass a sorted list, so ties
+ *   are deterministic — identical to the historical behavior).
  */
-export function resolvePageName(name: string, pages: string[]): string | null {
-  const target = pageKey(name)
+export function resolvePageName(name: string, pages: string[], sourcePath?: string): string | null {
+  const raw = name.trim()
+  if (!raw) return null
+  if (/[\\/]/.test(raw)) {
+    const key = pathKey(raw).replace(/^\/+/, '')
+    return pages.find((p) => pathKey(p) === key) ?? null
+  }
+  const target = pageKey(raw)
   if (!target) return null
+  if (sourcePath) {
+    const src = normSep(sourcePath)
+    const dir = src.includes('/') ? src.slice(0, src.lastIndexOf('/') + 1) : ''
+    const sib = pages.find((p) => {
+      const q = normSep(p)
+      return q.startsWith(dir) && !q.slice(dir.length).includes('/') && pageKey(p) === target
+    })
+    if (sib) return sib
+    const fd = `${src.replace(/\.md$/i, '')}.fd/`.toLowerCase()
+    const child = pages.find((p) => normSep(p).toLowerCase().startsWith(fd) && pageKey(p) === target)
+    if (child) return child
+  }
   return pages.find((p) => pageKey(p) === target) ?? null
 }
 

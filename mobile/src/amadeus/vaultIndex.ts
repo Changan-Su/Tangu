@@ -1,6 +1,6 @@
 // 移植自 desktop/electron/amadeus/fs/vaultIndex.ts。~100% 纯内存逻辑;唯一 IO(readEntry 的 fs.readFile)
 // 改走 vault.readTextAbs(Capacitor)。links/compiler 是 isomorphic 纯 JS,原样复用。
-import { linkTarget, pageKey, parseEmbeds, parseTags, parseWikiLinks, stripForIndex } from '@amadeus-shared/links'
+import { linkTarget, pageKey, parseEmbeds, parseTags, parseWikiLinks, resolvePageName, stripForIndex } from '@amadeus-shared/links'
 import { parseBody, stripFrontmatter } from '@amadeus-shared/compiler'
 import type { BacklinkRef, SearchHit, TagCount } from '@amadeus-shared/ipc'
 import type { VaultManager } from './vaultManager'
@@ -141,13 +141,15 @@ export class VaultIndex {
   }
 
   backlinks(targetPath: string): BacklinkRef[] {
-    const tk = pageKey(targetPath)
-    if (!tk) return []
+    if (!pageKey(targetPath)) return []
+    // 与 desktop vaultIndex 同款:原始链接按源上下文重解析,重名不互相污染。
+    const pages = [...this.entries.keys()].sort()
     const out: BacklinkRef[] = []
     for (const e of this.entries.values()) {
       if (e.path === targetPath) continue
-      if (!e.links.some((l) => pageKey(l) === tk)) continue
-      out.push({ path: e.path, title: e.title, snippet: backlinkSnippet(e.text, tk) })
+      const hits = (l: string): boolean => resolvePageName(l, pages, e.path) === targetPath
+      if (!e.links.some(hits)) continue
+      out.push({ path: e.path, title: e.title, snippet: backlinkSnippet(e.text, hits) })
     }
     out.sort((a, b) => a.title.localeCompare(b.title))
     return out
@@ -183,11 +185,11 @@ function countNewlines(s: string, end: number): number {
   return n
 }
 
-function backlinkSnippet(text: string, tk: string): string {
+function backlinkSnippet(text: string, isMatch: (target: string) => boolean): string {
   const re = /\[\[([^\]\n]+)\]\]/g
   let m: RegExpExecArray | null
   while ((m = re.exec(text))) {
-    if (pageKey(linkTarget(m[1])) !== tk) continue
+    if (!isMatch(linkTarget(m[1]))) continue
     let start = text.lastIndexOf('\n', m.index)
     start = start < 0 ? 0 : start + 1
     let end = text.indexOf('\n', m.index)

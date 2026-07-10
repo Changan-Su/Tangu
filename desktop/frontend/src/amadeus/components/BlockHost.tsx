@@ -310,7 +310,7 @@ export const BlockHost = memo(function BlockHost({
             {embed && embed !== 'loading' && (
               <button
                 className="embed-src"
-                onClick={() => openWikiLink(stripPageBasename(embed.owner))}
+                onClick={() => void usePageStore.getState().loadPage(embed.owner)} // 已持有全路径,不走 basename 往返(重名会开错)
                 title="去源头编辑"
               >
                 {stripPageBasename(embed.owner)} ↗
@@ -334,7 +334,7 @@ export const BlockHost = memo(function BlockHost({
               focusPlace={null}
               onFocused={noop}
               requestSelfFocus={noop}
-              onOpenWiki={(name) => openWikiLink(name)}
+              onOpenWiki={(name) => openWikiLink(name, embed.owner)} // 嵌入内容里的链接按其所有者解析
               getPageNames={() => usePageStore.getState().pages}
             />
           ) : (
@@ -380,7 +380,7 @@ export const BlockHost = memo(function BlockHost({
             focusPlace={focusPlace}
             onFocused={() => consumeFocus(blockId)}
             requestSelfFocus={(place) => requestFocus(blockId, place)}
-            onOpenWiki={(name) => openWikiLink(name)}
+            onOpenWiki={(name) => openWikiLink(name, pagePath)}
             onInsertEmbed={(t) => usePageStore.getState().insertEmbed(t)}
             getPageNames={() => usePageStore.getState().pages}
           />

@@ -24,7 +24,8 @@ import { openNote, openDb } from './amadeusNav'
 import { renameDb } from '@amadeus/lib/dbFileOps'
 import { emptyDb, serializeDb } from '@amadeus-shared/db/schema'
 import { useRecentViews } from './recentViews'
-import { buildTree, type TreeNode } from '@amadeus/lib/pageTree'
+import { buildTree, mergeFdNotes, type TreeNode } from '@amadeus/lib/pageTree'
+import { fdDirOf, isNoteMd } from '@amadeus/lib/fd'
 import { compile, parsePageSource } from '@amadeus-shared/compiler'
 import { recordNav, useWorkspace, activeMainPanel } from '@lcl/engine'
 import type { ViewProps } from '@lcl/engine'
@@ -50,6 +51,15 @@ const prefixesOf = (p: string): string[] => {
 async function renameAt(path: string, newName: string): Promise<void> {
   if (ps().activePage !== path) await ps().loadPage(path)
   await ps().renamePage(newName)
+}
+
+/** 删除确认文案:笔记带 .fd 子文件时点明「N 个子文件一并删除」(级联在 pageStore.deletePage)。 */
+function deleteNoteMsg(p: string): string {
+  const fd = fdDirOf(p)
+  const n = [...ps().pages, ...ps().files].filter((x) => x.startsWith(`${fd}/`)).length
+  return n > 0
+    ? `删除笔记「${baseName(p)}」?其中包含 ${n} 个子文件,将一并删除。此操作不可撤销。`
+    : `删除笔记「${baseName(p)}」?此操作不可撤销。`
 }
 
 /** 跨视图定位信号:编辑器面包屑点击 → 左栏笔记库展开 / 滚动 / 高亮该 folder 或 page。n 自增以重触发同路径。 */
@@ -104,7 +114,7 @@ function Breadcrumb() {
               // 靠近标题的段先淡入(delay 递减);收起态无 delay,同步淡出(见 CSS)。
               <span className="amx-crumb-seg" key={`${p.target ?? 'gap'}-${i}`} style={{ '--d': `${(n - 1 - i) * 25}ms` } as CSSProperties}>
                 {p.target ? (
-                  <button className="amx-crumb" title={p.target} onClick={() => requestLocate(p.target!)}>{p.seg}</button>
+                  <button className="amx-crumb" title={p.target} onClick={() => requestLocate(p.target!)}>{p.seg.replace(/\.fd$/i, '')}</button>
                 ) : (
                   <span className="amx-crumb amx-crumb-ellipsis" title={activePage}>…</span>
                 )}
@@ -203,7 +213,8 @@ export function AmadeusPagesView() {
 
   const q = query.trim().toLowerCase()
   // 嵌套树:文件夹在前、字母序,空文件夹可见;笔记之外的所有文件(附件/.db/…)也进树,Obsidian 语义。
-  const tree = useMemo(() => buildTree([...pages, ...files], folders), [pages, files, folders])
+  // mergeFdNotes:X.fd 文件夹隐藏、孩子挂上 X.md 节点(Notion「笔记即文件夹」);孤儿 .fd 保持普通文件夹。
+  const tree = useMemo(() => mergeFdNotes(buildTree([...pages, ...files], folders)), [pages, files, folders])
   const matches = useMemo(
     () => (q ? [...pages, ...files].filter((p) => baseName(p).toLowerCase().includes(q)) : []),
     [q, pages, files],
@@ -261,14 +272,28 @@ export function AmadeusPagesView() {
     })().catch((e: unknown) => window.alert(`新建 Base 失败:${e instanceof Error ? e.message : String(e)}`))
   }
 
-  const row = (path: string, depth = 0): ReactNode => {
+  /** 拖拽悬停在「合并笔记节点」上 = 拖进它的 .fd(Notion 语义);守卫拖自己/拖回原处/拖进自己子树。 */
+  const mergedDragOver = (e: RDragEvent<HTMLElement>, notePath: string, fd: string): void => {
+    if (!dragPath) return
+    e.stopPropagation()
+    if (dragPath === notePath || parentOf(dragPath) === fd) return
+    if (isNoteMd(dragPath)) {
+      const dfd = fdDirOf(dragPath)
+      if (fd === dfd || fd.startsWith(`${dfd}/`)) return // 不能把笔记拖进它自己的子树
+    }
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (dragOver !== fd) setDragOver(fd)
+  }
+
+  const row = (path: string, depth = 0, merged?: { fd: string; open: boolean; count: number }): ReactNode => {
     const isNote = isNotePath(path)
     const ctxKind = isNote ? 'page' : 'asset'
     return (
     <button
       key={path}
       ref={(el) => { if (path === flash) flashRef.current = el }}
-      className={`t2s-srow${path === activePage ? ' active' : ''}${path === flash ? ' amx-flash' : ''}${path === dragPath ? ' dragging' : ''}`}
+      className={`t2s-srow${path === activePage ? ' active' : ''}${path === flash ? ' amx-flash' : ''}${path === dragPath ? ' dragging' : ''}${merged && dragPath && dragOver === merged.fd ? ' amx-drop-into' : ''}`}
       style={depth > 0 ? { paddingLeft: 18 + depth * 14 } : undefined}
       onClick={(e) => { isNote ? void openNote(path, { newTab: e.metaKey || e.ctrlKey }) : isDbPath(path) ? openDb(path) : void amadeus.openVaultFile(path).catch(() => {}) }}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ kind: ctxKind, path, x: e.clientX, y: e.clientY }) }}
@@ -281,8 +306,19 @@ export function AmadeusPagesView() {
         setDragPath(path)
       }}
       onDragEnd={() => { setDragPath(null); setDragOver(null) }}
+      onDragOver={merged ? (e) => mergedDragOver(e, path, merged.fd) : undefined}
+      onDragLeave={merged ? () => { if (dragOver === merged.fd) setDragOver(null) } : undefined}
+      onDrop={merged ? (e) => { e.preventDefault(); e.stopPropagation(); dropTo(merged.fd) } : undefined}
       title={path}
     >
+      {merged && (
+        <span
+          className={`t2s-chev amx-note-chev${merged.open ? ' open' : ''}`}
+          onClick={(e) => { e.stopPropagation(); toggle(merged.fd) }}
+        >
+          <ChevronRight size={12} />
+        </span>
+      )}
       {renaming === path ? (
         <input
           ref={renameRef}
@@ -301,6 +337,7 @@ export function AmadeusPagesView() {
           {isNote ? baseName(path) : path.split(/[\\/]/).pop()}
         </span>
       )}
+      {merged && renaming !== path && <span className="t2s-count">{merged.count}</span>}
       <span className="t2s-srow-menu" onClick={(e) => { e.stopPropagation(); setMenu({ kind: ctxKind, path, x: e.clientX, y: e.clientY }) }}>
         <MoreHorizontal size={14} />
       </span>
@@ -311,7 +348,28 @@ export function AmadeusPagesView() {
   /** 递归渲染树节点(Obsidian 式嵌套):文件夹头 + 展开的子树,均按 depth 缩进。
    *  拖拽时无论是否可落都 stopPropagation,防止事件冒泡让祖先文件夹误抢落点。 */
   const renderNode = (node: TreeNode, depth: number): ReactNode => {
-    if (node.kind === 'file') return row(node.path, depth)
+    if (node.kind === 'file') {
+      if (!node.children.length) return row(node.path, depth)
+      // 合并笔记节点(X.md 吸收了 X.fd):笔记行带 chevron+计数,展开渲染 .fd 子树;expand key = .fd 路径
+      // (面包屑定位的 parentOf/prefixesOf 天然产出同一键,免改)。
+      const fd = fdDirOf(node.path)
+      const open = expanded.has(fd)
+      return (
+        <div key={node.path}>
+          {row(node.path, depth, { fd, open, count: node.children.filter((c) => c.kind === 'file').length })}
+          {open && (
+            <div
+              className={`t2s-group-sessions${dragPath && dragOver === fd ? ' amx-drop-into' : ''}`}
+              onDragOver={(e) => mergedDragOver(e, node.path, fd)}
+              onDragLeave={() => { if (dragOver === fd) setDragOver(null) }}
+              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); dropTo(fd) }}
+            >
+              {node.children.map((c) => renderNode(c, depth + 1))}
+            </div>
+          )}
+        </div>
+      )
+    }
     const folder = node.path
     const isCol = !expanded.has(folder)
     const fileCount = node.children.filter((c) => c.kind === 'file').length
@@ -319,6 +377,10 @@ export function AmadeusPagesView() {
       if (!dragPath) return
       e.stopPropagation()
       if (parentOf(dragPath) === folder) return // 拖回原文件夹 = 不可落(且不让祖先接手)
+      if (isNoteMd(dragPath)) {
+        const dfd = fdDirOf(dragPath)
+        if (folder === dfd || folder.startsWith(`${dfd}/`)) return // 不能把笔记拖进它自己的 .fd 子树
+      }
       e.preventDefault()
       e.dataTransfer.dropEffect = 'move'
       if (dragOver !== folder) setDragOver(folder)
@@ -421,12 +483,20 @@ export function AmadeusPagesView() {
       {menu?.kind === 'page' && (
         <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
           <button onClick={() => { void openNote(menu.path, { newTab: true }); setMenu(null) }}><Plus size={13} /> 在新标签页打开</button>
+          <button onClick={() => {
+            const p = menu.path
+            setMenu(null)
+            void ps().createChildNote(p, '未命名').then((np) => {
+              setExpanded((prev) => new Set([...prev, ...prefixesOf(fdDirOf(p))]))
+              void ps().loadPage(np)
+            })
+          }}><SquarePen size={13} /> 新建子笔记</button>
           <button onClick={() => startRename(menu.path)}><Pencil size={13} /> 重命名</button>
           <button onClick={() => { useAmadeusPrefs.getState().toggleStar(menu.path); setMenu(null) }}>
             <Star size={13} /> {useAmadeusPrefs.getState().starred.includes(menu.path) ? '取消收藏' : '收藏'}
           </button>
           <button onClick={() => { void amadeus.revealInFileManager(menu.path); setMenu(null) }}><FolderOpen size={13} /> 在文件管理器中显示</button>
-          <button className="danger" onClick={() => { const p = menu.path; setMenu(null); if (window.confirm(`删除笔记「${baseName(p)}」?此操作不可撤销。`)) { useRecentViews.getState().remove(`note:${p}`); void ps().deletePage(p) } }}><Trash2 size={13} /> 删除</button>
+          <button className="danger" onClick={() => { const p = menu.path; setMenu(null); if (window.confirm(deleteNoteMsg(p))) { useRecentViews.getState().remove(`note:${p}`); void ps().deletePage(p) } }}><Trash2 size={13} /> 删除</button>
         </div>
       )}
       {menu?.kind === 'asset' && (
@@ -737,7 +807,7 @@ export function AmadeusEditorView({ leaf }: ViewProps) {
             <Star size={13} /> {starred ? '取消收藏' : '收藏'}
           </button>
           <button onClick={() => { void amadeus.revealInFileManager(activePage); setNoteMenu(null) }}><FolderOpen size={13} /> 在文件管理器中显示</button>
-          <button className="danger" onClick={() => { const p = activePage; setNoteMenu(null); if (window.confirm(`删除笔记「${baseName(p)}」?此操作不可撤销。`)) { useRecentViews.getState().remove(`note:${p}`); void ps().deletePage(p) } }}>
+          <button className="danger" onClick={() => { const p = activePage; setNoteMenu(null); if (window.confirm(deleteNoteMsg(p))) { useRecentViews.getState().remove(`note:${p}`); void ps().deletePage(p) } }}>
             <Trash2 size={13} /> 删除笔记
           </button>
         </div>

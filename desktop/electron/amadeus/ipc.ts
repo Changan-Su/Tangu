@@ -414,6 +414,20 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
     await index.build()
   })
 
+  ipcMain.handle(IPC.moveFolder, async (_e, folderPath: string, destFolder: string) => {
+    const src = folderPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+    const name = src.split('/').pop()
+    if (!name) throw new Error('文件夹路径不能为空')
+    const dst = destFolder.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+    const newPath = dst ? `${dst}/${name}` : name
+    if (newPath === src) return src
+    if (dst === src || dst.startsWith(`${src}/`)) throw new Error('不能移动到自身内部')
+    if (await vault.pathExists(newPath)) throw new Error('目标位置已存在同名文件夹')
+    await vault.moveEntry(src, newPath)
+    await index.build()
+    return newPath
+  })
+
   const pluginsDir = (): string | null => {
     const root = vault.getRoot()
     return root ? path.join(root, '.amadeus', 'plugins') : null

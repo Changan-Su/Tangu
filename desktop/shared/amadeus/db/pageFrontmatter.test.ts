@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   setFmExtraOnSource,
+  patchFmExtraText,
   parseFmObject,
   inferColumnType,
   fmValueToCell,
@@ -52,6 +53,25 @@ describe('setFmExtraOnSource', () => {
     const out = setFmExtraOnSource(V3, { due: '2026-07-05' })
     expect(out).toMatch(/due:\s*"?2026-07-05"?/)
     expect(parseFmObject(parseFmObjectFixture(out))['due']).toBe('2026-07-05')
+  })
+})
+
+describe('patchFmExtraText(内存 fmExtra 路径)', () => {
+  it('空文本 + 增键;undefined 删键;删空返回 ""', () => {
+    expect(patchFmExtraText('', { children: ['a.md'] })).toBe('children:\n  - a.md')
+    expect(patchFmExtraText('children:\n  - a.md\ntag: x', { children: undefined })).toBe('tag: x')
+    expect(patchFmExtraText('children:\n  - a.md', { children: undefined })).toBe('')
+  })
+
+  it('非空但坏 YAML → null 拒改(守住用户手写内容)', () => {
+    expect(patchFmExtraText('foo: [broken', { children: ['a.md'] })).toBeNull()
+    expect(patchFmExtraText('- 顶层是数组', { children: ['a.md'] })).toBeNull()
+  })
+
+  it('amadeus_* 保留键不被 patch 劫持', () => {
+    expect(patchFmExtraText('tag: x', { amadeus_layout: 'evil', children: ['a.md'] })).toBe(
+      'tag: x\nchildren:\n  - a.md',
+    )
   })
 })
 

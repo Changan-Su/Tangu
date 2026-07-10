@@ -141,7 +141,7 @@ export function AmadeusTagsView() {
 
 // ─────────────────────────────── 局部关系图(右栏 tab;当前笔记的出/入链) ───────────────────────────────
 
-interface GNode { path: string; label: string; center: boolean; x: number; y: number; vx: number; vy: number; pinned: boolean }
+interface GNode { path: string; label: string; center: boolean; ghost?: boolean; x: number; y: number; vx: number; vy: number; pinned: boolean }
 interface GEdge { a: number; b: number }
 
 const W = 320
@@ -239,20 +239,30 @@ export function AmadeusLocalGraphView() {
       if (!live) return
       const st = ps()
       const contents = Object.values(st.blocks).map((b) => b.content).join('\n')
-      const outs = [...new Set(
-        parseWikiLinks(contents)
-          .map((n) => resolvePageName(n, st.pages))
-          .filter((x): x is string => !!x && x !== activePage),
-      )]
+      // 出链拆两桶:解析到的 → 实体节点;解析不到的 → ghost 节点(黯淡显示,点击询问创建)。
+      const outs: string[] = []
+      const ghosts: string[] = []
+      const seenGhost = new Set<string>()
+      for (const n of parseWikiLinks(contents)) {
+        const r = resolvePageName(n, st.pages, activePage)
+        if (r) {
+          if (r !== activePage && !outs.includes(r)) outs.push(r)
+        } else if (!seenGhost.has(n.toLowerCase())) {
+          seenGhost.add(n.toLowerCase())
+          ghosts.push(n)
+        }
+      }
       const others = [...new Set([...outs, ...incoming.map((r) => r.path).filter((p) => p !== activePage)])]
+      const ring = [...others, ...ghosts]
       const nodes: GNode[] = [
         { path: activePage, label: baseName(activePage), center: true, x: W / 2, y: H / 2, vx: 0, vy: 0, pinned: true },
-        ...others.map((p, i) => {
-          const ang = (i / Math.max(1, others.length)) * Math.PI * 2
-          return { path: p, label: baseName(p), center: false, x: W / 2 + Math.cos(ang) * 90, y: H / 2 + Math.sin(ang) * 90, vx: 0, vy: 0, pinned: false }
+        ...ring.map((p, i) => {
+          const ang = (i / Math.max(1, ring.length)) * Math.PI * 2
+          const ghost = i >= others.length
+          return { path: p, label: ghost ? p : baseName(p), center: false, ghost, x: W / 2 + Math.cos(ang) * 90, y: H / 2 + Math.sin(ang) * 90, vx: 0, vy: 0, pinned: false }
         }),
       ]
-      const idx = new Map(nodes.map((n, i) => [n.path, i]))
+      const idx = new Map(nodes.slice(0, 1 + others.length).map((n, i) => [n.path, i]))
       const edges: GEdge[] = []
       const seen = new Set<string>()
       for (const p of [...outs, ...incoming.map((r) => r.path)]) {
@@ -261,6 +271,7 @@ export function AmadeusLocalGraphView() {
         seen.add(p)
         edges.push({ a: 0, b })
       }
+      for (let i = 0; i < ghosts.length; i++) edges.push({ a: 0, b: 1 + others.length + i }) // ghost 恒连中心
       if (!live) return
       const g = { nodes, edges }
       graphRef.current = g
@@ -373,12 +384,17 @@ export function AmadeusLocalGraphView() {
                 || graph.edges.some((e) => (e.a === hover && e.b === i) || (e.b === hover && e.a === i))
               return (
                 <g
-                  key={n.path}
-                  className={`amx-graph-node${n.center ? ' center' : ''}${hover !== null ? (lit ? ' hl' : ' dim') : ''}`}
+                  key={n.ghost ? `g:${n.path}` : n.path}
+                  className={`amx-graph-node${n.center ? ' center' : ''}${n.ghost ? ' ghost' : ''}${hover !== null ? (lit ? ' hl' : ' dim') : ''}`}
                   onPointerDown={onNodePointerDown(i)}
                   onPointerEnter={() => setHover(i)}
                   onPointerLeave={() => setHover(null)}
-                  onClick={() => { if (!movedRef.current && !n.center) void openNote(n.path) }}
+                  onClick={() => {
+                    if (movedRef.current || n.center) return
+                    // ghost = 未解析链接:进与编辑器同款的「是否创建」确认流(源 = 中心笔记)。
+                    if (n.ghost) ps().openWikiLink(n.path)
+                    else void openNote(n.path)
+                  }}
                 >
                   <circle cx={n.x} cy={n.y} r={n.center ? 8 : 5.5} />
                   <text x={n.x} y={n.y + (n.center ? 20 : 16)} textAnchor="middle">{n.label.length > 12 ? `${n.label.slice(0, 12)}…` : n.label}</text>

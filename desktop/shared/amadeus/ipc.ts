@@ -32,6 +32,7 @@ export const IPC = {
   createFolder: 'folder:create',
   renameFolder: 'folder:rename',
   deleteFolder: 'folder:delete',
+  moveFolder: 'folder:move',
   structureChange: 'vault:structure-change',
   listPlugins: 'plugins:list',
   openPluginsFolder: 'plugins:open-folder',
@@ -225,6 +226,8 @@ export interface AmadeusApi {
   renameFolder(folderPath: string, newName: string): Promise<string>
   /** Delete a folder and everything inside it. */
   deleteFolder(folderPath: string): Promise<void>
+  /** Move a folder (with its subtree) into another folder ('' = vault root); returns its new vault-relative path. */
+  moveFolder(folderPath: string, destFolder: string): Promise<string>
   /** Subscribe to vault structure changes (pages/folders added/removed). Returns unsubscribe. */
   onStructureChange(cb: () => void): () => void
   /** Subscribe to external `.db` content changes (e.g. the agent editing calendars on disk). Returns unsubscribe. */

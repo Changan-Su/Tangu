@@ -7,6 +7,7 @@ import type { PageProps } from '@amadeus-shared/ipc'
 import { cellToFmValue } from '@amadeus-shared/db/pageFrontmatter'
 import type { CellValue, ColumnType } from '@amadeus-shared/db/schema'
 import { amadeus } from '../api'
+import { cascadeFdAfterRename } from './pageStore'
 
 export interface FolderView {
   status: 'loading' | 'ok' | 'error'
@@ -106,7 +107,8 @@ export const useNoteViewStore = create<NoteViewState>((set, get) => ({
   async renameNote(folder, notePath, newTitle) {
     if (!newTitle.trim()) return
     try {
-      await amadeus.renamePageFile(notePath, newTitle.trim())
+      const newPath = await amadeus.renamePageFile(notePath, newTitle.trim())
+      if (newPath !== notePath) await cascadeFdAfterRename(notePath, newPath) // .fd 子页面文件夹跟随改名
     } catch {
       /* 撞名/非法名:忽略,refresh 会还原显示 */
     }

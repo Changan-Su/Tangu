@@ -696,6 +696,12 @@
   background: var(--drop);
   border-radius: 3px;
 }
+/* 未解析双链(目标笔记不存在):黯淡 + 虚线,点击弹「是否创建」。 */
+.am-app .milkdown .ProseMirror .wikilink.wikilink-unresolved {
+  color: var(--text-muted);
+  opacity: 0.75;
+  text-decoration-style: dashed;
+}
 .am-app .milkdown .ProseMirror hr {
   border: none;
   border-top: 1px solid var(--border);
@@ -1041,7 +1047,10 @@
   backdrop-filter: blur(20px) saturate(140%);
 }
 .am-app .wiki-item {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
   width: 100%;
   text-align: left;
   border: none;
@@ -1057,6 +1066,20 @@
 .am-app .wiki-item[data-active] {
   background: var(--surface);
   color: var(--text);
+}
+/* Obsidian 式两段行:名字加粗 + 目录副标题(重名不合并,靠路径区分)。 */
+.am-app .wiki-item-name {
+  font-weight: 600;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.am-app .wiki-item-path {
+  font-size: 11px;
+  color: var(--text-muted);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .am-app .wiki-create {
   color: var(--text-muted);

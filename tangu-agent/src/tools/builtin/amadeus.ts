@@ -541,6 +541,7 @@ export const amadeusProvider: ToolProvider = {
 /** 通用工具指引(local/cloud 两段共用;硬编码进模型的提示一律英文)。 */
 const AMADEUS_TOOL_GUIDANCE =
   '- Notes: `amadeus_list_notes` to find, `amadeus_read_note` to read, `amadeus_write_note` to create or rewrite (plain markdown).\n' +
+  '- A note `X.md` may own a sibling folder `X.fd/` holding its child notes/databases (Notion-style subpages); the parent\'s frontmatter `children:` list mirrors that folder. To add a subpage under `X.md`, write to `X.fd/<name>.md`.\n' +
   '- Calendar / schedule: `amadeus_list_calendars` lists calendars; `amadeus_list_events` reads events; `amadeus_create_event` / `amadeus_edit_event` / `amadeus_delete_event` manage them.\n' +
   '- Event times are `YYYY-MM-DD` (all-day) or `YYYY-MM-DDTHH:mm` (with a time); an event has a start and an optional end.\n' +
   '- Use these only when the user asks about their notes, calendar, schedule, or to-dos, and prefer the calendar tools over hand-editing `.db` files.';

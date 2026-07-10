@@ -9,6 +9,7 @@
 import path from 'path-browserify'
 import { loadPage, newPage, pageFileName, savePage } from '@amadeus-shared/compiler'
 import type { PageManifest } from '@amadeus-shared/compiler'
+import { setFmExtraOnSource } from '@amadeus-shared/db/pageFrontmatter'
 import { dbFileSchema, parseDb, serializeDb } from '@amadeus-shared/db/schema'
 import type { DbFile } from '@amadeus-shared/db/schema'
 import type { AmadeusApi, DbReadResult, VaultInfo } from '@amadeus-shared/ipc'
@@ -135,6 +136,31 @@ export function createMobileAmadeusBridge(): AmadeusApi {
       return newPath
     },
     deleteFolder: async (folderPath) => { await ensureVault(); await vault.removeEntry(folderPath); await index.build() },
+    moveFolder: async (folderPath, destFolder) => {
+      await ensureVault()
+      const src = folderPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+      const name = src.split('/').pop()
+      if (!name) throw new Error('文件夹路径不能为空')
+      const dst = destFolder.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+      const newPath = dst ? `${dst}/${name}` : name
+      if (newPath === src) return src
+      if (dst === src || dst.startsWith(`${src}/`)) throw new Error('不能移动到自身内部')
+      if (await vault.pathExists(newPath)) throw new Error('目标位置已存在同名文件夹')
+      await vault.moveEntry(src, newPath)
+      await index.build()
+      return newPath
+    },
+
+    // 外科式 frontmatter 写(镜像 electron ipc.ts 的 setPageFrontmatter;.fd children 同步依赖)。
+    setPageFrontmatter: async (pagePath, patch) => {
+      await ensureVault()
+      const io = vault.pageIO(pagePath)
+      const name = pageFileName(pagePath)
+      if (!(await io.exists(name))) return // 笔记不在(已被删)→ 静默跳过
+      const raw = await io.readFile(name)
+      await vault.writeTextFile(pagePath, setFmExtraOnSource(raw, patch))
+      await index.update(pagePath)
+    },
 
     // 派生索引
     search: async (query) => { await ensureVault(); return index.search(query) },

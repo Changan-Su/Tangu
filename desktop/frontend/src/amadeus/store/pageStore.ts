@@ -11,8 +11,10 @@ import type {
   RowNode,
   StackNode,
 } from '@amadeus-shared/compiler/types'
-import { resolvePageName } from '@amadeus-shared/links'
+import { pageKey, resolvePageName } from '@amadeus-shared/links'
+import { patchFmExtraText } from '@amadeus-shared/db/pageFrontmatter'
 import { amadeus } from '../api'
+import { computeFdChildren, fdDirOf, isNoteMd, nearestFd, noteOfFd } from '../lib/fd'
 
 export interface BlockState {
   id: BlockId
@@ -122,8 +124,22 @@ interface PageState {
   /** 打开某路径的笔记;不存在则先创建(日记等「打开或新建」语义)。 */
   openOrCreate(path: string): Promise<void>
   renamePage(newName: string): Promise<boolean>
-  /** Open the page named by a [[wikilink]] (creating it if missing). */
-  openWikiLink(name: string): void
+  /** Open the page named by a [[wikilink]];未解析 → 记入 pendingWikiCreate 询问,不再静默创建。 */
+  openWikiLink(name: string, sourcePath?: string): void
+  /** 未解析 [[链接]] 点击后的待确认创建请求(确认框据此渲染)。 */
+  pendingWikiCreate: { name: string; sourcePath: string | null } | null
+  /** 确认创建:裸名 → 源笔记 .fd 子笔记;带路径 → 按链接写明的精确路径;无源 → vault 根。 */
+  confirmWikiCreate(): Promise<void>
+  cancelWikiCreate(): void
+  /** 显式创建意图(QuickSwitcher 新建):vault 根、不询问(= 历史 openWikiLink 的创建分支)。 */
+  createWikiPage(name: string): Promise<void>
+  /** 在 parentPath 的 .fd 里建子笔记(名字对全库 pageKey 与 .fd 内文件双重去重,同步父 children),
+   *  返回新 vault 相对路径;不导航。「在笔记内创建文件」的统一落点。 */
+  createChildNote(parentPath: string, name: string): Promise<string>
+  /** 重算并写回 parent 的 frontmatter children(= .fd 直接子文件清单;父笔记开着时走内存路径)。 */
+  syncFdChildren(parentNotePath: string): Promise<void>
+  /** 对一批路径,找各自所属 .fd 的父笔记并同步 children(去重)。 */
+  syncFdParentsOf(paths: string[]): Promise<void>
 
   /** Refresh both the page list and the folder list from disk. */
   refreshStructure(): Promise<void>
@@ -216,6 +232,7 @@ export const usePageStore = create<PageState>((set, get) => {
     dndActiveId: null,
     dndOverId: null,
     linkGraphVersion: 0,
+    pendingWikiCreate: null,
 
     setDnd(activeId, overId) {
       set({ dndActiveId: activeId, dndOverId: overId })
@@ -345,6 +362,22 @@ export const usePageStore = create<PageState>((set, get) => {
     async renamePage(newName) {
       const { manifest, blocks, activePage } = get()
       if (!manifest || !activePage) return false
+      // .fd 级联预检:新名对应的 .fd 位置已被占 → 先中止,不做半级联。
+      const oldFd = fdDirOf(activePage)
+      const hasFd = get().folders.includes(oldFd)
+      if (hasFd) {
+        let base = newName.trim().replace(/[\\/]/g, '')
+        if (base.toLowerCase().endsWith('.md')) base = base.slice(0, -3)
+        if (base) {
+          const dir = activePage.includes('/') ? activePage.slice(0, activePage.lastIndexOf('/')) : ''
+          const newFd = dir ? `${dir}/${base}.fd` : `${base}.fd`
+          const { pages, folders, files } = get()
+          if (newFd !== oldFd && (folders.includes(newFd) || pages.includes(newFd) || files.includes(newFd))) {
+            set({ error: '目标名称已被同名 .fd 文件夹占用' })
+            return false
+          }
+        }
+      }
       if (saveTimer) {
         clearTimeout(saveTimer) // cancel a pending save aimed at the OLD filename
         saveTimer = null
@@ -354,7 +387,8 @@ export const usePageStore = create<PageState>((set, get) => {
       try {
         const { newPath, page } = await amadeus.renamePage(activePage, newName, manifest, contents)
         set({ activePage: newPath, ...hydrate(page), status: 'ready', error: null })
-        await get().refreshPages()
+        if (hasFd && newPath !== activePage) await cascadeFdAfterRename(activePage, newPath)
+        await get().refreshStructure() // 级联可能动了文件夹,pages+folders 一起刷
         return true
       } catch (e) {
         set({ error: String(e) })
@@ -362,27 +396,106 @@ export const usePageStore = create<PageState>((set, get) => {
       }
     },
 
-    openWikiLink(name) {
+    openWikiLink(name, sourcePath) {
       const raw = name.trim()
       if (!raw) return
-      const match = resolvePageName(raw, get().pages)
+      const src = sourcePath ?? get().activePage ?? undefined
+      const match = resolvePageName(raw, get().pages, src)
       if (match) {
         void get().loadPage(match)
         return
       }
-      const base = raw.replace(/[\\/]/g, '') // filesystem-safe basename for the new page
+      // 未解析:询问而非静默建根。源须是笔记(.db 独立视图等无 .fd 语义 → 走根兜底)。
+      set({ pendingWikiCreate: { name: raw, sourcePath: src && isNoteMd(src) ? src : null } })
+    },
+
+    async createWikiPage(name) {
+      const base = name.trim().replace(/[\\/]/g, '') // filesystem-safe basename for the new page
       if (!base) return
-      void (async () => {
-        try {
-          await get().flushSave() // 换页前落盘,防待存的上一页内容被丢/写错对象
-          const path = `${base}.md`
+      try {
+        await get().flushSave() // 换页前落盘,防待存的上一页内容被丢/写错对象
+        const path = `${base}.md`
+        const page = await amadeus.newPage(path)
+        await get().refreshPages()
+        set({ activePage: path, ...hydrate(page), status: 'ready' })
+      } catch (e) {
+        set({ error: String(e) })
+      }
+    },
+
+    async confirmWikiCreate() {
+      const pending = get().pendingWikiCreate
+      if (!pending) return
+      set({ pendingWikiCreate: null })
+      const { name, sourcePath } = pending
+      try {
+        if (/[\\/]/.test(name)) {
+          // 路径限定链接:按链接写明的精确路径创建(Obsidian 语义,不折叠进 .fd)。
+          const clean = name.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+          if (!clean) return
+          await get().flushSave()
+          const path = /\.md$/i.test(clean) ? clean : `${clean}.md`
           const page = await amadeus.newPage(path)
-          await get().refreshPages()
+          await get().refreshStructure()
           set({ activePage: path, ...hydrate(page), status: 'ready' })
-        } catch (e) {
-          set({ error: String(e) })
+          return
         }
-      })()
+        if (sourcePath) {
+          const p = await get().createChildNote(sourcePath, name)
+          await get().loadPage(p)
+          return
+        }
+        await get().createWikiPage(name)
+      } catch (e) {
+        set({ error: String(e) })
+      }
+    },
+
+    cancelWikiCreate() {
+      set({ pendingWikiCreate: null })
+    },
+
+    async createChildNote(parentPath, name) {
+      await get().flushSave() // 父笔记先落盘(正文与新子文件同批可见)
+      const fd = fdDirOf(parentPath)
+      const stem = name.trim().replace(/[\\/]/g, '').replace(/\.md$/i, '') || '未命名'
+      const { pages, files } = get()
+      // 双重去重:全库 pageKey(保证父笔记里插入的 [[base]] 唯一解析到新子笔记)+ .fd 内同名文件。
+      const globalKeys = new Set(pages.map(pageKey))
+      const inFd = new Set(
+        [...pages, ...files].filter((p) => p.startsWith(`${fd}/`)).map((p) => p.split('/').pop()!.toLowerCase()),
+      )
+      let base = stem
+      for (let i = 1; globalKeys.has(pageKey(base)) || inFd.has(`${base}.md`.toLowerCase()); i++) base = `${stem}-${i}`
+      const path = `${fd}/${base}.md`
+      await amadeus.newPage(path) // mkdir -p 语义:desktop atomicWrite / cloud materializeParents / mobile 同
+      await get().syncFdChildren(parentPath) // 内含 refreshStructure
+      return path
+    },
+
+    async syncFdChildren(parentNotePath) {
+      await get().refreshStructure() // children 是 pages/files 的纯函数,先取最新
+      const { pages, files, activePage, manifest } = get()
+      if (!pages.includes(parentNotePath)) return // 父笔记不在(孤儿 .fd / 已删)→ 跳过
+      const children = computeFdChildren(parentNotePath, pages, files)
+      const patch = { children: children.length ? children : undefined }
+      if (parentNotePath === activePage && manifest) {
+        // 父笔记开着:改内存 fmExtra 走防抖保存 —— 外科写会被后续 save() 用旧 fmExtra 盖回去
+        // (桌面自写 ledger 抑制 reconcile 回声,内存不会自动更新),这是实测过的真实风险。
+        const next = patchFmExtraText(manifest.fmExtra ?? '', patch)
+        if (next !== null && next !== (manifest.fmExtra ?? '')) get().setFmExtra(next)
+      } else {
+        await amadeus.setPageFrontmatter?.(parentNotePath, patch) // ?. 容忍旧 preload 缺位(漂移可自愈)
+      }
+    },
+
+    async syncFdParentsOf(paths) {
+      const parents = new Set<string>()
+      for (const p of paths) {
+        const fd = nearestFd(p)
+        if (fd) parents.add(noteOfFd(fd))
+      }
+      for (const parent of parents) await get().syncFdChildren(parent)
     },
 
     async refreshStructure() {
@@ -395,8 +508,13 @@ export const usePageStore = create<PageState>((set, get) => {
     },
 
     async deletePage(pagePath) {
-      const wasActive = get().activePage === pagePath
-      if (wasActive && saveTimer) {
+      const fd = isNoteMd(pagePath) ? fdDirOf(pagePath) : null
+      const hasFd = !!fd && get().folders.includes(fd)
+      const active = get().activePage
+      // 级联删 .fd:活动页在父笔记或其 .fd 子树内都要善后(不能让待存回魂/编辑器悬空)。
+      const activeInside =
+        !!active && (active === pagePath || (hasFd && active.startsWith(`${fd}/`)))
+      if (activeInside && saveTimer) {
         clearTimeout(saveTimer) // don't let a pending save resurrect the deleted page
         saveTimer = null
       }
@@ -406,8 +524,16 @@ export const usePageStore = create<PageState>((set, get) => {
         set({ error: String(e) })
         return
       }
+      if (hasFd) {
+        try {
+          await amadeus.deleteFolder(fd)
+        } catch (e) {
+          set({ error: String(e) }) // 失败 = 孤儿 .fd,树里按普通文件夹可见,可手动处理
+        }
+      }
       await get().refreshStructure()
-      if (wasActive) {
+      await get().syncFdParentsOf([pagePath]) // 删的若是别人的 .fd 子文件,更新那位父亲的 children
+      if (activeInside) {
         const next = get().pages.find((p) => p !== pagePath) ?? null
         if (next) await get().loadPage(next)
         else set({ activePage: null, manifest: null, blocks: {}, status: 'idle' })
@@ -415,16 +541,44 @@ export const usePageStore = create<PageState>((set, get) => {
     },
 
     async movePage(pagePath, destFolder) {
-      const wasActive = get().activePage === pagePath
-      if (wasActive) await get().flushSave() // persist before the files relocate
+      const fd = isNoteMd(pagePath) ? fdDirOf(pagePath) : null
+      const hasFd = !!fd && get().folders.includes(fd)
+      const dst = destFolder.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+      if (hasFd) {
+        if (dst === fd || dst.startsWith(`${fd}/`)) {
+          set({ error: '不能移动到该笔记自己的子页面里' })
+          return
+        }
+        // 预检目标位置的同名 .fd,避免 .md 移完文件夹移不动的半级联。
+        const fdName = fd.split('/').pop()!
+        const fdDst = dst ? `${dst}/${fdName}` : fdName
+        const { pages, folders, files } = get()
+        if (fdDst !== fd && (folders.includes(fdDst) || pages.includes(fdDst) || files.includes(fdDst))) {
+          set({ error: '目标位置已存在同名 .fd 文件夹' })
+          return
+        }
+      }
+      const active = get().activePage
+      const wasActive = active === pagePath
+      const activeInFd = !!active && hasFd && active.startsWith(`${fd}/`)
+      if (wasActive || activeInFd) await get().flushSave() // persist before the files relocate
       try {
-        const newPath = await amadeus.movePage(pagePath, destFolder)
+        const newPath = await amadeus.movePage(pagePath, dst)
         if (wasActive) set({ activePage: newPath })
+        if (hasFd) {
+          try {
+            const newFd = await amadeus.moveFolder(fd, dst)
+            if (activeInFd) set({ activePage: newFd + active.slice(fd.length) })
+          } catch (e) {
+            set({ error: `子页面文件夹未跟随移动:${String(e)}` })
+          }
+        }
+        await get().refreshStructure()
+        await get().syncFdParentsOf([pagePath, newPath]) // 拖出/拖入 .fd 两端的父亲都同步
       } catch (e) {
         set({ error: String(e) })
-        return
+        await get().refreshStructure()
       }
-      await get().refreshStructure()
     },
 
     async createFolder(parentFolder, name) {
@@ -733,3 +887,13 @@ export const usePageStore = create<PageState>((set, get) => {
     },
   }
 })
+
+/** 笔记改名后的 .fd 跟随改名(pageStore.renamePage 与 noteViewStore.renameNote 共用)。
+ *  renameFolder 内部自带 flushSave / activePage 重映射 / refreshStructure / 失败置 error。 */
+export async function cascadeFdAfterRename(oldPath: string, newPath: string): Promise<void> {
+  const st = usePageStore.getState()
+  const oldFd = fdDirOf(oldPath)
+  if (!st.folders.includes(oldFd)) return
+  const newBase = newPath.split('/').pop()!.replace(/\.md$/i, '')
+  await st.renameFolder(oldFd, `${newBase}.fd`)
+}

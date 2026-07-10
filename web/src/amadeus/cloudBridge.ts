@@ -478,12 +478,15 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
         allTreePaths(tree).filter((p) => dirnamePosix(p) === destDirRel).map((p) => basenamePosix(p).toLowerCase()),
       )
       let base = uniqueNameAmong(existing, safeName)
+      // .db/.md 是文本文件:server kindForPath 按扩展名分 kind,binary 通道会被拒 → 走文本 PUT(seq 0 = 仅创建)。
+      const isText = /\.(db|md)$/i.test(safeName)
       for (let attempt = 0; attempt < 20; attempt++) {
         const { fileVaultRel, pageRel } = attachmentPaths(pagePath, base, opts)
         const clamped = normalizePosix(fileVaultRel)
         if (clamped === null) throw new Error('Asset escapes vault')
         try {
-          await postBinary(clamped, base, bytes, true)
+          if (isText) await putFile(clamped, new TextDecoder().decode(bytes), 0)
+          else await postBinary(clamped, base, bytes, true)
           return { pageRel, base }
         } catch (e) {
           if (is409(e)) {
@@ -620,6 +623,30 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
       await http.del(`/amadeus/vaults/${encodeURIComponent(vid())}/folders`, { path: folderPath })
       forgetSeqPrefix(folderPath)
       invalidateTree()
+    },
+
+    moveFolder: async (folderPath, destFolder) => {
+      await ensureVault()
+      const src = folderPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+      const name = basenamePosix(src)
+      if (!name) throw new Error('文件夹路径不能为空')
+      const dst = destFolder.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+      const newPath = dst ? `${dst}/${name}` : name
+      if (newPath === src) return src
+      if (dst === src || dst.startsWith(`${src}/`)) throw new Error('不能移动到自身内部')
+      let r: { path: string }
+      try {
+        r = await http.post<{ path: string }>(`/amadeus/vaults/${encodeURIComponent(vid())}/folders/move`, { path: src, dest: dst })
+      } catch (e) {
+        if (is409(e)) throw new Error('目标位置已存在同名文件夹')
+        throw e
+      }
+      migrateSeqPrefix(src, r.path)
+      if (lastLoadedPage && lastLoadedPage.startsWith(`${src}/`)) {
+        rememberPage(`${r.path}${lastLoadedPage.slice(src.length)}`)
+      }
+      invalidateTree()
+      return r.path
     },
 
     // ---- 插件 / OS 集成:web 端 no-op(渲染层 `?.` 兜底 / 明确提示) --------------

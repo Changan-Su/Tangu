@@ -45,6 +45,7 @@ const api: AmadeusApi = {
   createFolder: (parentFolder, name) => ipcRenderer.invoke(IPC.createFolder, parentFolder, name),
   renameFolder: (folderPath, newName) => ipcRenderer.invoke(IPC.renameFolder, folderPath, newName),
   deleteFolder: (folderPath) => ipcRenderer.invoke(IPC.deleteFolder, folderPath),
+  moveFolder: (folderPath, destFolder) => ipcRenderer.invoke(IPC.moveFolder, folderPath, destFolder),
   onStructureChange: (cb) => {
     const listener = (): void => cb()
     ipcRenderer.on(IPC.structureChange, listener)

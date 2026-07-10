@@ -52,3 +52,26 @@ function sortTree(node: TreeNode): void {
   })
   for (const c of node.children) if (c.kind === 'folder') sortTree(c)
 }
+
+/** Notion 式合并:同级 `X.fd` 文件夹的孩子挂到 `X.md` 文件节点上,文件夹行本身隐藏;
+ *  孤儿 .fd(无同名 .md,精确同名、大小写敏感)保持普通文件夹可见。原地改写并返回 root。 */
+export function mergeFdNotes(root: TreeNode): TreeNode {
+  const walk = (n: TreeNode): void => {
+    const fdByName = new Map(
+      n.children.filter((c) => c.kind === 'folder' && c.name.endsWith('.fd')).map((c) => [c.name, c] as const),
+    )
+    if (fdByName.size) {
+      for (const c of n.children) {
+        if (c.kind !== 'file' || !/\.md$/i.test(c.name)) continue
+        const fd = fdByName.get(c.name.replace(/\.md$/i, '.fd'))
+        if (fd) {
+          c.children = fd.children
+          n.children = n.children.filter((x) => x !== fd)
+        }
+      }
+    }
+    for (const c of n.children) walk(c) // 合并后的 file.children 也递归 → .fd 套 .fd 自然生效
+  }
+  walk(root)
+  return root
+}

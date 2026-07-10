@@ -6,7 +6,7 @@
 // expose each block for cross-note embeds, and record which blocks each note embeds.
 
 import { promises as fs } from 'node:fs'
-import { linkTarget, pageKey, parseEmbeds, parseTags, parseWikiLinks, stripForIndex } from '@amadeus-shared/links'
+import { linkTarget, pageKey, parseEmbeds, parseTags, parseWikiLinks, resolvePageName, stripForIndex } from '@amadeus-shared/links'
 import { parseBody, stripFrontmatter } from '@amadeus-shared/compiler'
 import type { BacklinkRef, SearchHit, TagCount } from '@amadeus-shared/ipc'
 import type { VaultManager } from './vaultManager'
@@ -171,13 +171,17 @@ export class VaultIndex {
   }
 
   backlinks(targetPath: string): BacklinkRef[] {
-    const tk = pageKey(targetPath)
-    if (!tk) return []
+    if (!pageKey(targetPath)) return []
+    // 逐条把原始链接按「源笔记上下文」重解析,只有真正解析到 targetPath 的才算反链
+    // (重名笔记不再互相污染)。pages 排序 = 解析规则(4)的确定性并列序。
+    // ponytail: O(entries×links×pages) 朴素扫,个人 vault 规模足够。
+    const pages = [...this.entries.keys()].sort()
     const out: BacklinkRef[] = []
     for (const e of this.entries.values()) {
       if (e.path === targetPath) continue
-      if (!e.links.some((l) => pageKey(l) === tk)) continue
-      out.push({ path: e.path, title: e.title, snippet: backlinkSnippet(e.text, tk) })
+      const hits = (l: string): boolean => resolvePageName(l, pages, e.path) === targetPath
+      if (!e.links.some(hits)) continue
+      out.push({ path: e.path, title: e.title, snippet: backlinkSnippet(e.text, hits) })
     }
     out.sort((a, b) => a.title.localeCompare(b.title))
     return out
@@ -213,12 +217,12 @@ function countNewlines(s: string, end: number): number {
   return n
 }
 
-/** The line containing the first [[link]] whose target matches `tk`. */
-function backlinkSnippet(text: string, tk: string): string {
+/** The line containing the first [[link]] whose target satisfies `isMatch`(与 backlinks 同一解析判据,摘录引对重名)。 */
+function backlinkSnippet(text: string, isMatch: (target: string) => boolean): string {
   const re = /\[\[([^\]\n]+)\]\]/g
   let m: RegExpExecArray | null
   while ((m = re.exec(text))) {
-    if (pageKey(linkTarget(m[1])) !== tk) continue
+    if (!isMatch(linkTarget(m[1]))) continue
     let start = text.lastIndexOf('\n', m.index)
     start = start < 0 ? 0 : start + 1
     let end = text.indexOf('\n', m.index)

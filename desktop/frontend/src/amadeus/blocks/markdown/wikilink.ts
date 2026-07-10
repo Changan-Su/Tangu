@@ -17,7 +17,11 @@ function displayLabel(inner: string): string {
   return l || inner.trim()
 }
 
-function buildDecorations(state: EditorState, onOpen: (name: string) => void): DecorationSet {
+function buildDecorations(
+  state: EditorState,
+  onOpen: (name: string) => void,
+  isResolved: (name: string) => boolean,
+): DecorationSet {
   const focus = wikiKey.getState(state)?.focus ?? false
   const decos: Decoration[] = []
   const selFrom = state.selection.from
@@ -49,13 +53,14 @@ function buildDecorations(state: EditorState, onOpen: (name: string) => void): D
       const to = cs + spTo
       const target = linkTarget(m[1])
       const label = displayLabel(m[1])
+      const ok = isResolved(target)
       decos.push(Decoration.inline(from, to, { class: 'wikilink-src-hidden' }))
       decos.push(
         Decoration.widget(
           from,
           () => {
             const el = document.createElement('span')
-            el.className = 'wikilink'
+            el.className = ok ? 'wikilink' : 'wikilink wikilink-unresolved' // 未解析 → 黯淡虚线,点击询问创建
             el.setAttribute('data-wiki', target)
             el.textContent = label
             el.addEventListener('mousedown', (e) => {
@@ -64,7 +69,8 @@ function buildDecorations(state: EditorState, onOpen: (name: string) => void): D
             })
             return el
           },
-          { side: -1, ignoreSelection: true, key: `w${from}:${m[0]}` },
+          // key 带解析态:同 key 的 widget DOM 会被 ProseMirror 复用,解析态翻转必须换 key 才会重建。
+          { side: -1, ignoreSelection: true, key: `w${from}:${m[0]}:${ok ? 1 : 0}` },
         ),
       )
     }
@@ -73,7 +79,7 @@ function buildDecorations(state: EditorState, onOpen: (name: string) => void): D
   return decos.length ? DecorationSet.create(state.doc, decos) : DecorationSet.empty
 }
 
-export function wikilinkPlugin(onOpen: (name: string) => void) {
+export function wikilinkPlugin(onOpen: (name: string) => void, isResolved: (name: string) => boolean = () => true) {
   return $prose(
     () =>
       new Plugin<{ focus: boolean }>({
@@ -91,7 +97,7 @@ export function wikilinkPlugin(onOpen: (name: string) => void) {
             focus: (view) => { if (!wikiKey.getState(view.state)?.focus) view.dispatch(view.state.tr.setMeta(wikiKey, { focus: true })); return false },
             blur: (view) => { if (wikiKey.getState(view.state)?.focus) view.dispatch(view.state.tr.setMeta(wikiKey, { focus: false })); return false },
           },
-          decorations: (state) => buildDecorations(state, onOpen),
+          decorations: (state) => buildDecorations(state, onOpen, isResolved),
         },
       }),
   )

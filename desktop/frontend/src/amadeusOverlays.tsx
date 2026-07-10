@@ -4,6 +4,8 @@
 import { useEffect, useState, type KeyboardEvent } from 'react'
 import { usePageStore } from '@amadeus/store/pageStore'
 import { useUiStore } from '@amadeus/store/uiStore'
+import { ConfirmDialog } from '@amadeus/components/Dialogs'
+import { fdDirOf } from '@amadeus/lib/fd'
 import { useUiOverlay, type TemplateCtx } from './amadeusOverlayStore'
 import { pageKey } from '@amadeus-shared/links'
 import { fuzzyRank } from '@lcl/engine/fuzzy'
@@ -29,8 +31,33 @@ export function AmadeusOverlays() {
     <>
       {overlay === 'switcher' && <QuickSwitcher />}
       {overlay === 'template' && templateCtx && <TemplatePicker ctx={templateCtx} />}
+      <WikiCreateConfirm />
       {toast && <div className="amx-toast">{toast}</div>}
     </>
+  )
+}
+
+/** 未解析 [[链接]] 点击后的创建确认(pendingWikiCreate 驱动):裸名落源笔记 .fd,
+ *  带路径按链接原路径,无源落 vault 根。.dialog-* 样式挂在 .am-app 下 → display:contents 载体。 */
+function WikiCreateConfirm() {
+  const pending = usePageStore((s) => s.pendingWikiCreate)
+  if (!pending) return null
+  const dest = /[\\/]/.test(pending.name)
+    ? `${pending.name.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').replace(/\.md$/i, '')}.md`
+    : pending.sourcePath
+      ? `${fdDirOf(pending.sourcePath)}/${pending.name}.md`
+      : `${pending.name}.md`
+  return (
+    <div className="am-app" style={{ display: 'contents' }}>
+      <ConfirmDialog
+        title="创建新笔记"
+        message={`“${pending.name}” 尚不存在。要在 ${dest} 创建吗？`}
+        confirmLabel="创建"
+        danger={false}
+        onConfirm={() => void usePageStore.getState().confirmWikiCreate()}
+        onClose={() => usePageStore.getState().cancelWikiCreate()}
+      />
+    </div>
   )
 }
 
@@ -109,7 +136,8 @@ function QuickSwitcher() {
   const total = results.length + (showCreate ? 1 : 0)
 
   const choose = (i: number): void => {
-    if (showCreate && i === results.length) usePageStore.getState().openWikiLink(q)
+    // 「新建」是显式创建意图:直接建在 vault 根,不走未解析询问流程。
+    if (showCreate && i === results.length) void usePageStore.getState().createWikiPage(q)
     else if (results[i]) void openNote(results[i])
     close()
   }
