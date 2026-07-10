@@ -3,10 +3,15 @@
  * 全部色值/阴影/半径/字栈取自 @toeverything/theme@1.1.23(AFFiNE 仓库锁定的主题包版本)
  * dist/style.css 的 [data-theme=light] / [data-theme=dark] 两块原值,手工映射到 LCL 契约;
  * 个别 LCL 有而 AFFiNE 没有的键(text-light/overlay 梯队/hover 强调/user-bg/glow)按其体系推导,逐处注明。
- * 照 kami 先例「语言自带整套 28 色」:用 :root[data-theme][data-skin](0,3,0)
- * 压过 skins.css 的配色轴;唯 custom 配色的 9 个内联 seed 变量会穿透(可借此换强调色)。
  *
- * ⚠ 暗色块必须与亮色块 28/28 逐键对称:漏声明的键会在暗色下拿到本文件的亮色值。
+ * 双层写法(2026-07-10 迭代:主题要适配配色轴):
+ * - 中性层(纸面/侧栏/灰阶/边线/阴影/工具底)恒为 AFFiNE,任何配色下不变 —— :root[data-theme][data-skin](0,3,0)通吃;
+ * - 强调色族(--accent/-hover/-light/-rgb/--on-accent/--user-bg 共 6 键)按配色位分块:
+ *   cream=官方蓝(默认招牌,住在通吃块里)、coral=AFFiNE 红、teal=AFFiNE 绿、lavender=官方靛,
+ *   同特异性靠书写顺序覆盖(变体块必须在通吃块之后);
+ * - custom 配色:applyTheme 的 9 个内联 seed 变量(强调 6 键 + bg/sidebar/bg-card 微染)天然压过一切选择器 → 自定义强调色照常生效。
+ *
+ * ⚠ 对称纪律:通吃块亮/暗 28/28 逐键对称;每个配色变体块亮/暗 6/6 逐键对称。漏键会在暗色下拿到亮色值。
  */
 
 /* ─── 结构层:AFFiNE 半径(元素 4 / 菜单 8 / popover 12 原值)+ 官方阴影体系 + Inter 字栈(补 CJK) ─── */
@@ -32,7 +37,7 @@
   --icon-shadow: 0px 0px 1px 0px rgba(0, 0, 0, 0.2);
 }
 
-/* ─── 亮色颜色层:纸面 #fff / 侧栏 #f4f4f5 / 蓝强调 #1e96eb(AFFiNE light 原值) ─── */
+/* ─── 亮色·通吃块:AFFiNE 中性底 + 官方蓝强调(cream 默认位;custom 被内联 seed 压过) ─── */
 :root[data-theme='affine'][data-skin] {
   --bg: #ffffff;                              /* background-primary */
   --bg-card: #fbfbfc;                         /* background-overlay-panel(AFFiNE 极扁平,面板与纸面几乎同色靠边线/阴影分层) */
@@ -64,7 +69,7 @@
   --glow: radial-gradient(120% 80% at 82% -12%, rgba(0, 0, 0, 0.02), transparent 58%); /* AFFiNE 无 glow,给近不可见值保持消费处合法 */
 }
 
-/* ─── 暗色颜色层:纸面 #141414 / 侧栏 #252525 / 蓝强调 #1c9ee4(AFFiNE dark 原值) ─── */
+/* ─── 暗色·通吃块:纸面 #141414 / 侧栏 #252525 / 官方暗侧微调蓝 #1c9ee4 ─── */
 :root.dark[data-theme='affine'][data-skin] {
   --bg: #141414;                              /* background-primary */
   --bg-card: #1e1e1e;                         /* background-overlay-panel */
@@ -94,4 +99,61 @@
   --tool-bg: #1f2022;                         /* background-code-block 暗侧原值 */
   --tool-text: #a8a8a0;                       /* icon-color 暗侧 */
   --glow: radial-gradient(120% 80% at 82% -12%, rgba(255, 255, 255, 0.015), transparent 58%);
+}
+
+/* ─── 配色变体(强调 6 键族;非蓝三色的 tint/hover 按 seed 规则推导:hover 亮侧混黑 14%/暗侧混白 18%,
+ *     tint 亮 .10 暗 .16、气泡 亮 .08 暗 .14 —— 与 custom seed 的观感规则一致,只有蓝用官方 tint 面) ─── */
+
+/* coral → AFFiNE 红(v1 error 原值 #eb4335 / 暗侧 #bc362a) */
+:root[data-theme='affine'][data-skin='coral'] {
+  --accent: #eb4335;
+  --accent-hover: #ca3a2e;
+  --accent-light: rgba(235, 67, 53, 0.1);
+  --accent-rgb: 235, 67, 53;
+  --on-accent: #ffffff;
+  --user-bg: rgba(235, 67, 53, 0.08);
+}
+:root.dark[data-theme='affine'][data-skin='coral'] {
+  --accent: #bc362a;
+  --accent-hover: #c85a50;
+  --accent-light: rgba(188, 54, 42, 0.16);
+  --accent-rgb: 188, 54, 42;
+  --on-accent: #ffffff;
+  --user-bg: rgba(188, 54, 42, 0.14);
+}
+
+/* teal → AFFiNE 绿(v1 success 原值 #10cb86 / 暗侧 #0da26b) */
+:root[data-theme='affine'][data-skin='teal'] {
+  --accent: #10cb86;
+  --accent-hover: #0eaf73;
+  --accent-light: rgba(16, 203, 134, 0.1);
+  --accent-rgb: 16, 203, 134;
+  --on-accent: #ffffff;
+  --user-bg: rgba(16, 203, 134, 0.08);
+}
+:root.dark[data-theme='affine'][data-skin='teal'] {
+  --accent: #0da26b;
+  --accent-hover: #39b386;
+  --accent-light: rgba(13, 162, 107, 0.16);
+  --accent-rgb: 13, 162, 107;
+  --on-accent: #ffffff;
+  --user-bg: rgba(13, 162, 107, 0.14);
+}
+
+/* lavender → AFFiNE 靛(v1 secondary 原值 #7d91ff / 暗侧 #9096f5) */
+:root[data-theme='affine'][data-skin='lavender'] {
+  --accent: #7d91ff;
+  --accent-hover: #6c7ddb;
+  --accent-light: rgba(125, 145, 255, 0.1);
+  --accent-rgb: 125, 145, 255;
+  --on-accent: #ffffff;
+  --user-bg: rgba(125, 145, 255, 0.08);
+}
+:root.dark[data-theme='affine'][data-skin='lavender'] {
+  --accent: #9096f5;
+  --accent-hover: #a4a9f7;
+  --accent-light: rgba(144, 150, 245, 0.16);
+  --accent-rgb: 144, 150, 245;
+  --on-accent: #ffffff;
+  --user-bg: rgba(144, 150, 245, 0.14);
 }
