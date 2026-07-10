@@ -238,7 +238,7 @@
   --dv-inactivegroup-hiddenpanel-tab-color: var(--text-faint, var(--text-muted));
   --dv-tab-divider-color: transparent;
   --dv-separator-border: transparent; /* 组间分割线去掉 → 改为间隙 + 圆角浮卡(见 .dv-groupview) */
-  --dv-active-sash-color: var(--accent);
+  --dv-active-sash-color: transparent; /* 满铺高亮弃用 → 换 1px 中线渐显(见下方「Resize divider」段) */
   --dv-paneview-active-outline-color: var(--accent);
   --dv-icon-hover-background-color: var(--overlay-light, rgba(127, 127, 127, 0.1));
   --dv-floating-box-shadow: var(--card-shadow, 0 8px 24px rgba(0, 0, 0, 0.2));
@@ -263,6 +263,58 @@
   overflow: hidden;
   background: var(--bg);
 }
+
+/* ── Resize divider(sash):默认极弱 1px 中线,hover/拖拽 150ms ease-out 渐显柔化 accent;
+ *    无满铺无粗线无布局位移。主区浮卡内缩 8px 后视觉边缘偏离组缝,::before 把 4px 热区扩到
+ *    10px 以覆盖观感边界;鼠标处的 tick 刻度由 sashAffordance.ts 的单例 .lcl-sash-tick 提供。 ── */
+.dockview-theme-lcl .dv-sash-container .dv-sash::before {
+  content: '';
+  position: absolute;
+}
+.dockview-theme-lcl .dv-split-view-container.dv-horizontal > .dv-sash-container > .dv-sash::before {
+  top: 0; bottom: 0; left: -3px; right: -3px;
+}
+.dockview-theme-lcl .dv-split-view-container.dv-vertical > .dv-sash-container > .dv-sash::before {
+  left: 0; right: 0; top: -3px; bottom: -3px;
+}
+.dockview-theme-lcl .dv-sash-container .dv-sash::after {
+  content: '';
+  position: absolute;
+  background: color-mix(in srgb, var(--border) 45%, transparent);
+  transition: background 150ms ease-out;
+  pointer-events: none;
+}
+.dockview-theme-lcl .dv-split-view-container.dv-horizontal > .dv-sash-container > .dv-sash::after {
+  top: 0; bottom: 0; left: 50%; width: 1px; transform: translateX(-50%);
+}
+.dockview-theme-lcl .dv-split-view-container.dv-vertical > .dv-sash-container > .dv-sash::after {
+  left: 0; right: 0; top: 50%; height: 1px; transform: translateY(-50%);
+}
+.dockview-theme-lcl .dv-sash-container .dv-sash:hover::after,
+.dockview-theme-lcl .dv-sash-container .dv-sash:active::after {
+  background: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+.dockview-theme-lcl .dv-split-view-container.dv-horizontal > .dv-sash-container > .dv-sash.dv-enabled {
+  cursor: col-resize;
+}
+.dockview-theme-lcl .dv-split-view-container.dv-vertical > .dv-sash-container > .dv-sash.dv-enabled {
+  cursor: row-resize;
+}
+/* tick 刻度:垂直于分界线的短把手,单例 fixed 定位跟随鼠标(JS 只改 left/top 与 show/h 类) */
+.lcl-sash-tick {
+  position: fixed;
+  z-index: 200; /* sash 本体 z-index 99 之上 */
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 60%, var(--border));
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease-out;
+}
+.lcl-sash-tick.show { opacity: 1; }
+.lcl-sash-tick.h { width: 3px; height: 12px; }
 
 /* 标签栏:内容垂直居中(修「偏上」);命名标签 = 圆角胶囊(激活浅底+圆角,无顶部细线)。 */
 .dockview-theme-lcl .dv-tabs-and-actions-container {

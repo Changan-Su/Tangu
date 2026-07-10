@@ -7,6 +7,7 @@ import { Ribbon } from './Ribbon'
 import { CommandPalette } from './CommandPalette'
 import { WorkspaceHost } from './WorkspaceHost'
 import { installHotkeys } from './commandRegistry'
+import { installSashAffordance } from './sashAffordance'
 import './engine.css'
 
 export const Shell: React.FC<{
@@ -17,6 +18,7 @@ export const Shell: React.FC<{
   header?: React.ReactNode
 }> = ({ dark, soft, buildDefault, header }) => {
   useEffect(() => installHotkeys(), [])
+  useEffect(() => installSashAffordance(), [])
   return (
     <div className="shell">
       {header}

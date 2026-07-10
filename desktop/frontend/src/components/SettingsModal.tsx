@@ -40,6 +40,7 @@ import { HooksTab } from './HooksTab'
 import { PluginSettingsPage } from './PluginSettingsPage'
 import { AgentClisTab } from './AgentClisTab'
 import { QrImage } from './QrImage'
+import { likelyMainlandChina } from './OnboardingWizard'
 
 type StaticTab = 'general' | 'connection' | 'forsion' | 'model' | 'mcp' | 'hooks' | 'skills' | 'agents' | 'plugins' | 'amadeus-plugins' | 'agent-clis' | 'browser' | 'wechat' | 'notes' | 'spaces' | 'theme' | 'shortcuts' | 'advanced' | 'developer' | 'about'
 // 动态插件设置页用 `plugin:<id>`(Obsidian 式一级入口)。
@@ -766,18 +767,24 @@ export const SettingsModal: React.FC<{
                               <option value="system">{t('settings.python.system')}</option>
                             </select>
                           </div>
-                          <div className="field" style={{ maxWidth: 200 }}>
+                          <div className="field">
                             <label>{t('settings.mirror.label')}</label>
-                            <select
-                              value={stored.mirror || 'default'}
-                              onChange={(e) => setStored({ ...stored, mirror: e.target.value as StoredDesktopConfig['mirror'] })}
-                            >
-                              <option value="default">{t('settings.mirror.default')}</option>
-                              <option value="china">{t('settings.mirror.china')}</option>
-                            </select>
+                            <div className="switch-row" style={{ minHeight: 30 }}>
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={(stored.mirror || 'default') === 'china'}
+                                className={`switch${(stored.mirror || 'default') === 'china' ? ' on' : ''}`}
+                                onClick={() => setStored({ ...stored, mirror: (stored.mirror || 'default') === 'china' ? 'default' : 'china' })}
+                              />
+                              <span>{t('settings.mirror.toggle')}</span>
+                            </div>
                           </div>
                         </div>
                         <div className="hint" style={{ marginBottom: 10 }}>{t('settings.python.hint')}</div>
+                        {likelyMainlandChina() && (stored.mirror || 'default') !== 'china' && (
+                          <div className="hint" style={{ marginBottom: 6, color: 'var(--accent)' }}>{t('settings.mirror.recommend')}</div>
+                        )}
                         <div className="hint" style={{ marginBottom: 6 }}>{t('settings.mirror.hint')}</div>
                         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
                           <button

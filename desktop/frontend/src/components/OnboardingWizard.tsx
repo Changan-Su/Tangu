@@ -19,6 +19,16 @@ import { BrandLogo } from './BrandLogo'
 import { Markdown } from './Markdown'
 import { CHANGELOG } from '../changelog'
 
+/** 系统语言/时区疑似中国大陆 → 引导/设置里推荐开镜像(仅推荐,不代选)。 */
+export const likelyMainlandChina = (): boolean => {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''
+    return navigator.language.toLowerCase() === 'zh-cn' || /^Asia\/(Shanghai|Chongqing|Harbin|Urumqi)$/.test(tz)
+  } catch {
+    return false
+  }
+}
+
 export const ONBOARDING_DISMISS_KEY = 'forsion_tangu_onboarding_done'
 /** 上次完成引导时的应用版本号;与当前版本不同 → 版本更新后再进一次引导(展示 What's New)。 */
 export const ONBOARDING_VERSION_KEY = 'forsion_tangu_onboarding_version'
@@ -250,13 +260,17 @@ export const OnboardingWizard: React.FC<{
   const [envChecking, setEnvChecking] = useState(false)
   const [runningInstall, setRunningInstall] = useState<string | null>(null)
   const [installLog, setInstallLog] = useState<string[]>([])
+  /** 最近一次「安装」的结果(行内反馈):ok=装上且复检到;missing=命令成功但复检仍缺;fail=exit≠0。 */
+  const [installResult, setInstallResult] = useState<{ tool: string; state: 'ok' | 'missing' | 'fail'; version: string | null; exitCode: number } | null>(null)
   const logRef = useRef<HTMLPreElement>(null)
 
-  const doEnvCheck = async (): Promise<void> => {
-    if (!window.tangu?.envCheck) return
+  const doEnvCheck = async (): Promise<EnvProbeResult[] | null> => {
+    if (!window.tangu?.envCheck) return null
     setEnvChecking(true)
     try {
-      setProbes(await window.tangu.envCheck())
+      const r = await window.tangu.envCheck()
+      setProbes(r)
+      return r
     } finally {
       setEnvChecking(false)
     }
@@ -283,9 +297,18 @@ export const OnboardingWizard: React.FC<{
     if (!window.confirm(t('onboarding.env.installConfirm', { command: p.installCommand }))) return
     setRunningInstall(p.installId)
     setInstallLog([])
+    setInstallResult(null)
     try {
-      await window.tangu.envRun(p.installId)
-      await doEnvCheck() // 装完重测
+      const r = await window.tangu.envRun(p.installId)
+      const after = await doEnvCheck() // 装完自动重测
+      const probe = after?.find((x) => x.tool === p.tool)
+      // 三态明示结果:exit 码 + 复检对比(exit 0 但复检仍缺 = PATH 未刷新/需重启,不能谎报成功)。
+      setInstallResult({
+        tool: p.tool,
+        state: r.exitCode !== 0 ? 'fail' : probe?.found ? 'ok' : 'missing',
+        version: probe?.version ?? null,
+        exitCode: r.exitCode,
+      })
     } finally {
       setRunningInstall(null)
     }
@@ -706,21 +729,27 @@ export const OnboardingWizard: React.FC<{
 
           {step === 'env' && (
             <>
-              {/* 网络环境:中国大陆用户一键切镜像源(pip/npm/git + 市场下载),即时落配置。 */}
+              {/* 网络环境:开关式换源(仅注入 Forsion 发起的子进程与下载,不改系统配置),即时落配置。 */}
               <div className="field">
                 <label>{t('onboarding.env.mirrorLabel')}</label>
-                <select
-                  value={mirror}
-                  onChange={(e) => {
-                    const v = e.target.value === 'china' ? 'china' : 'default'
-                    setMirror(v)
-                    void window.tangu?.setConfig?.({ mirror: v })
-                  }}
-                >
-                  <option value="default">{t('onboarding.env.mirrorDefault')}</option>
-                  <option value="china">{t('onboarding.env.mirrorChina')}</option>
-                </select>
-                <div className="hint" style={{ marginTop: 6 }}>{t('onboarding.env.mirrorHint')}</div>
+                <div className="switch-row">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={mirror === 'china'}
+                    className={`switch${mirror === 'china' ? ' on' : ''}`}
+                    onClick={() => {
+                      const v = mirror === 'china' ? 'default' : 'china'
+                      setMirror(v)
+                      void window.tangu?.setConfig?.({ mirror: v })
+                    }}
+                  />
+                  <span>{t('settings.mirror.toggle')}</span>
+                </div>
+                {likelyMainlandChina() && mirror !== 'china' && (
+                  <div className="hint" style={{ marginTop: 6, color: 'var(--accent)' }}>{t('settings.mirror.recommend')}</div>
+                )}
+                <div className="hint" style={{ marginTop: 6 }}>{t('settings.mirror.hint')}</div>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
                   <button
                     className="btn ghost sm"
@@ -746,28 +775,54 @@ export const OnboardingWizard: React.FC<{
               <div className="field">
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <MonitorCheck size={13} /> {t('onboarding.env.stepLabel')}
+                  <span className="grow" />
+                  <button
+                    className="btn ghost sm"
+                    disabled={envChecking || runningInstall !== null}
+                    onClick={() => void doEnvCheck()}
+                  >
+                    <RefreshCw size={12} className={envChecking ? 'spin' : ''} /> {t('onboarding.env.recheck')}
+                  </button>
                 </label>
                 {envChecking && <div className="hint">{t('onboarding.env.checking')}</div>}
                 {probes?.map((pr) => (
-                  <div key={pr.tool} className="file-row" style={{ cursor: 'default' }}>
-                    <span className="file-name">
-                      {pr.found ? '✅' : '⚠️'} <b>{pr.tool}</b>
-                      <span style={{ color: 'var(--text-muted)', marginLeft: 8, fontSize: 12 }}>
-                        {pr.found ? pr.version : pr.tool === 'docker' ? t('onboarding.env.missingDocker') : pr.tool === 'npm' ? t('onboarding.env.missingNpm') : t('onboarding.env.missing')}
+                  <React.Fragment key={pr.tool}>
+                    <div className="file-row" style={{ cursor: 'default' }}>
+                      <span className="file-name">
+                        {pr.found ? '✅' : '⚠️'} <b>{pr.tool}</b>
+                        <span style={{ color: 'var(--text-muted)', marginLeft: 8, fontSize: 12 }}>
+                          {pr.found ? pr.version : pr.tool === 'docker' ? t('onboarding.env.missingDocker') : pr.tool === 'npm' ? t('onboarding.env.missingNpm') : t('onboarding.env.missing')}
+                        </span>
                       </span>
-                    </span>
-                    {!pr.found && pr.installId && (
-                      <button
-                        className="btn ghost sm"
-                        disabled={runningInstall !== null}
-                        title={pr.installCommand || ''}
-                        onClick={() => void runInstall(pr)}
+                      {!pr.found && pr.installId && (
+                        <button
+                          className="btn ghost sm"
+                          disabled={runningInstall !== null}
+                          title={pr.installCommand || ''}
+                          onClick={() => void runInstall(pr)}
+                        >
+                          {runningInstall === pr.installId ? <Loader2 size={12} className="spin" /> : <Play size={12} />}{' '}
+                          {needsSudo(pr) ? t('onboarding.env.copyCmd') : t('onboarding.env.install')}
+                        </button>
+                      )}
+                    </div>
+                    {/* 安装结果三态行内反馈:成功(复检到)/命令成功但复检仍缺(PATH 未刷新)/失败(exit≠0)。 */}
+                    {installResult?.tool === pr.tool && (
+                      <div
+                        className="hint"
+                        style={{
+                          margin: '2px 0 6px', display: 'flex', alignItems: 'center', gap: 6,
+                          color: installResult.state === 'ok' ? 'var(--success, #22a06b)'
+                            : installResult.state === 'fail' ? 'var(--danger, #e5484d)' : 'var(--text-muted)',
+                        }}
                       >
-                        {runningInstall === pr.installId ? <Loader2 size={12} className="spin" /> : <Play size={12} />}{' '}
-                        {needsSudo(pr) ? t('onboarding.env.copyCmd') : t('onboarding.env.install')}
-                      </button>
+                        {installResult.state === 'ok' ? <Check size={12} /> : installResult.state === 'fail' ? <X size={12} /> : <RefreshCw size={12} />}
+                        {installResult.state === 'ok' && t('onboarding.env.installOk', { tool: installResult.tool, version: installResult.version || '' })}
+                        {installResult.state === 'missing' && t('onboarding.env.installedButMissing', { tool: installResult.tool })}
+                        {installResult.state === 'fail' && t('onboarding.env.installFail', { tool: installResult.tool, code: installResult.exitCode })}
+                      </div>
                     )}
-                  </div>
+                  </React.Fragment>
                 ))}
                 {installLog.length > 0 && (
                   <pre

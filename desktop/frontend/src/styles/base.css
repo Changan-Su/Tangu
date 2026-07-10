@@ -1792,6 +1792,37 @@ a:hover { color: var(--accent-hover); }
 .seg button + button { border-left: var(--border-width) solid var(--border); }
 .seg button.active { background: var(--accent-light); color: var(--accent-hover); }
 
+/* ── 开关(Switch):通用二态开关,<button role="switch" class="switch [on]">;文案配 .switch-row ── */
+.switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  flex: none;
+  padding: 0;
+  border: var(--border-width) solid var(--border);
+  border-radius: 999px;
+  background: var(--overlay-light, rgba(127, 127, 127, 0.12));
+  cursor: pointer;
+  transition: background var(--duration-fast), border-color var(--duration-fast);
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  transform: translateY(-50%);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
+  transition: left var(--duration-fast);
+}
+.switch.on { background: var(--accent); border-color: var(--accent); }
+.switch.on::after { left: calc(100% - 16px); background: var(--on-accent, #fff); }
+.switch:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 1px; }
+.switch-row { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text); }
+
 /* 主题卡片网格 */
 .theme-grid {
   display: grid;
