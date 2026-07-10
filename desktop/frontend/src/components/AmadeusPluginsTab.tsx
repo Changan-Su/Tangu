@@ -4,6 +4,9 @@
  * 不复用 Amadeus 自带 SettingsDialog 的 CSS(壳设置页没加载那套类)。
  */
 import React, { useEffect } from 'react'
+import { Button } from '@astryxdesign/core/Button'
+import { Switch } from '@astryxdesign/core/Switch'
+import { AstryxScope } from '../theme/astryxBridge'
 import { usePluginStore } from '@amadeus/plugins/pluginStore'
 import { installAmadeusPlugins } from '../amadeusPlugins'
 import { useI18n } from '../i18n'
@@ -32,12 +35,13 @@ export const AmadeusPluginsTab: React.FC = () => {
       : t('settings.amadeusPlugins.blockedMinApp', { v: p.minAppVersion || '?' })
 
   return (
+    <AstryxScope>
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div className="hint">{t('settings.amadeusPlugins.hint')}</div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button className="btn ghost sm" onClick={() => openFolder()}>{t('settings.amadeusPlugins.openFolder')}</button>
-        <button className="btn ghost sm" onClick={() => void reload()}>{t('settings.amadeusPlugins.reload')}</button>
-        <button className="btn ghost sm" onClick={() => void scaffold()}>{t('settings.amadeusPlugins.scaffold')}</button>
+        <Button size="sm" variant="ghost" label={t('settings.amadeusPlugins.openFolder')} onClick={() => openFolder()} />
+        <Button size="sm" variant="ghost" label={t('settings.amadeusPlugins.reload')} onClick={() => void reload()} />
+        <Button size="sm" variant="ghost" label={t('settings.amadeusPlugins.scaffold')} onClick={() => void scaffold()} />
       </div>
       {plugins.length === 0 && <div className="hint">{t('settings.amadeusPlugins.empty')}</div>}
       {plugins.map((p) => {
@@ -59,11 +63,12 @@ export const AmadeusPluginsTab: React.FC = () => {
                 </div>
                 {p.description && <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 2 }}>{p.description}</div>}
               </div>
-              <input type="checkbox" checked={on} disabled={!!p.blocked} onChange={() => toggle(p.id)} style={{ cursor: p.blocked ? 'not-allowed' : 'pointer' }} />
+              <Switch label={p.name} isLabelHidden value={on} isDisabled={!!p.blocked} onChange={() => toggle(p.id)} />
             </div>
           </div>
         )
       })}
     </div>
+    </AstryxScope>
   )
 }

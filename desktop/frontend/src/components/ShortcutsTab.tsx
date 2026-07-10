@@ -4,6 +4,8 @@
  */
 import React, { useState } from 'react'
 import { RotateCcw, X } from 'lucide-react'
+import { Button } from '@astryxdesign/core/Button'
+import { AstryxScope } from '../theme/astryxBridge'
 import { useCommandStore, useShortcuts, eventToHotkey, formatHotkey } from '@lcl/engine'
 import { useI18n } from '../i18n'
 
@@ -46,6 +48,7 @@ export const ShortcutsTab: React.FC = () => {
   }
 
   return (
+    <AstryxScope>
     <div className="field">
       <div className="settings-sec">{t('settings.tab.shortcuts')}</div>
       <div className="hint" style={{ marginBottom: 10 }}>{t('settings.shortcuts.desc')}</div>
@@ -84,8 +87,9 @@ export const ShortcutsTab: React.FC = () => {
         })}
       </div>
       <div className="field-row" style={{ marginTop: 12 }}>
-        <button type="button" className="btn sm" onClick={() => resetAll()}>{t('settings.shortcuts.resetAll')}</button>
+        <Button size="sm" variant="secondary" label={t('settings.shortcuts.resetAll')} onClick={() => resetAll()} />
       </div>
     </div>
+    </AstryxScope>
   )
 }

@@ -4,6 +4,9 @@
  * 插件清单与 agents 由 SettingsModal 统一持有并下传(避免双拉,启用态变更即时反映到 nav)。仅本地后端可用。
  */
 import React, { useEffect, useState } from 'react'
+import { Button } from '@astryxdesign/core/Button'
+import { Switch } from '@astryxdesign/core/Switch'
+import { AstryxScope } from '../theme/astryxBridge'
 import { setPluginEnabled, uninstallPlugin, type PluginInfo } from '../services/backendService'
 import { useApp } from '../stores/appStore'
 import type { TanguDesktopConfig } from '../types'
@@ -46,6 +49,7 @@ export const PluginsTab: React.FC<{
   if (!plugins.length) return <div className="hint">{t('settings.plugins.empty')}</div>
 
   return (
+    <AstryxScope>
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {plugins.map((p) => (
         <div key={p.id} style={{ border: 'var(--border-width) solid var(--border)', borderRadius: 'var(--radius-lg, 10px)', padding: 12 }}>
@@ -65,17 +69,16 @@ export const PluginsTab: React.FC<{
               <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 2 }}>{ds(p)}</div>
             </div>
             {p.settings && p.enabled && (
-              <button className="btn ghost sm" onClick={() => onOpenSettings(p.id)}>{t('settings.plugins.openSettings')}</button>
+              <Button size="sm" variant="ghost" label={t('settings.plugins.openSettings')} onClick={() => onOpenSettings(p.id)} />
             )}
             {p.source === 'folder' && userIds.has(p.id) && (
-              <button className="btn ghost sm" style={{ color: 'var(--danger, #c0392b)' }} onClick={() => void uninstall(p)}>
-                {t('settings.plugins.uninstall')}
-              </button>
+              <Button size="sm" variant="destructive" label={t('settings.plugins.uninstall')} onClick={() => void uninstall(p)} />
             )}
-            <input type="checkbox" checked={p.enabled} onChange={() => void toggle(p)} style={{ cursor: 'pointer' }} />
+            <Switch label={nm(p)} isLabelHidden value={p.enabled} onChange={() => void toggle(p)} />
           </div>
         </div>
       ))}
     </div>
+    </AstryxScope>
   )
 }

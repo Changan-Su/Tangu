@@ -4,6 +4,9 @@
  *  配置:列出全部含「日历日期」列的多维表,每库可设颜色/显隐/默认库(按 vault 存 localStorage)。 */
 import { useEffect, useMemo, useState } from 'react'
 import { useWorkspace, activeMainPanel } from '@lcl/engine'
+import { Button } from '@astryxdesign/core/Button'
+import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
+import { AstryxScope } from '../theme/astryxBridge'
 import { usePageStore } from '../amadeus/store/pageStore'
 import { useAggregatedDatabases } from '../amadeus/store/dbAggregateStore'
 import { useCalendarConfig, colorForDb, isHidden, defaultDbPath } from '../amadeus/store/calendarConfigStore'
@@ -12,10 +15,12 @@ import { WEEKDAYS, addDays, diffDays, fmtStamp, monthGridDays, monthLabel, start
 
 export function CalendarConfigView() {
   return (
-    <div className="amx-calside">
-      <MiniCalendar />
-      <ConfigList />
-    </div>
+    <AstryxScope>
+      <div className="amx-calside">
+        <MiniCalendar />
+        <ConfigList />
+      </div>
+    </AstryxScope>
   )
 }
 
@@ -112,19 +117,21 @@ function ConfigList() {
                 <input type="color" value={color} onChange={(e) => setColor(vault, db.path, e.target.value)} title="事件颜色" />
               </span>
               <span className={`amx-calcfg-name${visible ? '' : ' off'}`} title={db.name}>{db.name}</span>
-              <button
-                className={`amx-calcfg-def${isDefault ? ' on' : ''}`}
+              <Button
+                size="sm"
+                variant={isDefault ? 'primary' : 'ghost'}
+                isIconOnly
+                icon={<span>★</span>}
+                label="设为新建事件的默认多维表"
+                tooltip="设为新建事件的默认多维表"
                 onClick={() => setDefault(vault, db.path)}
-                title="设为新建事件的默认多维表"
-              >
-                ★
-              </button>
-              <input
-                type="checkbox"
-                className="amx-calcfg-vis"
-                checked={visible}
+              />
+              <CheckboxInput
+                label="在日历中显示"
+                isLabelHidden
+                size="sm"
+                value={visible}
                 onChange={() => toggleHidden(vault, db.path)}
-                title="在日历中显示"
               />
             </div>
           )

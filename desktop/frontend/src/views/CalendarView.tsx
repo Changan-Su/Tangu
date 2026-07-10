@@ -15,6 +15,10 @@ import {
   type MouseEvent as ReactMouseEvent,
   type RefObject,
 } from 'react'
+import { ChevronLeft, ChevronRight, Minus, Plus } from 'lucide-react'
+import { Button } from '@astryxdesign/core/Button'
+import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
+import { AstryxScope } from '../theme/astryxBridge'
 import { parseCalDate } from '@amadeus-shared/db/calDate'
 import { usePageStore } from '../amadeus/store/pageStore'
 import {
@@ -149,27 +153,30 @@ export function CalendarView() {
   const n = mode === 'week' ? 7 : mode === '3day' ? 3 : 1
   return (
     <div className="amx-cal">
-      <header className="amx-cal-bar">
-        <div className="amx-cal-nav">
-          <button className="amx-cal-btn" onClick={() => api.current?.prev()} aria-label="上一页">‹</button>
-          <button className="amx-cal-btn amx-cal-today" onClick={() => api.current?.today()}>今天</button>
-          <button className="amx-cal-btn" onClick={() => api.current?.next()} aria-label="下一页">›</button>
-          <span className="amx-cal-title" ref={titleRef} />
-        </div>
-        <div className="amx-cal-modes">
-          {mode !== 'month' && (
-            <>
-              <button className="amx-cal-btn" onClick={() => setHourPx(hourPx - 8)} aria-label="缩小时间轴" title="缩小时间轴（Ctrl/Cmd+滚轮）">−</button>
-              <button className="amx-cal-btn" onClick={() => setHourPx(hourPx + 8)} aria-label="放大时间轴" title="放大时间轴（Ctrl/Cmd+滚轮）">＋</button>
-            </>
-          )}
-          {(['month', 'week', '3day', 'day'] as CalMode[]).map((m) => (
-            <button key={m} className={`amx-cal-mode${mode === m ? ' on' : ''}`} onClick={() => setMode(m)}>
-              {m === 'month' ? '月' : m === 'week' ? '周' : m === '3day' ? '3 日' : '日'}
-            </button>
-          ))}
-        </div>
-      </header>
+      <AstryxScope>
+        <header className="amx-cal-bar">
+          <div className="amx-cal-nav">
+            <Button size="sm" variant="ghost" isIconOnly icon={<ChevronLeft size={14} />} label="上一页" onClick={() => api.current?.prev()} />
+            <Button size="sm" variant="ghost" label="今天" onClick={() => api.current?.today()} />
+            <Button size="sm" variant="ghost" isIconOnly icon={<ChevronRight size={14} />} label="下一页" onClick={() => api.current?.next()} />
+            <span className="amx-cal-title" ref={titleRef} />
+          </div>
+          <div className="amx-cal-modes">
+            {mode !== 'month' && (
+              <>
+                <Button size="sm" variant="ghost" isIconOnly icon={<Minus size={14} />} label="缩小时间轴" tooltip="缩小时间轴（Ctrl/Cmd+滚轮）" onClick={() => setHourPx(hourPx - 8)} />
+                <Button size="sm" variant="ghost" isIconOnly icon={<Plus size={14} />} label="放大时间轴" tooltip="放大时间轴（Ctrl/Cmd+滚轮）" onClick={() => setHourPx(hourPx + 8)} />
+              </>
+            )}
+            <SegmentedControl value={mode} onChange={(v) => setMode(v as CalMode)} label="视图" size="sm">
+              <SegmentedControlItem value="month" label="月" />
+              <SegmentedControlItem value="week" label="周" />
+              <SegmentedControlItem value="3day" label="3 日" />
+              <SegmentedControlItem value="day" label="日" />
+            </SegmentedControl>
+          </div>
+        </header>
+      </AstryxScope>
 
       {visible.length === 0 && (
         <div className="amx-cal-empty">还没有日历事件。双击空白处新建,或给多维表加「日历日期」列。</div>

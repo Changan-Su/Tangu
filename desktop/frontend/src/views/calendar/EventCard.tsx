@@ -3,34 +3,16 @@
  *  透明捕获层点外即关;卡片 fixed 定位在锚点旁,不依赖事件块 DOM。
  *
  *  ★ astryx 试点(facebook/astryx,Beta):卡片面子 = astryx Card/TextInput/Button,
- *  LCL token 桥 = defineTheme 的 token 值直接引用 LCL CSS 变量(--accent/--bg/--text…),
- *  明暗由 LCL 变量自身随 data-mode 流动,mode 再镜像给 Theme 管 astryx 内建色。
+ *  桥与 Theme 一律走 theme/astryxBridge 的 <AstryxScope>(全应用唯一接入口)。
  *  域内编辑器(CalDateFields/CardPropField)与定位/动画壳保持原样;回滚 = 分支不合并。 */
-import '@astryxdesign/core/reset.css'
-import '@astryxdesign/core/astryx.css'
-import '@astryxdesign/theme-neutral/theme.css'
-import { Theme, defineTheme } from '@astryxdesign/core/theme'
 import { Card } from '@astryxdesign/core/Card'
 import { Button } from '@astryxdesign/core/Button'
 import { TextInput } from '@astryxdesign/core/TextInput'
-import { useTheme } from '../../stores/themeStore'
+import { AstryxScope } from '../../theme/astryxBridge'
 import { coerceForDisplay, type CellValue, type DbColumn } from '@amadeus-shared/db/schema'
 import { CalDateFields } from '../../amadeus/blocks/database/propertyTypes.builtins'
 import { getPropertyType, resolveBaseType } from '../../amadeus/blocks/database/propertyTypes'
 import { setAggCell, setAggName, deleteAggRow, cellText, type AggDb, type AggRow } from '../../amadeus/store/dbAggregateStore'
-
-// LCL → astryx token 桥:单值字符串引用 LCL 变量,换肤/明暗零维护跟随。
-const lclTheme = defineTheme({
-  name: 'forsion-lcl',
-  tokens: {
-    '--color-accent': 'var(--accent, #6c5ce7)',
-    '--color-background-body': 'var(--bg)',
-    '--color-background-surface': 'var(--bg-card, var(--bg))',
-    '--color-text-primary': 'var(--text)',
-    '--color-text-secondary': 'var(--text-muted)',
-    '--radius-container': 'var(--radius-md, 12px)',
-  },
-})
 
 export interface Anchor { left: number; top: number; right: number; bottom: number }
 
@@ -55,7 +37,6 @@ function cardPos(at: Anchor): { left: number; top: number } {
 }
 
 export function EventCard({ ev, at, onClose }: { ev: CardTarget; at: Anchor; onClose: () => void }) {
-  const mode = useTheme((s) => s.mode)
   const { db, row, colId, title } = ev
   const nameCol = db.columns[0]
   const titleEditable = !(db.isNoteView && nameCol?.type === 'page')
@@ -64,7 +45,7 @@ export function EventCard({ ev, at, onClose }: { ev: CardTarget; at: Anchor; onC
   return (
     <div className="amx-cal-cardcatch" onMouseDown={onClose}>
       <div className="amx-cal-cardwrap" style={pos} onMouseDown={(e) => e.stopPropagation()}>
-        <Theme theme={lclTheme} mode={mode}>
+        <AstryxScope>
           <Card padding={3}>
             <div className="amx-cal-cardin">
               <div className="amx-cal-card-db" style={{ color: ev.color ?? 'var(--accent, #6c5ce7)' }}>◆ {db.name}</div>
@@ -103,7 +84,7 @@ export function EventCard({ ev, at, onClose }: { ev: CardTarget; at: Anchor; onC
               </div>
             </div>
           </Card>
-        </Theme>
+        </AstryxScope>
       </div>
     </div>
   )
