@@ -222,6 +222,10 @@ export interface ModelsResponse {
   models: ModelInfo[]
   directProviders: Array<{ providerId: string; baseUrl?: string; modelIds?: string[]; imageModelIds?: string[]; ttsModelIds?: string[] }>
   defaultModelId: string | null
+  /** admin 的 app 级「后台 agent 默认」槽(Muse/Historian 未显式选模型时跟随;缺省回退 defaultModelId)。 */
+  backgroundModelId?: string | null
+  /** admin 的 app 级「生图默认」槽(generate_image 与设置生图区未显式选择时跟随)。 */
+  imageModelId?: string | null
   /** 云端托管面诊断:empty=可达但 admin 没配模型;error=不可达/未授权/未部署 brain-api。 */
   forsion?: { status: 'ok' | 'empty' | 'error'; detail: string | null }
 }

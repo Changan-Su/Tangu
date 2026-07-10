@@ -1,7 +1,8 @@
 /**
  * Special Agent（Historian / Muse）配置 —— 本地 `~/.tangu/special-agents.json` 单一事实来源。
  *
- * 二者**默认全关**；开启需用户显式选模型（modelId 空 → 视为未就绪，服务 no-op）。
+ * 二者**默认全关**。modelId 空 ≠ 未就绪:经 resolveBackgroundModelId 跟随 admin 的
+ * app 级「后台 agent 默认」槽(其次对话默认);本地显式选过模型即脱离跟随。全无 → 服务 no-op。
  * 运行时（localHistorian / muse / supervisor）只读；桌面 Settings 与 TUI slash 经
  * `GET/POST /agent/special/config` 端点写。仅 standalone/managed（桌面+TUI）形态使用。
  *
@@ -10,6 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { specialAgentsConfigFile } from '../core/tanguHome.js';
 import { getRawSection, saveSection } from '../core/config.js';
+import { deps } from '../seams/runtime.js';
 
 export interface HistorianConfig {
   enabled: boolean;
@@ -178,6 +180,31 @@ export function saveSpecialAgentsConfig(patch: Partial<SpecialAgentsConfig>): Sp
   });
   saveSection('specialAgents', merged);
   return merged;
+}
+
+/**
+ * 后台 agent（Historian/Muse）模型解析:用户显式配置 > admin 的 app 级「后台 agent 默认」槽 >
+ * app 级对话默认 > profile 静态默认。用户没手动选模型时跟随云端(admin 改了下次解析即生效);
+ * 选过即脱离跟随。60s 缓存(Historian 每轮触发,避免连环拉模型列表)。
+ */
+let bgSlotCache: { at: number; bg: string; def: string } | null = null;
+export async function resolveBackgroundModelId(explicit: string): Promise<string> {
+  if (explicit) return explicit;
+  const now = Date.now();
+  if (!bgSlotCache || now - bgSlotCache.at > 60_000) {
+    let bg = '';
+    let def = '';
+    try {
+      const list = deps().brain.models.listModelsForProject;
+      if (list) {
+        const r = await list(deps().profile.appId);
+        bg = String(r?.backgroundModelId || '');
+        def = String(r?.defaultModelId || '');
+      }
+    } catch { /* 云端不可达 → 落 profile 静态默认 */ }
+    bgSlotCache = { at: now, bg, def };
+  }
+  return bgSlotCache.bg || bgSlotCache.def || deps().profile.defaultModelId || '';
 }
 
 /** 当前设备本地时是否在运行时段内（activeHours=null → 恒 true；支持跨夜）。 */

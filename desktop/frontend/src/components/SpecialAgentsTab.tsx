@@ -23,15 +23,24 @@ export const SpecialAgentsTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg })
   const [conf, setConf] = useState<SpecialAgentsConfig | null>(null)
   const [defaults, setDefaults] = useState<{ historianPrompt: string }>({ historianPrompt: '' })
   const [models, setModels] = useState<ModelInfo[]>([])
+  /** admin 的 app 级后台默认槽(其次对话默认):未显式选模型时跟随,开关不再因空模型而禁用。 */
+  const [slotDefault, setSlotDefault] = useState('')
   const [msg, setMsg] = useState('')
 
   useEffect(() => {
     void getSpecialConfig(cfg).then((r) => { setConf(r.config); if (r.defaults) setDefaults(r.defaults) }).catch(() => setConf(null))
-    void listModels(cfg).then((r) => setModels(r.models)).catch(() => setModels([]))
+    void listModels(cfg).then((r) => {
+      setModels(r.models)
+      setSlotDefault(r.backgroundModelId || r.defaultModelId || '')
+    }).catch(() => setModels([]))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const modelOpts = useMemo(() => models.map((m) => ({ id: m.id, label: m.name || m.id })), [models])
+  const slotDefaultLabel = useMemo(
+    () => (slotDefault ? (models.find((m) => m.id === slotDefault)?.name || slotDefault) : ''),
+    [slotDefault, models],
+  )
 
   const saveHistorian = (patch: Partial<HistorianConfig>): void => {
     if (!conf) return
@@ -52,7 +61,9 @@ export const SpecialAgentsTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg })
 
   const modelSelect = (value: string, onChange: (v: string) => void) => (
     <select value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">{t('settings.special.pickModelFirst')}</option>
+      <option value="">
+        {slotDefault ? t('settings.special.followCloudDefault', { model: slotDefaultLabel }) : t('settings.special.pickModelFirst')}
+      </option>
       {modelOpts.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
     </select>
   )
@@ -72,10 +83,10 @@ export const SpecialAgentsTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg })
         <div className="agent-card-head">
           <span className="ac-title"><History size={15} /> {t('settings.special.historian')}</span>
           <span className="grow" />
-          <Seg value={h.enabled} canOn={!!h.modelId} onChange={(v) => saveHistorian({ enabled: v })}
+          <Seg value={h.enabled} canOn={!!h.modelId || !!slotDefault} onChange={(v) => saveHistorian({ enabled: v })}
             onLabel={t('settings.special.on')} offLabel={t('settings.special.off')} />
         </div>
-        <p className="ac-desc">{t('settings.special.historianDesc')}{!h.modelId && ` · ${t('settings.special.pickModelFirst')}`}</p>
+        <p className="ac-desc">{t('settings.special.historianDesc')}{!h.modelId && !slotDefault && ` · ${t('settings.special.pickModelFirst')}`}</p>
         <div className="field"><label>{t('settings.special.model')}</label>{modelSelect(h.modelId, (v) => saveHistorian({ modelId: v }))}</div>
         <div className="field">
           <label>{t('settings.special.h.mode')}</label>
@@ -109,10 +120,10 @@ export const SpecialAgentsTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg })
         <div className="agent-card-head">
           <span className="ac-title"><Sparkles size={15} /> {t('settings.special.muse')}</span>
           <span className="grow" />
-          <Seg value={m.enabled} canOn={!!m.modelId} onChange={(v) => saveMuse({ enabled: v })}
+          <Seg value={m.enabled} canOn={!!m.modelId || !!slotDefault} onChange={(v) => saveMuse({ enabled: v })}
             onLabel={t('settings.special.on')} offLabel={t('settings.special.off')} />
         </div>
-        <p className="ac-desc">{t('settings.special.museDesc')}{!m.modelId && ` · ${t('settings.special.pickModelFirst')}`}</p>
+        <p className="ac-desc">{t('settings.special.museDesc')}{!m.modelId && !slotDefault && ` · ${t('settings.special.pickModelFirst')}`}</p>
         <div className="field"><label>{t('settings.special.model')}</label>{modelSelect(m.modelId, (v) => saveMuse({ modelId: v }))}</div>
         <div className="field-row">
           {numField(t('settings.special.m.restartWindow'), m.restartWindowHours, (n) => saveMuse({ restartWindowHours: n }), 1, 24)}

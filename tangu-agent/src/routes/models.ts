@@ -30,6 +30,8 @@ router.get('/agent/models', authMiddleware, async (req: AuthRequest, res) => {
     let forsion: { status: 'ok' | 'empty' | 'error'; detail: string | null } = { status: 'ok', detail: null };
     let cloud: any[] = [];
     let projectDefaultModelId: string | null = null;
+    let projectBackgroundModelId: string | null = null;
+    let projectImageModelId: string | null = null;
     try {
       // 优先按应用过滤(admin 的 project_model_configs);brain 未实现该可选方法 → 回退全局列表。
       const listForProject = deps().brain.models.listModelsForProject;
@@ -37,6 +39,8 @@ router.get('/agent/models', authMiddleware, async (req: AuthRequest, res) => {
         const r = await listForProject(profile.appId);
         cloud = r?.models || [];
         projectDefaultModelId = r?.defaultModelId ?? null;
+        projectBackgroundModelId = r?.backgroundModelId ?? null;
+        projectImageModelId = r?.imageModelId ?? null;
       } else {
         cloud = (await deps().brain.models.listGlobalModels()) || [];
       }
@@ -75,8 +79,15 @@ router.get('/agent/models', authMiddleware, async (req: AuthRequest, res) => {
     const seenId = new Set<string>();
     const uniqueModels = models.filter((m) => (seenId.has(m.id) ? false : (seenId.add(m.id), true)));
 
-    // 默认模型:admin 的 project 默认 > profile 静态默认。
-    res.json({ models: uniqueModels, directProviders, defaultModelId: projectDefaultModelId || profile.defaultModelId || null, forsion });
+    // 默认模型:admin 的 project 默认 > profile 静态默认。后台/生图槽供客户端「未显式设置即跟随」。
+    res.json({
+      models: uniqueModels,
+      directProviders,
+      defaultModelId: projectDefaultModelId || profile.defaultModelId || null,
+      backgroundModelId: projectBackgroundModelId,
+      imageModelId: projectImageModelId,
+      forsion,
+    });
   } catch (e: any) {
     res.status(500).json({ detail: e?.message || 'list models failed' });
   }

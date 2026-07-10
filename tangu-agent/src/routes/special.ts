@@ -60,7 +60,8 @@ router.post('/agent/special/config', authMiddleware, async (req: AuthRequest, re
     const legacy = legacyMusePrompt();
     const config = saveSpecialAgentsConfig(patch);
     // 刚启用 Muse → 立即播种其系统 agent 文件夹(名册马上可见)并催一次巡检,免得等满一个周期。
-    if (config.muse.enabled && config.muse.modelId) {
+    // modelId 空不再挡:未选模型=跟随 admin 后台默认槽,可用性由 tick 内 resolveBackgroundModelId 判定。
+    if (config.muse.enabled) {
       void ensureMuseAgent(legacy).catch(() => {});
       kickMuse();
     }

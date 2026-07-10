@@ -20,7 +20,7 @@ import { query, getOlderThanSql } from '../core/db.js';
 import { deps } from '../seams/runtime.js';
 import { createRun } from './runStore.js';
 import { enqueueRun } from './agentLoop.js';
-import { loadSpecialAgentsConfig, legacyMusePrompt, isWithinActiveHours, buildTodoDedupHint, type MuseConfig } from './specialAgentsConfig.js';
+import { loadSpecialAgentsConfig, legacyMusePrompt, isWithinActiveHours, buildTodoDedupHint, resolveBackgroundModelId, type MuseConfig } from './specialAgentsConfig.js';
 import { MUSE_AGENT_SLUG, ensureMuseAgent, listAgents, resolveMemorySlug } from '../agents/agentRegistry.js';
 import { runWithAgentSlug } from '../seams/runContext.js';
 import { DEFAULT_AGENT_SLUG } from '../core/tanguHome.js';
@@ -275,7 +275,9 @@ async function tick(): Promise<void> {
     if (!isLocal()) return;
     const cfg = loadSpecialAgentsConfig().muse;
     if (!cfg.enabled) { lastRunning = false; return; }
-    if (!cfg.modelId) { lastRunning = false; log('已启用但未选模型,跳过'); return; }
+    // 模型解析:用户显式配置 > admin 后台默认槽 > 对话默认(未选模型=跟随云端,admin 改动下轮生效)。
+    cfg.modelId = await resolveBackgroundModelId(cfg.modelId);
+    if (!cfg.modelId) { lastRunning = false; log('已启用但无可用模型(本地未选且云端无后台默认),跳过'); return; }
     // 播种/自愈 Muse 系统 agent 文件夹(幂等;首次创建时一次性迁移旧自定义 prompt)。
     await ensureMuseAgent(legacyMusePrompt()).catch((e: any) => log(`播种 muse agent 失败:${e?.message || e}`));
     if (!isWithinActiveHours(cfg, nowHour())) { log(`不在运行时段(当前 ${nowHour()} 时),跳过`); return; }

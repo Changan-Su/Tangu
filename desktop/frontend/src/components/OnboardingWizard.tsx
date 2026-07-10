@@ -232,12 +232,8 @@ export const OnboardingWizard: React.FC<{
   const saveHistorian = (patch: Partial<SpecialAgentsConfig['historian']>): void => {
     if (!special) return
     const h = { ...special.historian, ...patch }
-    // 开启需要模型:沿用上一步选的默认模型(设置里可再改)。
-    if (h.enabled && !h.modelId) h.modelId = chosenModel
-    if (h.enabled && !h.modelId) {
-      setAgMsg(t('onboarding.agents.historianNeedModel'))
-      return
-    }
+    // modelId 留空=跟随 admin 的「后台 agent 默认」槽(其次对话默认);不再强制选模型,
+    // 也不把引导选的对话模型写死进来(写了就脱离跟随)。
     setSpecial({ ...special, historian: h })
     // 保存失败绝不静默:提示 + 回读服务端真值(否则乐观 UI 显示已开而后端没存上)。
     void apiCfg().then((cfg) =>
@@ -870,7 +866,9 @@ export const OnboardingWizard: React.FC<{
                 className="btn primary sm"
                 disabled={step === 'connect' && !connectReady}
                 onClick={() => {
-                  if (step === 'model' && chosenModel) {
+                  // 只有用户改选了非云端默认的模型才写 cfg(显式设置=脱离跟随);保持预选默认
+                  // 直接下一步 → cfg.modelId 留空,持续跟随 admin 的 app 级默认。
+                  if (step === 'model' && chosenModel && chosenModel !== (models?.defaultModelId || '')) {
                     void window.tangu?.setConfig({ modelId: chosenModel })
                   }
                   if (step === 'workspace') {

@@ -10,13 +10,18 @@ import { deps } from '../../seams/runtime.js';
 import type { ToolProvider } from '../toolRegistry.js';
 import type { ToolContext } from '../toolTypes.js';
 
-/** 取第一个可用生图模型 id:云端(modelType=image_gen)优先,其次直连 provider 的 imageModelIds。 */
+/** 生图模型缺省解析:admin 的 app 级生图默认槽 > 第一个可用云端生图模型 > 直连 provider 的 imageModelIds。 */
 async function firstImageModelId(appId: string): Promise<string | null> {
   try {
     const m = deps().brain.models;
     let cloud: any[] = [];
-    if (m.listModelsForProject) cloud = (await m.listModelsForProject(appId))?.models || [];
-    else cloud = (await m.listGlobalModels()) || [];
+    if (m.listModelsForProject) {
+      const r = await m.listModelsForProject(appId);
+      if (r?.imageModelId) return String(r.imageModelId); // admin 生图默认(用户/run 未显式指定时跟随)
+      cloud = r?.models || [];
+    } else {
+      cloud = (await m.listGlobalModels()) || [];
+    }
     const img = cloud.find((x) => x?.id && x.modelType === 'image_gen');
     if (img?.id) return String(img.id);
     for (const p of m.listDirectProviders?.() ?? []) {

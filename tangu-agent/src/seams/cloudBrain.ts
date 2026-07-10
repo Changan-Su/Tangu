@@ -131,10 +131,16 @@ export interface ModelsBrain {
    * 按应用过滤的模型列表(遵守 Forsion admin「应用模型配置」project_model_configs)。
    * 可选:旧版云端/brain 未实现 → 调用方回退 listGlobalModels。
    * 语义:project 无配置行 → 等价全局列表(优雅降级);有配置行 → 严格遵守。
-   * 错误处理与 listGlobalModels 同款:httpBrain 对网络/旧契约降级 { models: [], defaultModelId: null }
-   * (TUI 依赖不抛;空列表真相由调用方探针补全),进程内实现可抛(调用方捕获)。
+   * 附带 admin 的 app 级三槽默认(对话/后台 agent/生图;旧云端缺字段 → null,客户端按各自回退链降级)。
+   * 错误处理与 listGlobalModels 同款:httpBrain 对网络/旧契约降级全 null(TUI 依赖不抛;
+   * 空列表真相由调用方探针补全),进程内实现可抛(调用方捕获)。
    */
-  listModelsForProject?(projectId: string): Promise<{ models: any[]; defaultModelId: string | null }>;
+  listModelsForProject?(projectId: string): Promise<{
+    models: any[];
+    defaultModelId: string | null;
+    backgroundModelId?: string | null;
+    imageModelId?: string | null;
+  }>;
 }
 
 /**

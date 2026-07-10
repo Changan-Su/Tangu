@@ -21,7 +21,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { query } from '../core/db.js';
 import { deps } from '../seams/runtime.js';
 import type { ChatMessage } from '../core/types.js';
-import { loadSpecialAgentsConfig, DEFAULT_HISTORIAN_PROMPT, type HistorianConfig } from './specialAgentsConfig.js';
+import { loadSpecialAgentsConfig, DEFAULT_HISTORIAN_PROMPT, resolveBackgroundModelId, type HistorianConfig } from './specialAgentsConfig.js';
 import { enterRunContext } from '../seams/runContext.js';
 import { getAgent, resolveMemorySlug } from '../agents/agentRegistry.js';
 import { branchSession } from './sessionBranch.js';
@@ -199,7 +199,10 @@ export async function onUserRunDone(sessionId: string, userId: string, memScopeS
   if (effectiveSlug) enterRunContext(userId, undefined, effectiveSlug);
   let cfg;
   try { cfg = loadSpecialAgentsConfig().historian; } catch { return; }
-  if (!cfg.enabled || !cfg.modelId) return;
+  if (!cfg.enabled) return;
+  // 模型解析:用户显式配置 > admin 后台默认槽 > 对话默认(未选模型=跟随云端)。
+  cfg.modelId = await resolveBackgroundModelId(cfg.modelId).catch(() => '');
+  if (!cfg.modelId) return;
 
   try {
     // 仅用户会话；并发安全：roundN 由 done run 计数推出（幂等）。app_id/model_id/agent_config 供辅助模式讨论用。

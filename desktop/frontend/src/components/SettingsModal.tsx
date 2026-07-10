@@ -1115,29 +1115,40 @@ export const SettingsModal: React.FC<{
                       ) : null}
                     </div>
 
-                    {/* 生图模型(generate_image 用):始终可见,选中即设为默认;无则给配置指引。 */}
+                    {/* 生图模型(generate_image 用):选中即设为默认,再点取消=跟随云端生图默认;无则给配置指引。 */}
                     <div className="field">
                       <label>{t('settings.model.imageModelsLabel')}</label>
                       {(() => {
                         const imgs = (models?.models || []).filter((m) => m.modelType === 'image_gen')
                         if (!imgs.length) return <div className="hint">{modelsLoading ? t('common.loading') : t('settings.model.imageEmpty')}</div>
+                        const cloudImageDefault = models?.imageModelId || ''
                         return (
                           <div className="model-group-body">
-                            {imgs.map((m) => (
-                              <button
-                                key={`${m.source}-${m.id}`}
-                                className={`file-row${(draft.imageModelId || '') === m.id ? ' active' : ''}`}
-                                onClick={() => { setDraft({ ...draft, imageModelId: m.id }); p.onConfigChange({ imageModelId: m.id }) }}
-                              >
-                                <span className="file-name" style={{ color: (draft.imageModelId || '') === m.id ? 'var(--accent)' : undefined }}>{m.name}</span>
-                                {m.source === 'direct' && <span className="model-group-tag">{t('model.group.direct')}</span>}
-                                {(draft.imageModelId || '') === m.id && <Check size={12} style={{ color: 'var(--accent)' }} />}
-                              </button>
-                            ))}
+                            {imgs.map((m) => {
+                              const selected = (draft.imageModelId || '') === m.id
+                              return (
+                                <button
+                                  key={`${m.source}-${m.id}`}
+                                  className={`file-row${selected ? ' active' : ''}`}
+                                  onClick={() => { const v = selected ? '' : m.id; setDraft({ ...draft, imageModelId: v }); p.onConfigChange({ imageModelId: v }) }}
+                                >
+                                  <span className="file-name" style={{ color: selected ? 'var(--accent)' : undefined }}>{m.name}</span>
+                                  {m.source === 'direct' && <span className="model-group-tag">{t('model.group.direct')}</span>}
+                                  {!draft.imageModelId && m.id === cloudImageDefault && (
+                                    <span className="model-group-tag">{t('settings.model.imageCloudDefaultTag')}</span>
+                                  )}
+                                  {selected && <Check size={12} style={{ color: 'var(--accent)' }} />}
+                                </button>
+                              )
+                            })}
                           </div>
                         )
                       })()}
-                      <div className="hint" style={{ marginTop: 4 }}>{t('settings.model.imageHelp')}</div>
+                      <div className="hint" style={{ marginTop: 4 }}>
+                        {!draft.imageModelId && models?.imageModelId
+                          ? t('settings.model.imageFollowingDefault', { model: (models.models || []).find((m) => m.id === models.imageModelId)?.name || models.imageModelId })
+                          : t('settings.model.imageHelp')}
+                      </div>
                     </div>
 
                     {isDesktop && providers && providers.length > 0 && (
