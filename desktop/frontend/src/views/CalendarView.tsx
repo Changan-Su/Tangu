@@ -15,9 +15,10 @@ import {
   type MouseEvent as ReactMouseEvent,
   type RefObject,
 } from 'react'
-import { ChevronLeft, ChevronRight, Minus, Plus } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, Minus, Plus } from 'lucide-react'
 import { Button } from '@astryxdesign/core/Button'
-import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
+import { DropdownMenu, DropdownMenuItem } from '@astryxdesign/core/DropdownMenu'
+import { Kbd } from '@astryxdesign/core/Kbd'
 import { AstryxScope } from '../theme/astryxBridge'
 import { parseCalDate } from '@amadeus-shared/db/calDate'
 import { usePageStore } from '../amadeus/store/pageStore'
@@ -99,6 +100,14 @@ function buildEvents(dbs: AggDb[], vault: string, byVault: Parameters<typeof col
   return out
 }
 
+/** 模式下拉(Notion Calendar 式)的条目与单键快捷键。 */
+const MODE_ITEMS: Array<{ id: CalMode; label: string; key: string }> = [
+  { id: 'day', label: '日', key: 'd' },
+  { id: 'week', label: '周', key: 'w' },
+  { id: '3day', label: '3 日', key: '3' },
+  { id: 'month', label: '月', key: 'm' },
+]
+
 const hhmm = (d: Date): string => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 const rectOf = (e: ReactMouseEvent | ReactPointerEvent): Anchor => (e.currentTarget as HTMLElement).getBoundingClientRect()
 const eventValue = (start: Date, end: Date | null, allDay: boolean): string =>
@@ -150,15 +159,28 @@ export function CalendarView() {
     openCard(`${db.path}::${newId}`, at)
   }
 
+  // 单键快捷键(D/W/3/M,Notion Calendar 式):输入控件/修饰键组合不劫持。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const t = e.target as HTMLElement | null
+      if (t && t.closest('input, textarea, select, [contenteditable]')) return
+      const hit = MODE_ITEMS.find((m) => m.key === e.key.toLowerCase())
+      if (!hit) return
+      e.preventDefault()
+      useCalendarNav.getState().setMode(hit.id)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   const n = mode === 'week' ? 7 : mode === '3day' ? 3 : 1
   return (
     <div className="amx-cal">
       <AstryxScope>
+        {/* Notion Calendar 式工具条:左=标题;右=模式▾ 今天 ‹ ›(时间视图另有 ± 缩放)。 */}
         <header className="amx-cal-bar">
           <div className="amx-cal-nav">
-            <Button size="sm" variant="ghost" isIconOnly icon={<ChevronLeft size={14} />} label="上一页" onClick={() => api.current?.prev()} />
-            <Button size="sm" variant="ghost" label="今天" onClick={() => api.current?.today()} />
-            <Button size="sm" variant="ghost" isIconOnly icon={<ChevronRight size={14} />} label="下一页" onClick={() => api.current?.next()} />
             <span className="amx-cal-title" ref={titleRef} />
           </div>
           <div className="amx-cal-modes">
@@ -168,12 +190,20 @@ export function CalendarView() {
                 <Button size="sm" variant="ghost" isIconOnly icon={<Plus size={14} />} label="放大时间轴" tooltip="放大时间轴（Ctrl/Cmd+滚轮）" onClick={() => setHourPx(hourPx + 8)} />
               </>
             )}
-            <SegmentedControl value={mode} onChange={(v) => setMode(v as CalMode)} label="视图" size="sm">
-              <SegmentedControlItem value="month" label="月" />
-              <SegmentedControlItem value="week" label="周" />
-              <SegmentedControlItem value="3day" label="3 日" />
-              <SegmentedControlItem value="day" label="日" />
-            </SegmentedControl>
+            <DropdownMenu button={{ label: MODE_ITEMS.find((m) => m.id === mode)?.label ?? '周', variant: 'secondary', size: 'sm' }} menuWidth={168}>
+              {MODE_ITEMS.map((m) => (
+                <DropdownMenuItem
+                  key={m.id}
+                  icon={mode === m.id ? <Check size={14} /> : <span style={{ display: 'inline-block', width: 14 }} />}
+                  label={m.label}
+                  endContent={<Kbd keys={m.key} />}
+                  onClick={() => setMode(m.id)}
+                />
+              ))}
+            </DropdownMenu>
+            <Button size="sm" variant="secondary" label="今天" onClick={() => api.current?.today()} />
+            <Button size="sm" variant="ghost" isIconOnly icon={<ChevronLeft size={14} />} label="上一页" onClick={() => api.current?.prev()} />
+            <Button size="sm" variant="ghost" isIconOnly icon={<ChevronRight size={14} />} label="下一页" onClick={() => api.current?.next()} />
           </div>
         </header>
       </AstryxScope>

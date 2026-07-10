@@ -464,11 +464,10 @@
 /* ── Calendar View ── */
 .amx-cal { display: flex; flex-direction: column; height: 100%; background: var(--bg); color: var(--text); }
 .amx-cal-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); flex: none; }
-.amx-cal-nav { display: flex; align-items: center; gap: 6px; }
-.amx-cal-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 30px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); background: transparent; color: var(--text); font: inherit; cursor: pointer; }
-.amx-cal-btn:hover { background: var(--bg-hover, var(--overlay-light)); }
-.amx-cal-today { font-size: 12.5px; }
-.amx-cal-title { margin-left: 8px; font-size: 15px; font-weight: 600; }
+/* Notion Calendar 式工具条:左=标题独占;右=astryx 组(模式▾ 今天 ‹ ›)。翻页/今天按钮已换 astryx Button,
+ * 旧 .amx-cal-btn/.amx-cal-today 无消费者已删。 */
+.amx-cal-nav { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.amx-cal-title { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 模式组已换 astryx SegmentedControl(自带描边/选中态):容器只管排布,旧边框+overflow 裁剪会把它挤瘪。 */
 .amx-cal-modes { display: inline-flex; align-items: center; gap: 6px; }
 .amx-cal-empty { padding: 18px; color: var(--text-faint, var(--text-muted)); font-size: 13px; text-align: center; }
