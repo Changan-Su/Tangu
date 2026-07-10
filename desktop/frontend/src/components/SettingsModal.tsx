@@ -3,7 +3,7 @@
  * 在 Desktop 主界面内替换 Chat/Inspector 区域，而不是覆盖式弹窗。
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { X, ArrowLeft, RefreshCw, Sun, Moon, RotateCcw, LogIn, LogOut, KeyRound, Plus, Trash2, Plug, Search, Download, Sparkles, Wrench, Check, Globe2, QrCode, Smartphone, FolderOpen, Play } from 'lucide-react'
+import { X, ArrowLeft, Loader2, RefreshCw, Sun, Moon, RotateCcw, LogIn, LogOut, ExternalLink, KeyRound, Plus, Trash2, Plug, Search, Download, Sparkles, Wrench, Check, Globe2, QrCode, Smartphone, FolderOpen, Play } from 'lucide-react'
 import { ThemeCard } from './ThemeCard'
 import { listLanguages, listSkins } from '../theme/registry'
 import { applyTheme } from '../theme/loader'
@@ -40,13 +40,6 @@ import { HooksTab } from './HooksTab'
 import { PluginSettingsPage } from './PluginSettingsPage'
 import { AgentClisTab } from './AgentClisTab'
 import { QrImage } from './QrImage'
-// astryx 大面积适配(评估期):表单控件成建制换 astryx,布局外壳/异构控件(datalist/color)保留。
-import { Button as AxButton } from '@astryxdesign/core/Button'
-import { TextInput as AxTextInput } from '@astryxdesign/core/TextInput'
-import { Switch as AxSwitch } from '@astryxdesign/core/Switch'
-import { Selector as AxSelector } from '@astryxdesign/core/Selector'
-import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
-import { AstryxScope } from '../theme/astryxBridge'
 
 type StaticTab = 'general' | 'connection' | 'forsion' | 'model' | 'mcp' | 'hooks' | 'skills' | 'agents' | 'plugins' | 'amadeus-plugins' | 'agent-clis' | 'browser' | 'wechat' | 'notes' | 'spaces' | 'theme' | 'shortcuts' | 'advanced' | 'developer' | 'about'
 // 动态插件设置页用 `plugin:<id>`(Obsidian 式一级入口)。
@@ -642,7 +635,6 @@ export const SettingsModal: React.FC<{
   if (!p.open) return null
 
   return (
-    <AstryxScope>
     <div className="settings-page">
       <aside className="settings-nav" aria-label="Settings navigation">
         {/* 左上角返回 + 设置搜索(codex 风):常驻顶部,不随分类列表滚动。 */}
@@ -697,10 +689,14 @@ export const SettingsModal: React.FC<{
                     {isDesktop && (
                       <div className="field">
                         <label>{t('settings.backend.modeLabel')}</label>
-                        <SegmentedControl value={mode} onChange={(v) => setMode(v as 'managed' | 'external')} label={t('settings.backend.modeLabel')} size="sm">
-                          <SegmentedControlItem value="managed" label={t('settings.backend.modeManaged')} />
-                          <SegmentedControlItem value="external" label={t('settings.backend.modeExternal')} />
-                        </SegmentedControl>
+                        <div className="seg">
+                          <button className={mode === 'managed' ? 'active' : ''} onClick={() => setMode('managed')}>
+                            {t('settings.backend.modeManaged')}
+                          </button>
+                          <button className={mode === 'external' ? 'active' : ''} onClick={() => setMode('external')}>
+                            {t('settings.backend.modeExternal')}
+                          </button>
+                        </div>
                       </div>
                     )}
 
@@ -708,28 +704,26 @@ export const SettingsModal: React.FC<{
                       <div className="field">
                         <label>{t('settings.workspace.label')}</label>
                         <div className="settings-inline-row">
-                          <AxTextInput
-                            label={t('settings.workspace.label')}
-                            isLabelHidden
-                            size="sm"
+                          <input
+                            type="text"
                             value={stored.defaultWorkspaceDir || ''}
-                            onChange={(v) => setStored({ ...stored, defaultWorkspaceDir: v })}
+                            onChange={(e) => setStored({ ...stored, defaultWorkspaceDir: e.target.value })}
                             placeholder={t('settings.workspace.placeholder')}
                           />
-                          <AxButton
-                            label={t('settings.workspace.pick')}
-                            variant="ghost"
-                            size="sm"
+                          <button
+                            className="btn ghost sm"
                             onClick={() => void window.tangu?.pickDirectory?.().then((d) => {
                               if (d) void window.tangu!.setConfig({ defaultWorkspaceDir: d }).then(setStored)
                             })}
-                          />
-                          <AxButton
-                            label={t('settings.btn.save')}
-                            variant="primary"
-                            size="sm"
+                          >
+                            {t('settings.workspace.pick')}
+                          </button>
+                          <button
+                            className="btn primary sm"
                             onClick={() => void window.tangu!.setConfig({ defaultWorkspaceDir: (stored.defaultWorkspaceDir || '').trim() }).then(setStored)}
-                          />
+                          >
+                            {t('settings.btn.save')}
+                          </button>
                         </div>
                         <div className="hint">
                           {t('settings.workspace.hint')}
@@ -741,65 +735,54 @@ export const SettingsModal: React.FC<{
                       <>
                         <div className="field-row">
                           <div className="field">
-                            <AxTextInput
+                            <label><KeyRound size={11} style={{ verticalAlign: -1 }} /> {t('settings.token.label')}</label>
+                            <input
                               type="password"
-                              label={t('settings.token.label')}
-                              size="sm"
                               value={stored.cloudToken}
-                              onChange={(v) => setStored({ ...stored, cloudToken: v })}
+                              onChange={(e) => setStored({ ...stored, cloudToken: e.target.value })}
                               placeholder={t('settings.token.placeholder')}
                             />
                           </div>
                           <div className="field" style={{ maxWidth: 160 }}>
-                            <AxSelector
-                              label={t('settings.sandbox.label')}
-                              size="sm"
+                            <label>{t('settings.sandbox.label')}</label>
+                            <select
                               value={stored.sandbox}
-                              onChange={(v) => setStored({ ...stored, sandbox: v as any })}
-                              options={[
-                                { value: 'auto', label: t('settings.sandbox.auto') },
-                                { value: 'docker', label: 'Docker' },
-                                { value: 'none', label: t('settings.sandbox.none') },
-                              ]}
-                            />
+                              onChange={(e) => setStored({ ...stored, sandbox: e.target.value as any })}
+                            >
+                              <option value="auto">{t('settings.sandbox.auto')}</option>
+                              <option value="docker">Docker</option>
+                              <option value="none">{t('settings.sandbox.none')}</option>
+                            </select>
                           </div>
                         </div>
                         <div className="field-row">
                           <div className="field" style={{ maxWidth: 200 }}>
-                            <AxSelector
-                              label={t('settings.python.label')}
-                              size="sm"
+                            <label>{t('settings.python.label')}</label>
+                            <select
                               value={stored.pythonMode || 'bundled'}
-                              onChange={(v) => setStored({ ...stored, pythonMode: v as StoredDesktopConfig['pythonMode'] })}
-                              options={[
-                                { value: 'bundled', label: t('settings.python.bundled') },
-                                { value: 'system', label: t('settings.python.system') },
-                              ]}
-                            />
+                              onChange={(e) => setStored({ ...stored, pythonMode: e.target.value as StoredDesktopConfig['pythonMode'] })}
+                            >
+                              <option value="bundled">{t('settings.python.bundled')}</option>
+                              <option value="system">{t('settings.python.system')}</option>
+                            </select>
                           </div>
                           <div className="field" style={{ maxWidth: 200 }}>
-                            <AxSelector
-                              label={t('settings.mirror.label')}
-                              size="sm"
+                            <label>{t('settings.mirror.label')}</label>
+                            <select
                               value={stored.mirror || 'default'}
-                              onChange={(v) => setStored({ ...stored, mirror: v as StoredDesktopConfig['mirror'] })}
-                              options={[
-                                { value: 'default', label: t('settings.mirror.default') },
-                                { value: 'china', label: t('settings.mirror.china') },
-                              ]}
-                            />
+                              onChange={(e) => setStored({ ...stored, mirror: e.target.value as StoredDesktopConfig['mirror'] })}
+                            >
+                              <option value="default">{t('settings.mirror.default')}</option>
+                              <option value="china">{t('settings.mirror.china')}</option>
+                            </select>
                           </div>
                         </div>
                         <div className="hint" style={{ marginBottom: 10 }}>{t('settings.python.hint')}</div>
                         <div className="hint" style={{ marginBottom: 6 }}>{t('settings.mirror.hint')}</div>
                         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-                          <AxButton
-                            label={t('settings.mirror.test')}
-                            variant="ghost"
-                            size="sm"
-                            icon={<Plug size={12} />}
-                            isLoading={mirrorTesting}
-                            isDisabled={!window.tangu?.envTestMirror}
+                          <button
+                            className="btn ghost sm"
+                            disabled={mirrorTesting || !window.tangu?.envTestMirror}
                             onClick={() => {
                               if (!window.tangu?.envTestMirror) return
                               setMirrorTesting(true); setMirrorTest(null)
@@ -808,7 +791,9 @@ export const SettingsModal: React.FC<{
                                 .catch(() => setMirrorTest(null))
                                 .finally(() => setMirrorTesting(false))
                             }}
-                          />
+                          >
+                            {mirrorTesting ? <Loader2 size={12} className="spin" /> : <Plug size={12} />} {t('settings.mirror.test')}
+                          </button>
                           {mirrorTest?.targets.map((tg) => (
                             <span key={tg.name} style={{ fontSize: 12.5, color: tg.ok ? 'var(--text-muted)' : 'var(--danger, #e5484d)' }}>
                               {tg.ok ? '✓' : '✗'} {tg.name} · {tg.ok ? `${tg.latencyMs}ms` : (tg.error || t('settings.mirror.unreachable'))}
@@ -816,14 +801,13 @@ export const SettingsModal: React.FC<{
                           ))}
                         </div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
-                          <AxButton label={t('settings.backend.saveRestart')} variant="primary" size="sm" onClick={saveManaged} />
-                          <AxButton
-                            label={t('settings.backend.restart')}
-                            variant="ghost"
-                            size="sm"
-                            icon={<RotateCcw size={12} />}
+                          <button className="btn primary sm" onClick={saveManaged}>{t('settings.backend.saveRestart')}</button>
+                          <button
+                            className="btn ghost sm"
                             onClick={() => void window.tangu!.backendRestart!().then(setBackendSt)}
-                          />
+                          >
+                            <RotateCcw size={12} /> {t('settings.backend.restart')}
+                          </button>
                           <span className={`conn-pill ${backendSt?.state === 'ready' ? 'ok' : backendSt?.state === 'crashed' ? 'err' : ''}`}>
                             <span className="dot" />
                             {t(BACKEND_STATE_LABEL[backendSt?.state || 'stopped'])}
@@ -839,12 +823,12 @@ export const SettingsModal: React.FC<{
                           </div>
                         )}
                         <div className="field">
-                          <AxButton
-                            label={t('settings.backend.viewLogs')}
-                            variant="ghost"
-                            size="sm"
+                          <button
+                            className="btn ghost sm"
                             onClick={() => void window.tangu!.backendLogs!().then(setLogs)}
-                          />
+                          >
+                            {t('settings.backend.viewLogs')}
+                          </button>
                           {logs && (
                             <pre style={{
                               marginTop: 8, fontSize: 11, fontFamily: 'var(--font-mono)', maxHeight: 220,
@@ -862,28 +846,31 @@ export const SettingsModal: React.FC<{
                     {(!isDesktop || mode === 'external') && !cloudWeb && (
                       <>
                         <div className="field">
-                          <AxTextInput
-                            label={t('settings.external.urlLabel')}
-                            size="sm"
+                          <label>{t('settings.external.urlLabel')}</label>
+                          <input
+                            type="text"
                             value={draft.backendUrl}
-                            onChange={(v) => setDraft({ ...draft, backendUrl: v })}
+                            onChange={(e) => setDraft({ ...draft, backendUrl: e.target.value })}
                             placeholder="http://localhost:8787"
-                            description={t('settings.external.urlHint')}
                           />
+                          <div className="hint">{t('settings.external.urlHint')}</div>
                         </div>
                         <div className="field">
-                          <AxTextInput
+                          <label>{t('settings.external.tokenLabel')}</label>
+                          <input
                             type="password"
-                            label={t('settings.external.tokenLabel')}
-                            size="sm"
                             value={draft.token}
-                            onChange={(v) => setDraft({ ...draft, token: v })}
+                            onChange={(e) => setDraft({ ...draft, token: e.target.value })}
                             placeholder={t('settings.external.tokenPlaceholder')}
                           />
                         </div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                          <AxButton label={t('settings.btn.testConnection')} variant="ghost" size="sm" isLoading={testing} onClick={() => void test()} />
-                          <AxButton label={t('settings.btn.saveConnect')} variant="primary" size="sm" onClick={saveConnection} />
+                          <button className="btn ghost sm" onClick={test} disabled={testing}>
+                            {testing ? <Loader2 size={13} className="spin" /> : null} {t('settings.btn.testConnection')}
+                          </button>
+                          <button className="btn primary sm" onClick={saveConnection}>
+                            {t('settings.btn.saveConnect')}
+                          </button>
                           <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{testResult}</span>
                         </div>
                       </>
@@ -902,7 +889,9 @@ export const SettingsModal: React.FC<{
                           <span className="conn-pill ok"><span className="dot" />
                             {t('settings.forsion.loggedInAs', { name: authSt.nickname || authSt.username || '' })}
                           </span>
-                          <AxButton label={t('settings.forsion.logout')} variant="ghost" size="sm" icon={<LogOut size={12} />} isLoading={loggingIn} onClick={() => void doForsionLogout()} />
+                          <button className="btn ghost sm" onClick={() => void doForsionLogout()} disabled={loggingIn}>
+                            {loggingIn ? <Loader2 size={12} className="spin" /> : <LogOut size={12} />} {t('settings.forsion.logout')}
+                          </button>
                         </div>
                       ) : (
                         <div>
@@ -910,14 +899,9 @@ export const SettingsModal: React.FC<{
                           {authSt?.loggedIn && authSt?.tokenValid === false && (
                             <div className="hint" style={{ color: 'var(--danger)', marginBottom: 8 }}>{t('settings.forsion.expired')}</div>
                           )}
-                          <AxButton
-                            label={authSt?.loggedIn && authSt?.tokenValid === false ? t('settings.forsion.relogin') : t('settings.forsion.login')}
-                            variant="primary"
-                            size="sm"
-                            icon={<LogIn size={12} />}
-                            isLoading={loggingIn}
-                            onClick={() => void doForsionLogin()}
-                          />
+                          <button className="btn primary sm" onClick={() => void doForsionLogin()} disabled={loggingIn}>
+                            {loggingIn ? <Loader2 size={12} className="spin" /> : <LogIn size={12} />} {authSt?.loggedIn && authSt?.tokenValid === false ? t('settings.forsion.relogin') : t('settings.forsion.login')}
+                          </button>
                           {device && (
                             <div style={{ marginTop: 10 }}>
                               <QrImage value={device.url} />
@@ -934,20 +918,18 @@ export const SettingsModal: React.FC<{
                       <div className="field">
                         <label><Globe2 size={11} style={{ verticalAlign: -1 }} /> {t('settings.forsion.cloudUrlLabel')}</label>
                         <div className="settings-inline-row">
-                          <AxTextInput
-                            label={t('settings.forsion.cloudUrlLabel')}
-                            isLabelHidden
-                            size="sm"
+                          <input
+                            type="text"
                             value={stored.cloudUrl}
-                            onChange={(v) => setStored({ ...stored, cloudUrl: v.trim() })}
+                            onChange={(e) => setStored({ ...stored, cloudUrl: e.target.value.trim() })}
                             placeholder="https://api.forsion.net"
                           />
-                          <AxButton
-                            label={t('settings.forsion.save')}
-                            variant="primary"
-                            size="sm"
+                          <button
+                            className="btn primary sm"
                             onClick={() => void window.tangu!.setConfig({ cloudUrl: (stored.cloudUrl || '').trim() }).then(setStored)}
-                          />
+                          >
+                            {t('settings.forsion.save')}
+                          </button>
                         </div>
                         <div className="hint">{t('settings.forsion.cloudUrlHint')}</div>
                       </div>
@@ -958,23 +940,19 @@ export const SettingsModal: React.FC<{
                       <div className="field">
                         <label>{t('settings.forsion.syncLabel')}</label>
                         <div className="hint" style={{ marginBottom: 8 }}>{t('settings.forsion.syncHint')}</div>
-                        <div style={{ marginBottom: 8 }}>
-                          <AxSwitch
-                            label={t('settings.forsion.autoSync')}
-                            description={t('settings.forsion.autoSyncHint')}
-                            value={!!stored.forsionSyncEnabled}
-                            onChange={(checked) => void window.tangu!.setConfig({ forsionSyncEnabled: checked }).then(setStored)}
+                        <label className="inline-check" style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8 }}>
+                          <input
+                            type="checkbox"
+                            checked={!!stored.forsionSyncEnabled}
+                            onChange={(e) => void window.tangu!.setConfig({ forsionSyncEnabled: e.target.checked }).then(setStored)}
                           />
-                        </div>
+                          {t('settings.forsion.autoSync')}
+                        </label>
+                        <div className="hint" style={{ marginBottom: 8 }}>{t('settings.forsion.autoSyncHint')}</div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                          <AxButton
-                            label={syncing ? t('settings.forsion.syncing') : t('settings.forsion.syncNow')}
-                            variant="primary"
-                            size="sm"
-                            icon={<RefreshCw size={12} />}
-                            isLoading={syncing}
-                            onClick={() => void doSyncNow()}
-                          />
+                          <button className="btn primary sm" onClick={() => void doSyncNow()} disabled={syncing}>
+                            {syncing ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />} {syncing ? t('settings.forsion.syncing') : t('settings.forsion.syncNow')}
+                          </button>
                           <span className="hint">
                             {t('settings.forsion.lastSynced', {
                               time: stored.forsionLastSyncedAt
@@ -1000,12 +978,15 @@ export const SettingsModal: React.FC<{
                   <>
                     <div className="settings-sec settings-sec--gap">{t('settings.inbox.title')}</div>
                     <div className="field">
-                      <AxSwitch
-                        label={t('settings.inbox.notifyLabel')}
-                        description={t('settings.inbox.notifyHint')}
-                        value={stored.inboxNotifyEnabled !== false}
-                        onChange={(checked) => void window.tangu!.setConfig({ inboxNotifyEnabled: checked }).then(setStored)}
-                      />
+                      <label className="inline-check" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={stored.inboxNotifyEnabled !== false}
+                          onChange={(e) => void window.tangu!.setConfig({ inboxNotifyEnabled: e.target.checked }).then(setStored)}
+                        />
+                        {t('settings.inbox.notifyLabel')}
+                      </label>
+                      <div className="hint">{t('settings.inbox.notifyHint')}</div>
                     </div>
                   </>
                 )}
@@ -1013,66 +994,63 @@ export const SettingsModal: React.FC<{
                 {tab === 'notes' && stored && (
                   <>
                     <div className="field">
-                      <AxSelector
-                        label={t('settings.notes.modeLabel')}
-                        size="sm"
+                      <label>{t('settings.notes.modeLabel')}</label>
+                      <select
                         value={stored.notesAttachmentMode || 'attachments'}
-                        onChange={(v) => void window.tangu!.setConfig({ notesAttachmentMode: v as StoredDesktopConfig['notesAttachmentMode'] }).then(setStored)}
-                        options={[
-                          { value: 'attachments', label: t('settings.notes.modeAttachments') },
-                          { value: 'same', label: t('settings.notes.modeSame') },
-                          { value: 'vault', label: t('settings.notes.modeVault') },
-                        ]}
-                        description={t('settings.notes.modeHint')}
-                      />
+                        onChange={(e) => void window.tangu!.setConfig({ notesAttachmentMode: e.target.value as StoredDesktopConfig['notesAttachmentMode'] }).then(setStored)}
+                      >
+                        <option value="attachments">{t('settings.notes.modeAttachments')}</option>
+                        <option value="same">{t('settings.notes.modeSame')}</option>
+                        <option value="vault">{t('settings.notes.modeVault')}</option>
+                      </select>
+                      <div className="hint">{t('settings.notes.modeHint')}</div>
                     </div>
                     {(stored.notesAttachmentMode || 'attachments') === 'vault' && (
                       <div className="field">
                         <label>{t('settings.notes.folderLabel')}</label>
                         <div className="settings-inline-row">
-                          <AxTextInput
-                            label={t('settings.notes.folderLabel')}
-                            isLabelHidden
-                            size="sm"
+                          <input
+                            type="text"
                             value={stored.notesAttachmentFolder ?? 'assets'}
-                            onChange={(v) => setStored({ ...stored, notesAttachmentFolder: v })}
+                            onChange={(e) => setStored({ ...stored, notesAttachmentFolder: e.target.value })}
                             placeholder="assets"
                           />
-                          <AxButton
-                            label={t('settings.btn.save')}
-                            variant="primary"
-                            size="sm"
+                          <button
+                            className="btn primary sm"
                             onClick={() => void window.tangu!.setConfig({ notesAttachmentFolder: (stored.notesAttachmentFolder || 'assets').trim().replace(/^\/+|\/+$/g, '') }).then(setStored)}
-                          />
+                          >
+                            {t('settings.btn.save')}
+                          </button>
                         </div>
                         <div className="hint">{t('settings.notes.folderHint')}</div>
                       </div>
                     )}
                     <div className="field">
-                      <AxSwitch
-                        label={t('settings.notes.previewLabel')}
-                        description={t('settings.notes.previewHint')}
-                        value={stored.notesImportPreview !== false}
-                        onChange={(checked) => void window.tangu!.setConfig({ notesImportPreview: checked }).then(setStored)}
-                      />
+                      <label className="inline-check" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={stored.notesImportPreview !== false}
+                          onChange={(e) => void window.tangu!.setConfig({ notesImportPreview: e.target.checked }).then(setStored)}
+                        />
+                        {t('settings.notes.previewLabel')}
+                      </label>
+                      <div className="hint">{t('settings.notes.previewHint')}</div>
                     </div>
                     <div className="field">
                       <label>{t('settings.notes.dailyLabel')}</label>
                       <div className="settings-inline-row">
-                        <AxTextInput
-                          label={t('settings.notes.dailyLabel')}
-                          isLabelHidden
-                          size="sm"
+                        <input
+                          type="text"
                           value={stored.notesDailyFolder ?? ''}
-                          onChange={(v) => setStored({ ...stored, notesDailyFolder: v })}
+                          onChange={(e) => setStored({ ...stored, notesDailyFolder: e.target.value })}
                           placeholder={t('settings.notes.dailyPlaceholder')}
                         />
-                        <AxButton
-                          label={t('settings.btn.save')}
-                          variant="primary"
-                          size="sm"
+                        <button
+                          className="btn primary sm"
                           onClick={() => void window.tangu!.setConfig({ notesDailyFolder: (stored.notesDailyFolder || '').trim().replace(/^\/+|\/+$/g, '') }).then(setStored)}
-                        />
+                        >
+                          {t('settings.btn.save')}
+                        </button>
                       </div>
                       <div className="hint">{t('settings.notes.dailyHint')}</div>
                     </div>
@@ -1084,15 +1062,15 @@ export const SettingsModal: React.FC<{
                     <div className="field">
                       <label>{t('settings.model.defaultLabel')}</label>
                       <div style={{ display: 'flex', gap: 8 }}>
-                        <AxTextInput
-                          label={t('settings.model.defaultLabel')}
-                          isLabelHidden
-                          size="sm"
+                        <input
+                          type="text"
                           value={draft.modelId}
-                          onChange={(v) => setDraft({ ...draft, modelId: v })}
+                          onChange={(e) => setDraft({ ...draft, modelId: e.target.value })}
                           placeholder={t('settings.model.defaultPlaceholder')}
                         />
-                        <AxButton label={t('settings.btn.save')} variant="ghost" size="sm" onClick={() => p.onConfigChange({ modelId: draft.modelId })} />
+                        <button className="btn ghost sm" onClick={() => p.onConfigChange({ modelId: draft.modelId })}>
+                          {t('settings.btn.save')}
+                        </button>
                       </div>
                       <div className="hint">
                         {t('settings.model.defaultHintPrefix')}<code>&lt;providerId&gt;/&lt;model&gt;</code>{t('settings.model.defaultHintSuffix')}
@@ -1160,15 +1138,16 @@ export const SettingsModal: React.FC<{
                         <label>{t('settings.provider.loginLabel')}</label>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           {providers.map((pr) => (
-                            <AxButton
+                            <button
                               key={pr.id}
-                              label={`${pr.id}${pr.loggedIn ? t('settings.provider.loggedInSuffix') : ''}`}
-                              variant="ghost"
-                              size="sm"
-                              icon={<LogIn size={12} />}
-                              isLoading={providerBusy === pr.id}
+                              className="btn ghost sm"
+                              disabled={providerBusy === pr.id}
                               onClick={() => void doProviderLogin(pr.id)}
-                            />
+                            >
+                              {providerBusy === pr.id ? <Loader2 size={12} className="spin" /> : <LogIn size={12} />}
+                              {pr.id}
+                              {pr.loggedIn ? t('settings.provider.loggedInSuffix') : ''}
+                            </button>
                           ))}
                         </div>
                         <div className="hint">
@@ -1231,18 +1210,17 @@ export const SettingsModal: React.FC<{
                         </div>
                       )}
                       {!editProvider && (
-                        <AxButton
-                          label={t('settings.customProvider.add')}
-                          variant="ghost"
-                          size="sm"
-                          icon={<Plus size={13} />}
+                        <button
+                          className="btn ghost sm"
                           onClick={() => {
                             setEditProvider({ providerId: '', baseUrl: '', apiKey: '', modelIds: [], modelsCsv: '', imageModelsCsv: '', ttsModelsCsv: '' })
                             setProviderTestMsg('')
                             setProviderSaveMsg('')
                             setFetchedModels(null); setModelSearch(''); setFetchModelsMsg('')
                           }}
-                        />
+                        >
+                          <Plus size={13} /> {t('settings.customProvider.add')}
+                        </button>
                       )}
                       {providerSaveMsg && !editProvider && (
                         <div className="hint" style={{ marginTop: 6 }}>{providerSaveMsg}</div>
@@ -1253,72 +1231,66 @@ export const SettingsModal: React.FC<{
                       <>
                         <div className="field-row">
                           <div className="field">
-                            <AxTextInput
-                              label={t('settings.customProvider.idLabel')}
-                              size="sm"
+                            <label>{t('settings.customProvider.idLabel')}</label>
+                            <input
+                              type="text"
                               value={editProvider.providerId}
-                              onChange={(v) => setEditProvider({ ...editProvider, providerId: v.trim() })}
+                              onChange={(e) => setEditProvider({ ...editProvider, providerId: e.target.value.trim() })}
                               placeholder={t('settings.customProvider.idPlaceholder')}
                             />
                           </div>
                         </div>
                         <div className="field">
-                          <AxTextInput
-                            label={t('settings.customProvider.baseUrlLabel')}
-                            size="sm"
+                          <label>{t('settings.customProvider.baseUrlLabel')}</label>
+                          <input
+                            type="text"
                             value={editProvider.baseUrl}
-                            onChange={(v) => setEditProvider({ ...editProvider, baseUrl: v.trim() })}
+                            onChange={(e) => setEditProvider({ ...editProvider, baseUrl: e.target.value.trim() })}
                             placeholder={t('settings.customProvider.baseUrlPlaceholder')}
                           />
                         </div>
                         <div className="field-row">
                           <div className="field">
-                            <AxTextInput
+                            <label>{t('settings.customProvider.apiKeyLabel')}</label>
+                            <input
                               type="password"
-                              label={t('settings.customProvider.apiKeyLabel')}
-                              size="sm"
                               value={editProvider.apiKey || ''}
-                              onChange={(v) => setEditProvider({ ...editProvider, apiKey: v })}
+                              onChange={(e) => setEditProvider({ ...editProvider, apiKey: e.target.value })}
                               placeholder="sk-…"
                             />
                           </div>
                           <div className="field">
-                            <AxTextInput
-                              label={t('settings.customProvider.modelsLabel')}
-                              size="sm"
+                            <label>{t('settings.customProvider.modelsLabel')}</label>
+                            <input
+                              type="text"
                               value={editProvider.modelsCsv}
-                              onChange={(v) => setEditProvider({ ...editProvider, modelsCsv: v })}
+                              onChange={(e) => setEditProvider({ ...editProvider, modelsCsv: e.target.value })}
                               placeholder={t('settings.customProvider.modelsPlaceholder')}
                             />
                           </div>
                           <div className="field">
-                            <AxTextInput
-                              label={t('settings.customProvider.imageModelsLabel')}
-                              size="sm"
+                            <label>{t('settings.customProvider.imageModelsLabel')}</label>
+                            <input
+                              type="text"
                               value={editProvider.imageModelsCsv}
-                              onChange={(v) => setEditProvider({ ...editProvider, imageModelsCsv: v })}
+                              onChange={(e) => setEditProvider({ ...editProvider, imageModelsCsv: e.target.value })}
                               placeholder={t('settings.customProvider.imageModelsPlaceholder')}
                             />
                           </div>
                           <div className="field">
-                            <AxTextInput
-                              label={t('settings.customProvider.ttsModelsLabel')}
-                              size="sm"
+                            <label>{t('settings.customProvider.ttsModelsLabel')}</label>
+                            <input
+                              type="text"
                               value={editProvider.ttsModelsCsv}
-                              onChange={(v) => setEditProvider({ ...editProvider, ttsModelsCsv: v })}
+                              onChange={(e) => setEditProvider({ ...editProvider, ttsModelsCsv: e.target.value })}
                               placeholder={t('settings.customProvider.ttsModelsPlaceholder')}
                             />
                           </div>
                         </div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                          <AxButton
-                            label={providerTesting ? t('settings.btn.cancel') : t('settings.btn.testConnection')}
-                            variant="ghost"
-                            size="sm"
-                            icon={<Plug size={12} />}
-                            isLoading={providerTesting}
-                            isInterruptible
-                            isDisabled={!editProvider.baseUrl}
+                          <button
+                            className="btn ghost sm"
+                            disabled={!editProvider.baseUrl}
                             onClick={() => {
                               // 已在测试中 → 这个按钮变成「取消」:abort 掉挂起的请求(错误 URL/密钥时不再无限转圈)。
                               if (providerTesting) { providerTestAbort.current?.abort(); return }
@@ -1339,14 +1311,12 @@ export const SettingsModal: React.FC<{
                                     : `✗ ${e?.message || e}`))
                                 .finally(() => { setProviderTesting(false); providerTestAbort.current = null })
                             }}
-                          />
-                          <AxButton
-                            label={t('settings.customProvider.fetchModels')}
-                            variant="ghost"
-                            size="sm"
-                            icon={<Download size={12} />}
-                            isLoading={fetchingModels}
-                            isDisabled={!editProvider.baseUrl}
+                          >
+                            {providerTesting ? <Loader2 size={12} className="spin" /> : <Plug size={12} />} {providerTesting ? t('settings.btn.cancel') : t('settings.btn.testConnection')}
+                          </button>
+                          <button
+                            className="btn ghost sm"
+                            disabled={fetchingModels || !editProvider.baseUrl}
                             onClick={() => {
                               setFetchingModels(true)
                               setFetchModelsMsg('')
@@ -1362,12 +1332,12 @@ export const SettingsModal: React.FC<{
                                 .catch((e) => { setFetchedModels([]); setFetchModelsMsg(`✗ ${e?.message || e}`) })
                                 .finally(() => setFetchingModels(false))
                             }}
-                          />
-                          <AxButton
-                            label={t('settings.btn.save')}
-                            variant="primary"
-                            size="sm"
-                            isDisabled={!editProvider.providerId || !editProvider.baseUrl}
+                          >
+                            {fetchingModels ? <Loader2 size={12} className="spin" /> : <Download size={12} />} {t('settings.customProvider.fetchModels')}
+                          </button>
+                          <button
+                            className="btn primary sm"
+                            disabled={!editProvider.providerId || !editProvider.baseUrl}
                             onClick={() => {
                               const modelIds = editProvider.modelsCsv.split(',').map((s) => s.trim()).filter(Boolean)
                               const imageModelIds = editProvider.imageModelsCsv.split(',').map((s) => s.trim()).filter(Boolean)
@@ -1386,8 +1356,10 @@ export const SettingsModal: React.FC<{
                                 setProviderSaveMsg(t('settings.customProvider.savedReloading'))
                               }).catch((e) => setProviderTestMsg(`${t('settings.toast.saveFailed')}${e?.message || e}`))
                             }}
-                          />
-                          <AxButton label={t('settings.btn.cancel')} variant="ghost" size="sm" onClick={() => { setEditProvider(null); setFetchedModels(null); setModelSearch(''); setFetchModelsMsg('') }} />
+                          >
+                            {t('settings.btn.save')}
+                          </button>
+                          <button className="btn ghost sm" onClick={() => { setEditProvider(null); setFetchedModels(null); setModelSearch(''); setFetchModelsMsg('') }}>{t('settings.btn.cancel')}</button>
                           <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{providerTestMsg}</span>
                         </div>
 
@@ -1492,13 +1464,9 @@ export const SettingsModal: React.FC<{
                         </div>
                         <div className="field">
                           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                            <AxButton
-                              label={t('settings.tts.testBtn')}
-                              variant="ghost"
-                              size="sm"
-                              icon={<Play size={12} />}
-                              isLoading={ttsTesting}
-                              isDisabled={!(stored.ttsModelId || '').trim()}
+                            <button
+                              className="btn ghost sm"
+                              disabled={ttsTesting || !(stored.ttsModelId || '').trim()}
                               onClick={() => {
                                 setTtsTesting(true); setTtsTestMsg('')
                                 previewTts(p.cfg, { model: (stored.ttsModelId || '').trim(), voice: (stored.ttsVoice || '').trim() || undefined, speed: stored.ttsSpeed }, t('settings.tts.testText'))
@@ -1506,16 +1474,21 @@ export const SettingsModal: React.FC<{
                                   .catch((e: any) => setTtsTestMsg(`✗ ${e?.message || e}`))
                                   .finally(() => setTtsTesting(false))
                               }}
-                            />
+                            >
+                              {ttsTesting ? <Loader2 size={12} className="spin" /> : <Play size={12} />} {t('settings.tts.testBtn')}
+                            </button>
                             <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{ttsTestMsg}</span>
                           </div>
                         </div>
                         <div className="field">
-                          <AxSwitch
-                            label={t('settings.tts.autoSpeak')}
-                            value={stored.ttsAutoSpeak === true}
-                            onChange={(checked) => void window.tangu!.setConfig({ ttsAutoSpeak: checked }).then(setStored)}
-                          />
+                          <label className="inline-check" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={stored.ttsAutoSpeak === true}
+                              onChange={(e) => void window.tangu!.setConfig({ ttsAutoSpeak: e.target.checked }).then(setStored)}
+                            />
+                            {t('settings.tts.autoSpeak')}
+                          </label>
                           <div className="hint">{t('settings.tts.autoSpeakHint')}</div>
                         </div>
                         {(() => {
@@ -1601,13 +1574,12 @@ export const SettingsModal: React.FC<{
                         </div>
                       )}
                       {!editMcp && (
-                        <AxButton
-                          label={t('settings.mcp.add')}
-                          variant="ghost"
-                          size="sm"
-                          icon={<Plus size={13} />}
+                        <button
+                          className="btn ghost sm"
                           onClick={() => setEditMcp({ name: '', isNew: true, command: '', argsText: '', url: '', transport: 'auto', envText: '' })}
-                        />
+                        >
+                          <Plus size={13} /> {t('settings.mcp.add')}
+                        </button>
                       )}
                       {mcpMsg && !editMcp && <div className="hint" style={{ marginTop: 6 }}>{mcpMsg}</div>}
                     </div>
@@ -1616,59 +1588,52 @@ export const SettingsModal: React.FC<{
                       <>
                         <div className="field-row">
                           <div className="field">
-                            <AxTextInput
-                              label={t('settings.mcp.nameLabel')}
-                              size="sm"
+                            <label>{t('settings.mcp.nameLabel')}</label>
+                            <input
+                              type="text"
                               value={editMcp.name}
-                              isDisabled={!editMcp.isNew}
-                              onChange={(v) => setEditMcp({ ...editMcp, name: v.trim() })}
+                              disabled={!editMcp.isNew}
+                              onChange={(e) => setEditMcp({ ...editMcp, name: e.target.value.trim() })}
                               placeholder={t('settings.mcp.namePlaceholder')}
                             />
                           </div>
                           <div className="field" style={{ maxWidth: 140 }}>
-                            <AxSelector
-                              label={t('settings.mcp.transportLabel')}
-                              size="sm"
+                            <label>{t('settings.mcp.transportLabel')}</label>
+                            <select
                               value={editMcp.transport}
-                              onChange={(v) => setEditMcp({ ...editMcp, transport: v as any })}
-                              options={[
-                                { value: 'auto', label: t('settings.mcp.transportAuto') },
-                                { value: 'stdio', label: 'stdio' },
-                                { value: 'http', label: 'HTTP' },
-                                { value: 'sse', label: 'SSE' },
-                              ]}
-                            />
+                              onChange={(e) => setEditMcp({ ...editMcp, transport: e.target.value as any })}
+                            >
+                              <option value="auto">{t('settings.mcp.transportAuto')}</option>
+                              <option value="stdio">stdio</option>
+                              <option value="http">HTTP</option>
+                              <option value="sse">SSE</option>
+                            </select>
                           </div>
                         </div>
                         <div className="field">
                           <label>{t('settings.mcp.commandLabel')}</label>
                           <div style={{ display: 'flex', gap: 8 }}>
-                            <div style={{ maxWidth: 160 }}>
-                              <AxTextInput
-                                label={t('settings.mcp.commandLabel')}
-                                isLabelHidden
-                                size="sm"
-                                value={editMcp.command}
-                                onChange={(v) => setEditMcp({ ...editMcp, command: v })}
-                                placeholder="npx"
-                              />
-                            </div>
-                            <AxTextInput
-                              label="args"
-                              isLabelHidden
-                              size="sm"
+                            <input
+                              type="text"
+                              style={{ maxWidth: 160 }}
+                              value={editMcp.command}
+                              onChange={(e) => setEditMcp({ ...editMcp, command: e.target.value })}
+                              placeholder="npx"
+                            />
+                            <input
+                              type="text"
                               value={editMcp.argsText}
-                              onChange={(v) => setEditMcp({ ...editMcp, argsText: v })}
+                              onChange={(e) => setEditMcp({ ...editMcp, argsText: e.target.value })}
                               placeholder="-y @modelcontextprotocol/server-filesystem /tmp"
                             />
                           </div>
                         </div>
                         <div className="field">
-                          <AxTextInput
-                            label={t('settings.mcp.urlLabel')}
-                            size="sm"
+                          <label>{t('settings.mcp.urlLabel')}</label>
+                          <input
+                            type="text"
                             value={editMcp.url}
-                            onChange={(v) => setEditMcp({ ...editMcp, url: v.trim() })}
+                            onChange={(e) => setEditMcp({ ...editMcp, url: e.target.value.trim() })}
                             placeholder="https://example.com/mcp"
                           />
                         </div>
@@ -1682,11 +1647,9 @@ export const SettingsModal: React.FC<{
                           />
                         </div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                          <AxButton
-                            label={t('settings.btn.save')}
-                            variant="primary"
-                            size="sm"
-                            isDisabled={!editMcp.name || (!editMcp.command && !editMcp.url)}
+                          <button
+                            className="btn primary sm"
+                            disabled={!editMcp.name || (!editMcp.command && !editMcp.url)}
                             onClick={() => {
                               const env: Record<string, string> = {}
                               for (const line of editMcp.envText.split('\n')) {
@@ -1703,8 +1666,10 @@ export const SettingsModal: React.FC<{
                               writeMcp({ ...mcpServers, [editMcp.name]: entry }, t('settings.mcp.savedReconnecting'))
                               setEditMcp(null)
                             }}
-                          />
-                          <AxButton label={t('settings.btn.cancel')} variant="ghost" size="sm" onClick={() => setEditMcp(null)} />
+                          >
+                            {t('settings.btn.save')}
+                          </button>
+                          <button className="btn ghost sm" onClick={() => setEditMcp(null)}>{t('settings.btn.cancel')}</button>
                           <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{mcpMsg}</span>
                         </div>
                       </>
@@ -1739,59 +1704,73 @@ export const SettingsModal: React.FC<{
                       <Globe2 size={14} /> {t('settings.browser.title')}
                     </div>
                     <div className="field">
-                      <AxSwitch
-                        label={t('settings.browser.agentBrowser')}
-                        description={t('settings.browser.hint')}
-                        value={stored.browserEnabled !== false}
-                        onChange={(checked) => setStored({ ...stored, browserEnabled: checked })}
-                      />
+                      <label>{t('settings.browser.agentBrowser')}</label>
+                      <div className="seg">
+                        <button
+                          className={stored.browserEnabled !== false ? 'active' : ''}
+                          onClick={() => setStored({ ...stored, browserEnabled: true })}
+                        >
+                          {t('common.enabled')}
+                        </button>
+                        <button
+                          className={stored.browserEnabled === false ? 'active' : ''}
+                          onClick={() => setStored({ ...stored, browserEnabled: false })}
+                        >
+                          {t('common.disabled')}
+                        </button>
+                      </div>
+                      <div className="hint">
+                        {t('settings.browser.hint')}
+                      </div>
                     </div>
                     <div className="field-row">
                       <div className="field">
-                        <AxSelector
-                          label={t('settings.browser.engine')}
-                          size="sm"
+                        <label>{t('settings.browser.engine')}</label>
+                        <select
                           value={stored.browserEngine || 'auto'}
-                          onChange={(v) => setStored({ ...stored, browserEngine: v as StoredDesktopConfig['browserEngine'] })}
-                          options={[
-                            { value: 'auto', label: 'Auto' },
-                            { value: 'chrome', label: 'Chrome' },
-                            { value: 'lightpanda', label: 'Lightpanda' },
-                          ]}
-                        />
+                          onChange={(e) => setStored({ ...stored, browserEngine: e.target.value as StoredDesktopConfig['browserEngine'] })}
+                        >
+                          <option value="auto">Auto</option>
+                          <option value="chrome">Chrome</option>
+                          <option value="lightpanda">Lightpanda</option>
+                        </select>
                       </div>
                       <div className="field">
-                        <AxSelector
-                          label={t('settings.browser.searchEngine')}
-                          size="sm"
+                        <label>{t('settings.browser.searchEngine')}</label>
+                        <select
                           value={stored.browserSearchEngine || 'duckduckgo'}
-                          onChange={(v) => setStored({ ...stored, browserSearchEngine: v as StoredDesktopConfig['browserSearchEngine'] })}
-                          options={[
-                            { value: 'duckduckgo', label: 'DuckDuckGo' },
-                            { value: 'bing', label: 'Bing' },
-                            { value: 'google', label: 'Google' },
-                            { value: 'baidu', label: 'Baidu' },
-                          ]}
-                        />
+                          onChange={(e) => setStored({ ...stored, browserSearchEngine: e.target.value as StoredDesktopConfig['browserSearchEngine'] })}
+                        >
+                          <option value="duckduckgo">DuckDuckGo</option>
+                          <option value="bing">Bing</option>
+                          <option value="google">Google</option>
+                          <option value="baidu">Baidu</option>
+                        </select>
                       </div>
                       <div className="field" style={{ maxWidth: 160 }}>
-                        <AxTextInput
-                          label={t('settings.browser.timeout')}
-                          size="sm"
+                        <label>{t('settings.browser.timeout')}</label>
+                        <input
+                          type="text"
                           value={String(stored.browserCommandTimeoutMs || 30000)}
-                          onChange={(v) => setStored({ ...stored, browserCommandTimeoutMs: Number(v.replace(/[^\d]/g, '')) || 30000 })}
+                          onChange={(e) => setStored({ ...stored, browserCommandTimeoutMs: Number(e.target.value.replace(/[^\d]/g, '')) || 30000 })}
                         />
                       </div>
                     </div>
                     <div className="field">
-                      <AxSwitch
-                        label={t('settings.browser.allowPrivate')}
-                        description={t('settings.browser.allowPrivateHint')}
-                        value={!!stored.browserAllowPrivateUrls}
-                        onChange={(checked) => setStored({ ...stored, browserAllowPrivateUrls: checked })}
-                      />
+                      <label className="inline-check">
+                        <input
+                          type="checkbox"
+                          checked={!!stored.browserAllowPrivateUrls}
+                          onChange={(e) => setStored({ ...stored, browserAllowPrivateUrls: e.target.checked })}
+                        />
+                        {t('settings.browser.allowPrivate')}
+                      </label>
+                      <div className="hint">{t('settings.browser.allowPrivateHint')}</div>
                     </div>
-                    <AxButton label={t('settings.btn.save')} variant="primary" size="sm" isLoading={wechatBusy} onClick={() => void saveRemoteSettings()} />
+                    <button className="btn primary sm" disabled={wechatBusy} onClick={() => void saveRemoteSettings()}>
+                      {wechatBusy ? <Loader2 size={12} className="spin" /> : null}
+                      {t('settings.btn.save')}
+                    </button>
                     {wechatMsg && <div className="hint" style={{ marginTop: 8 }}>{wechatMsg}</div>}
                   </>
                 )}
@@ -1802,49 +1781,59 @@ export const SettingsModal: React.FC<{
                       <Smartphone size={14} /> {t('settings.wechat.title')}
                     </div>
                     <div className="field">
-                      <AxSwitch
-                        label={t('settings.wechat.channel')}
-                        description={t('settings.wechat.hint')}
-                        value={stored.wechatEnabled !== false}
-                        onChange={(checked) => setStored({ ...stored, wechatEnabled: checked })}
-                      />
+                      <label>{t('settings.wechat.channel')}</label>
+                      <div className="seg">
+                        <button
+                          className={stored.wechatEnabled !== false ? 'active' : ''}
+                          onClick={() => setStored({ ...stored, wechatEnabled: true })}
+                        >
+                          {t('common.enabled')}
+                        </button>
+                        <button
+                          className={stored.wechatEnabled === false ? 'active' : ''}
+                          onClick={() => setStored({ ...stored, wechatEnabled: false })}
+                        >
+                          {t('common.disabled')}
+                        </button>
+                      </div>
+                      <div className="hint">
+                        {t('settings.wechat.hint')}
+                      </div>
                     </div>
                     <div className="field-row">
                       <div className="field">
-                        <AxTextInput
-                          label={t('settings.wechat.defaultSession')}
-                          size="sm"
+                        <label>{t('settings.wechat.defaultSession')}</label>
+                        <input
+                          type="text"
                           value={stored.wechatDefaultSessionId || p.activeSession?.id || ''}
-                          onChange={(v) => setStored({ ...stored, wechatDefaultSessionId: v.trim() })}
+                          onChange={(e) => setStored({ ...stored, wechatDefaultSessionId: e.target.value.trim() })}
                           placeholder={p.activeSession?.id || t('settings.wechat.defaultSessionPlaceholder')}
                         />
                       </div>
                       <div className="field" style={{ maxWidth: 220 }}>
-                        <AxSelector
-                          label={t('settings.wechat.approvalMode')}
-                          size="sm"
+                        <label>{t('settings.wechat.approvalMode')}</label>
+                        <select
                           value={stored.wechatRemoteApprovalMode || 'readonly'}
-                          onChange={(v) => setStored({ ...stored, wechatRemoteApprovalMode: v as StoredDesktopConfig['wechatRemoteApprovalMode'] })}
-                          options={[
-                            { value: 'readonly', label: t('approval.mode.readonly') },
-                            { value: 'auto-edit', label: t('approval.mode.autoEdit') },
-                            { value: 'full-auto', label: t('approval.mode.fullAuto') },
-                          ]}
-                        />
+                          onChange={(e) => setStored({ ...stored, wechatRemoteApprovalMode: e.target.value as StoredDesktopConfig['wechatRemoteApprovalMode'] })}
+                        >
+                          <option value="readonly">{t('approval.mode.readonly')}</option>
+                          <option value="auto-edit">{t('approval.mode.autoEdit')}</option>
+                          <option value="full-auto">{t('approval.mode.fullAuto')}</option>
+                        </select>
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
-                      <AxButton label={t('settings.btn.save')} variant="primary" size="sm" isLoading={wechatBusy} onClick={() => void saveRemoteSettings()} />
-                      <AxButton
-                        label={t('settings.wechat.startQr')}
-                        variant="ghost"
-                        size="sm"
-                        icon={<QrCode size={12} />}
-                        isLoading={wechatBusy}
-                        isDisabled={stored.wechatEnabled === false}
-                        onClick={() => void startWechatBind()}
-                      />
-                      <AxButton label={t('common.refresh')} variant="ghost" size="sm" icon={<RefreshCw size={12} />} onClick={refreshWechat} />
+                      <button className="btn primary sm" disabled={wechatBusy} onClick={() => void saveRemoteSettings()}>
+                        {wechatBusy ? <Loader2 size={12} className="spin" /> : null}
+                        {t('settings.btn.save')}
+                      </button>
+                      <button className="btn ghost sm" disabled={wechatBusy || stored.wechatEnabled === false} onClick={() => void startWechatBind()}>
+                        {wechatBusy ? <Loader2 size={12} className="spin" /> : <QrCode size={12} />}
+                        {t('settings.wechat.startQr')}
+                      </button>
+                      <button className="btn ghost sm" onClick={refreshWechat}>
+                        <RefreshCw size={12} /> {t('common.refresh')}
+                      </button>
                       {wechatStatus && (
                         <span className={`conn-pill ${wechatStatus.enabled ? 'ok' : ''}`}>
                           <span className="dot" />
@@ -1912,24 +1901,22 @@ export const SettingsModal: React.FC<{
                         ))}
                       </div>
                       <div className="field-row" style={{ gap: 8, marginTop: 8 }}>
-                        <AxButton
-                          label={t('settings.theme.openFolder')}
-                          variant="secondary"
-                          size="sm"
-                          icon={<FolderOpen size={13} />}
-                          onClick={() => { void window.tangu?.openThemesDir?.() }}
-                        />
-                        <AxButton
-                          label={t('settings.theme.reload')}
-                          variant="secondary"
-                          size="sm"
-                          icon={<RefreshCw size={13} />}
-                          isLoading={themesReloading}
-                          onClick={() => {
+                        <button type="button" className="btn sm" onClick={() => { void window.tangu?.openThemesDir?.() }}>
+                          <FolderOpen size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
+                          {t('settings.theme.openFolder')}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn sm"
+                          disabled={themesReloading}
+                          onClick={async () => {
                             setThemesReloading(true)
-                            void Promise.resolve(p.onReloadThemes?.()).finally(() => setThemesReloading(false))
+                            try { await p.onReloadThemes?.() } finally { setThemesReloading(false) }
                           }}
-                        />
+                        >
+                          <RefreshCw size={13} className={themesReloading ? 'spin' : ''} style={{ verticalAlign: -2, marginRight: 4 }} />
+                          {t('settings.theme.reload')}
+                        </button>
                       </div>
                       <div className="hint" style={{ marginTop: 6 }}>{t('settings.theme.dropHint')}</div>
                     </div>
@@ -1973,33 +1960,42 @@ export const SettingsModal: React.FC<{
                     )}
                     <div className="field">
                       <label>{t('settings.theme.modeLabel')}</label>
-                      <SegmentedControl
-                        value={p.themeMode}
-                        onChange={(v) => {
-                          const m = v as 'light' | 'dark'
-                          applyTheme(p.themeLang, p.themeSkin, m, { customColor: p.themeSeed })
-                          p.onThemeChange(p.themeLang, p.themeSkin, m)
-                        }}
-                        label={t('settings.theme.modeLabel')}
-                        size="sm"
-                      >
-                        <SegmentedControlItem value="light" label={t('settings.theme.light')} icon={<Sun size={13} />} />
-                        <SegmentedControlItem value="dark" label={t('settings.theme.dark')} icon={<Moon size={13} />} />
-                      </SegmentedControl>
+                      <div className="seg">
+                        <button
+                          className={p.themeMode === 'light' ? 'active' : ''}
+                          onClick={() => {
+                            applyTheme(p.themeLang, p.themeSkin, 'light', { customColor: p.themeSeed })
+                            p.onThemeChange(p.themeLang, p.themeSkin, 'light')
+                          }}
+                        >
+                          <Sun size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
+                          {t('settings.theme.light')}
+                        </button>
+                        <button
+                          className={p.themeMode === 'dark' ? 'active' : ''}
+                          onClick={() => {
+                            applyTheme(p.themeLang, p.themeSkin, 'dark', { customColor: p.themeSeed })
+                            p.onThemeChange(p.themeLang, p.themeSkin, 'dark')
+                          }}
+                        >
+                          <Moon size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
+                          {t('settings.theme.dark')}
+                        </button>
+                      </div>
                     </div>
                     <div className="field">
                       <label>{t('settings.theme.flatLabel')}</label>
-                      <SegmentedControl value={p.flatOn ? 'on' : 'off'} onChange={(v) => p.onFlatChange(v === 'on')} label={t('settings.theme.flatLabel')} size="sm">
-                        <SegmentedControlItem value="off" label={t('settings.theme.flatOff')} />
-                        <SegmentedControlItem value="on" label={t('settings.theme.flatOn')} />
-                      </SegmentedControl>
+                      <div className="seg">
+                        <button className={!p.flatOn ? 'active' : ''} onClick={() => p.onFlatChange(false)}>{t('settings.theme.flatOff')}</button>
+                        <button className={p.flatOn ? 'active' : ''} onClick={() => p.onFlatChange(true)}>{t('settings.theme.flatOn')}</button>
+                      </div>
                     </div>
                     <div className="field">
                       <label>{t('settings.theme.glassLabel')}</label>
-                      <SegmentedControl value={p.glassOn ? 'on' : 'off'} onChange={(v) => p.onGlassChange(v === 'on')} label={t('settings.theme.glassLabel')} size="sm">
-                        <SegmentedControlItem value="on" label={t('settings.theme.glassOn')} />
-                        <SegmentedControlItem value="off" label={t('settings.theme.glassOff')} />
-                      </SegmentedControl>
+                      <div className="seg">
+                        <button className={p.glassOn ? 'active' : ''} onClick={() => p.onGlassChange(true)}>{t('settings.theme.glassOn')}</button>
+                        <button className={!p.glassOn ? 'active' : ''} onClick={() => p.onGlassChange(false)}>{t('settings.theme.glassOff')}</button>
+                      </div>
                     </div>
                   </>
                 )}
@@ -2055,14 +2051,14 @@ export const SettingsModal: React.FC<{
                                       )}
                                     </span>
                                     {(s.source === 'local' || s.source === 'claude' || s.source === 'codex') && (
-                                      <AxButton
-                                        label={t('settings.skills.uploadBtn')}
-                                        variant="ghost"
-                                        size="sm"
-                                        isLoading={skillBusy === s.id}
-                                        tooltip={t('settings.skills.uploadTitle')}
+                                      <button
+                                        className="btn ghost sm"
+                                        disabled={skillBusy === s.id}
+                                        title={t('settings.skills.uploadTitle')}
                                         onClick={() => void doUploadSkill(s.id)}
-                                      />
+                                      >
+                                        {skillBusy === s.id ? <Loader2 size={11} className="spin" /> : t('settings.skills.uploadBtn')}
+                                      </button>
                                     )}
                                     {s.source === 'user' && (
                                       <button
@@ -2091,24 +2087,18 @@ export const SettingsModal: React.FC<{
                           {t('settings.discovery.hint')}
                         </div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
-                          <AxButton
-                            label={t('settings.discovery.scan')}
-                            variant="ghost"
-                            size="sm"
-                            icon={<Search size={12} />}
-                            isLoading={discScanning}
-                            onClick={() => void doDiscScan()}
-                          />
+                          <button className="btn ghost sm" disabled={discScanning} onClick={() => void doDiscScan()}>
+                            {discScanning ? <Loader2 size={12} className="spin" /> : <Search size={12} />} {t('settings.discovery.scan')}
+                          </button>
                           {disc && (
-                            <AxButton
-                              label={t('settings.discovery.importSelected', { count: discSelSkills.size + discSelMcp.size })}
-                              variant="primary"
-                              size="sm"
-                              icon={<Download size={12} />}
-                              isLoading={discImporting}
-                              isDisabled={discSelSkills.size === 0 && discSelMcp.size === 0}
+                            <button
+                              className="btn primary sm"
+                              disabled={discImporting || (discSelSkills.size === 0 && discSelMcp.size === 0)}
                               onClick={() => void doDiscImport()}
-                            />
+                            >
+                              {discImporting ? <Loader2 size={12} className="spin" /> : <Download size={12} />}
+                              {t('settings.discovery.importSelected', { count: discSelSkills.size + discSelMcp.size })}
+                            </button>
                           )}
                         </div>
 
@@ -2182,13 +2172,13 @@ export const SettingsModal: React.FC<{
                     <div className="field" style={{ marginTop: 14 }}>
                       <label>恢复默认布局</label>
                       <div className="hint" style={{ marginBottom: 8 }}>把工作区面板还原为默认黄金分割布局(中间 0.618 / 左右各 0.191),并清除已保存的自定义布局。</div>
-                      <AxButton
-                        label="恢复默认布局"
-                        variant="ghost"
-                        size="sm"
-                        icon={<RotateCcw size={13} />}
+                      <button
+                        className="btn ghost sm"
                         onClick={() => { useWorkspace.getState().resetLayout(); p.onClose() }}
-                      />
+                      >
+                        <RotateCcw size={13} />
+                        恢复默认布局
+                      </button>
                     </div>
 
                     <div className="field" style={{ marginTop: 14 }}>
@@ -2210,15 +2200,14 @@ export const SettingsModal: React.FC<{
                     <div className="field" style={{ marginTop: 14 }}>
                       <label>{t('settings.advanced.exportLogs')}</label>
                       <div className="hint" style={{ marginBottom: 8 }}>{t('settings.advanced.exportLogsHint')}</div>
-                      <AxButton
-                        label={t('settings.advanced.exportBtn')}
-                        variant="ghost"
-                        size="sm"
-                        icon={<Download size={13} />}
-                        isLoading={exporting}
-                        isDisabled={!p.activeSession}
+                      <button
+                        className="btn ghost sm"
                         onClick={() => void exportSessionLogs()}
-                      />
+                        disabled={exporting || !p.activeSession}
+                      >
+                        {exporting ? <Loader2 size={13} className="spin" /> : <Download size={13} />}
+                        {t('settings.advanced.exportBtn')}
+                      </button>
                       {!p.activeSession && <div className="hint" style={{ marginTop: 6 }}>{t('settings.advanced.exportNoSession')}</div>}
                       {exportMsg && <div className="hint" style={{ marginTop: 6, wordBreak: 'break-all' }}>{exportMsg}</div>}
                     </div>
@@ -2227,23 +2216,26 @@ export const SettingsModal: React.FC<{
                       <div className="field" style={{ marginTop: 18, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
                         <label style={{ color: 'var(--danger)' }}>{t('settings.clearData.label')}</label>
                         <div className="hint" style={{ marginBottom: 8 }}>{t('settings.clearData.hint')}</div>
-                        <AxSwitch label={t('settings.clearData.tangu')} value={clearTangu} onChange={setClearTangu} />
-                        <div style={{ marginTop: 4 }}>
-                          <AxSwitch label={t('settings.clearData.desktop')} value={clearDesktop} onChange={setClearDesktop} />
-                        </div>
+                        <label className="inline-check">
+                          <input type="checkbox" checked={clearTangu} onChange={(e) => setClearTangu(e.target.checked)} />
+                          {t('settings.clearData.tangu')}
+                        </label>
+                        <label className="inline-check" style={{ marginTop: 4 }}>
+                          <input type="checkbox" checked={clearDesktop} onChange={(e) => setClearDesktop(e.target.checked)} />
+                          {t('settings.clearData.desktop')}
+                        </label>
                         <div style={{ marginTop: 10 }}>
-                          <AxButton
-                            label={t('settings.clearData.btn')}
-                            variant="destructive"
-                            size="sm"
-                            icon={<Trash2 size={13} />}
-                            isDisabled={!clearTangu && !clearDesktop}
+                          <button
+                            className="btn danger sm"
+                            disabled={!clearTangu && !clearDesktop}
                             onClick={() => {
                               if (!clearTangu && !clearDesktop) return
                               if (!window.confirm(t('settings.clearData.confirm'))) return
                               void window.tangu?.clearAppData?.({ tangu: clearTangu, desktop: clearDesktop })
                             }}
-                          />
+                          >
+                            <Trash2 size={13} /> {t('settings.clearData.btn')}
+                          </button>
                         </div>
                         {window.tangu?.platform === 'darwin' && (
                           <div className="hint" style={{ marginTop: 6 }}>{t('settings.clearData.macNote')}</div>
@@ -2260,33 +2252,39 @@ export const SettingsModal: React.FC<{
                     <div className="field">
                       <label>{t('settings.developer.relaunchLabel')}</label>
                       <div>
-                        <AxButton label={t('settings.developer.relaunch')} variant="ghost" size="sm" icon={<Sparkles size={12} />} onClick={() => p.onRelaunchOnboarding?.()} />
+                        <button className="btn ghost sm" onClick={() => p.onRelaunchOnboarding?.()}>
+                          <Sparkles size={12} /> {t('settings.developer.relaunch')}
+                        </button>
                       </div>
                       <div className="hint">{t('settings.developer.relaunchHint')}</div>
                     </div>
                     <div className="field">
-                      <AxSwitch
-                        label={t('settings.developer.showSystemPrompt')}
-                        description={t('settings.developer.showSystemPromptHint')}
-                        value={showSysPrompt}
-                        onChange={(on) => {
-                          setShowSysPrompt(on)
-                          try { localStorage.setItem(SHOW_SYSTEM_PROMPT_KEY, on ? '1' : '0') } catch { /* ignore */ }
-                        }}
-                      />
+                      <label className="inline-check">
+                        <input
+                          type="checkbox"
+                          checked={showSysPrompt}
+                          onChange={(e) => {
+                            const on = e.target.checked
+                            setShowSysPrompt(on)
+                            try { localStorage.setItem(SHOW_SYSTEM_PROMPT_KEY, on ? '1' : '0') } catch { /* ignore */ }
+                          }}
+                        />
+                        {t('settings.developer.showSystemPrompt')}
+                      </label>
+                      <div className="hint">{t('settings.developer.showSystemPromptHint')}</div>
                     </div>
                     <div className="field">
                       <label>{t('settings.developer.testUpdateLabel')}</label>
                       <div>
-                        <AxButton label={t('settings.developer.testUpdate')} variant="ghost" size="sm" icon={<RefreshCw size={12} />} onClick={() => { openChangelogTab(); p.onClose() }} />
+                        <button className="btn ghost sm" onClick={() => { openChangelogTab(); p.onClose() }}>
+                          <RefreshCw size={12} /> {t('settings.developer.testUpdate')}
+                        </button>
                       </div>
                       <div className="hint">{t('settings.developer.testUpdateHint')}</div>
                     </div>
                     <div className="field">
-                      <AxButton
-                        label={t('settings.developer.disable')}
-                        variant="ghost"
-                        size="sm"
+                      <button
+                        className="btn ghost sm"
                         onClick={() => {
                           try { localStorage.removeItem(DEV_MODE_KEY) } catch { /* ignore */ }
                           // 关开发者模式顺手清掉「显示 system prompt」,免得关了 tab 还在聊天里冒调试块。
@@ -2296,7 +2294,9 @@ export const SettingsModal: React.FC<{
                           setDevClicks(0)
                           setTab('about')
                         }}
-                      />
+                      >
+                        {t('settings.developer.disable')}
+                      </button>
                     </div>
                   </>
                 )}
@@ -2366,6 +2366,5 @@ export const SettingsModal: React.FC<{
         </div>
       </section>
     </div>
-    </AstryxScope>
   )
 }

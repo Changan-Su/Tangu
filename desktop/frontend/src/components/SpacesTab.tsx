@@ -4,8 +4,6 @@
  * (按 id→磁盘目录映射删配方 + 撤 ribbon 图标 + 清命名布局)。判定内置/用户用 isUserSpace。
  */
 import React from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { AstryxScope } from '../theme/astryxBridge'
 import { useSpaceStore, label } from '@lcl/engine'
 import { isUserSpace, deleteUserSpace } from '../userSpaces'
 import { useApp } from '../stores/appStore'
@@ -27,7 +25,6 @@ export const SpacesTab: React.FC = () => {
   }
 
   return (
-    <AstryxScope>
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div className="hint">{t('settings.spaces.hint')}</div>
       {spaces.length === 0 && <div className="hint">{t('settings.spaces.empty')}</div>}
@@ -46,13 +43,14 @@ export const SpacesTab: React.FC = () => {
                 </div>
               </div>
               {user && (
-                <Button size="sm" variant="destructive" label={t('settings.spaces.uninstall')} onClick={() => void uninstall(sp.id, name)} />
+                <button className="btn ghost sm" style={{ color: 'var(--danger)' }} onClick={() => void uninstall(sp.id, name)}>
+                  {t('settings.spaces.uninstall')}
+                </button>
               )}
             </div>
           </div>
         )
       })}
     </div>
-    </AstryxScope>
   )
 }

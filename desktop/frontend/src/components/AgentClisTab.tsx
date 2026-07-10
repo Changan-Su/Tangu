@@ -5,9 +5,7 @@
  * 经 PUT /agent/engines/:id 持久化到 ~/.tangu/engine-prefs.json。未检测到的引擎只显示安装提示。
  */
 import React, { useEffect, useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { Selector } from '@astryxdesign/core/Selector'
-import { AstryxScope } from '../theme/astryxBridge'
+import { Loader2 } from 'lucide-react'
 import { useI18n } from '../i18n'
 import {
   listEngines,
@@ -82,18 +80,13 @@ export const AgentClisTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg }) => 
     if (imported) return <span className="hint" style={{ fontSize: 12 }}>{t('settings.agentClis.imported')}</span>
     const key = `${engineId}:${kind}:${name}`
     return (
-      <Button
-        size="sm"
-        variant="ghost"
-        label={t('settings.agentClis.importBtn')}
-        isLoading={busy === key}
-        onClick={() => doImport(engineId, kind, name)}
-      />
+      <button className="btn ghost sm" disabled={busy === key} onClick={() => doImport(engineId, kind, name)}>
+        {busy === key ? <Loader2 size={11} className="spin" /> : t('settings.agentClis.importBtn')}
+      </button>
     )
   }
 
   return (
-    <AstryxScope>
     <div className="field">
       <div className="settings-section-title">{t('settings.agentClis.title')}</div>
       <div className="hint" style={{ marginBottom: 12 }}>{t('settings.agentClis.hint')}</div>
@@ -126,22 +119,18 @@ export const AgentClisTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg }) => 
               {e.available ? (
                 <>
                   <div className="field" style={{ margin: '10px 0 0' }}>
+                    <label>{t('settings.agentClis.defaultModel')}</label>
                     {c === 'loading' ? (
-                      <>
-                        <label>{t('settings.agentClis.defaultModel')}</label>
-                        <div className="hint">{t('settings.agentClis.loadingModels')}</div>
-                      </>
+                      <div className="hint">{t('settings.agentClis.loadingModels')}</div>
                     ) : (
-                      <Selector
-                        label={t('settings.agentClis.defaultModel')}
-                        options={[
-                          { value: '', label: t('settings.agentClis.modelDefault') },
-                          ...models.map((m) => ({ value: m.id, label: m.name })),
-                        ]}
-                        value={e.defaultModel || ''}
-                        onChange={(v: string) => onPickModel(e.id, v)}
-                        size="sm"
-                      />
+                      <select value={e.defaultModel || ''} onChange={(ev) => onPickModel(e.id, ev.target.value)}>
+                        <option value="">{t('settings.agentClis.modelDefault')}</option>
+                        {models.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </select>
                     )}
                   </div>
                   {a && a !== 'loading' && (a.skills.length > 0 || a.mcp.length > 0) && (
@@ -196,6 +185,5 @@ export const AgentClisTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg }) => 
         })}
       </div>
     </div>
-    </AstryxScope>
   )
 }

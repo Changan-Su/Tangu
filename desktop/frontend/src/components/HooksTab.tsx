@@ -5,12 +5,6 @@
  * 仅本地后端可用（host-only；tab 在 SettingsModal 已由 isDesktop 门控）。
  */
 import React, { useCallback, useEffect, useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { TextInput } from '@astryxdesign/core/TextInput'
-import { TextArea } from '@astryxdesign/core/TextArea'
-import { Selector } from '@astryxdesign/core/Selector'
-import { Switch } from '@astryxdesign/core/Switch'
-import { AstryxScope } from '../theme/astryxBridge'
 import { getHooks, saveHooks, trustHookReq, enableHookReq, type HooksData, type HookDiscovered } from '../services/backendService'
 import type { TanguDesktopConfig } from '../types'
 import { useI18n } from '../i18n'
@@ -92,7 +86,6 @@ export const HooksTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg }) => {
   )
 
   return (
-    <AstryxScope>
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div className="hint" style={{ fontSize: 12 }}>
         {en
@@ -101,48 +94,39 @@ export const HooksTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg }) => {
       </div>
 
       {!draft && (
-        <Button
-          size="sm"
-          variant="secondary"
-          label={en ? '＋ New hook' : '＋ 新建 hook'}
-          onClick={() => { setEditKey(null); setDraft({ event: 'PreToolUse', matcher: '', command: '', timeout: '' }) }}
-        />
+        <button className="btn sm" onClick={() => { setEditKey(null); setDraft({ event: 'PreToolUse', matcher: '', command: '', timeout: '' }) }}>
+          {en ? '＋ New hook' : '＋ 新建 hook'}
+        </button>
       )}
 
       {draft && (
         <div style={{ border: 'var(--border-width) solid var(--border)', borderRadius: 'var(--radius-lg, 10px)', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <Selector
-            label={en ? 'Event' : '事件'}
-            options={eventNames}
-            value={draft.event}
-            onChange={(v: string) => setDraft({ ...draft, event: v })}
-            description={en ? EVENT_DESC[draft.event]?.en : EVENT_DESC[draft.event]?.zh}
-            size="sm"
-          />
+          <label style={{ fontSize: 12 }}>
+            {en ? 'Event' : '事件'}
+            <select value={draft.event} onChange={(e) => setDraft({ ...draft, event: e.target.value })} style={{ marginLeft: 8 }}>
+              {eventNames.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
+          <div style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>{en ? EVENT_DESC[draft.event]?.en : EVENT_DESC[draft.event]?.zh}</div>
           {!MATCHERLESS.has(draft.event) && (
-            <TextInput
-              label={en ? 'Matcher' : '匹配器'}
-              value={draft.matcher}
-              placeholder="* / run_bash / edit_file|write_file / mcp__.*"
-              onChange={(v: string) => setDraft({ ...draft, matcher: v })}
-              size="sm"
-            />
+            <label style={{ fontSize: 12 }}>
+              {en ? 'Matcher' : '匹配器'}
+              <input value={draft.matcher} placeholder={en ? '* / run_bash / edit_file|write_file / mcp__.*' : '* / run_bash / edit_file|write_file / mcp__.*'}
+                onChange={(e) => setDraft({ ...draft, matcher: e.target.value })} style={{ marginLeft: 8, width: 'calc(100% - 60px)' }} />
+            </label>
           )}
-          <TextArea
-            label={en ? 'Command (shell)' : '命令（shell）'}
-            value={draft.command}
-            rows={2}
-            placeholder={en ? 'e.g. grep -q "rm -rf" && exit 2' : '例如 grep -q "rm -rf" && exit 2'}
-            onChange={(v: string) => setDraft({ ...draft, command: v })}
-            size="sm"
-          />
+          <label style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {en ? 'Command (shell)' : '命令（shell）'}
+            <textarea value={draft.command} rows={2} placeholder={en ? 'e.g. grep -q "rm -rf" && exit 2' : '例如 grep -q "rm -rf" && exit 2'}
+              onChange={(e) => setDraft({ ...draft, command: e.target.value })} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }} />
+          </label>
           <label style={{ fontSize: 12 }}>
             {en ? 'Timeout (s)' : '超时（秒）'}
             <input value={draft.timeout} type="number" placeholder="600" onChange={(e) => setDraft({ ...draft, timeout: e.target.value })} style={{ marginLeft: 8, width: 80 }} />
           </label>
           <div style={{ display: 'flex', gap: 8 }}>
-            <Button size="sm" variant="secondary" label={en ? 'Save' : '保存'} onClick={() => void submitDraft()} isDisabled={!draft.command.trim()} />
-            <Button size="sm" variant="ghost" label={en ? 'Cancel' : '取消'} onClick={() => { setDraft(null); setEditKey(null) }} />
+            <button className="btn sm" onClick={() => void submitDraft()} disabled={!draft.command.trim()}>{en ? 'Save' : '保存'}</button>
+            <button className="btn ghost sm" onClick={() => { setDraft(null); setEditKey(null) }}>{en ? 'Cancel' : '取消'}</button>
           </div>
         </div>
       )}
@@ -169,10 +153,10 @@ export const HooksTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg }) => {
                     </div>
                     <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 12, marginTop: 3, wordBreak: 'break-all' }}>{h.command}</div>
                   </div>
-                  {h.trust === 'needs-review' && <Button size="sm" variant="ghost" label={en ? 'Trust' : '信任'} onClick={() => void trust({ ...h, event })} />}
-                  <Button size="sm" variant="ghost" label={en ? 'Edit' : '编辑'} onClick={() => startEdit({ ...h, event })} />
-                  <Button size="sm" variant="ghost" label={en ? 'Delete' : '删除'} onClick={() => void del(h.key)} />
-                  <Switch label={en ? 'Enabled' : '启用'} isLabelHidden value={h.enabled} onChange={() => void toggle({ ...h, event })} />
+                  {h.trust === 'needs-review' && <button className="btn ghost sm" onClick={() => void trust({ ...h, event })}>{en ? 'Trust' : '信任'}</button>}
+                  <button className="btn ghost sm" onClick={() => startEdit({ ...h, event })}>{en ? 'Edit' : '编辑'}</button>
+                  <button className="btn ghost sm" onClick={() => void del(h.key)}>{en ? 'Delete' : '删除'}</button>
+                  <input type="checkbox" checked={h.enabled} onChange={() => void toggle({ ...h, event })} style={{ cursor: 'pointer' }} />
                 </div>
               ))}
             </div>
@@ -180,6 +164,5 @@ export const HooksTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg }) => {
         )
       })}
     </div>
-    </AstryxScope>
   )
 }

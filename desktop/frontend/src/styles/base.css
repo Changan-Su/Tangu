@@ -1725,9 +1725,6 @@ a:hover { color: var(--accent-hover); }
   flex: 0 0 auto;
   white-space: nowrap;
 }
-/* astryx 适配:astryx 控件(TextInput 等)是包装 div 非裸 input,首个子元素当输入位撑满行。 */
-.settings-inline-row > :first-child { flex: 1 1 auto; min-width: 0; }
-.settings-inline-row > button.astryx-button { flex: 0 0 auto; white-space: nowrap; }
 
 @media (max-width: 720px) {
   .settings-page { grid-template-columns: 190px minmax(0, 1fr); }
