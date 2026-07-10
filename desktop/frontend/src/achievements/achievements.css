@@ -1,6 +1,10 @@
 /* 成就系统:toast + 面板内容区(外壳复用 .settings-page,零新增外壳样式)。全部取 base.css token。 */
 
-/* ── 成就 toast:凝聚显形→停留→失焦淡出(无位移无弹跳) ───────────── */
+/* ── 成就 toast:徽章「坠落→解锁→展开」三段式(固定 340px,单时间轴 4.6s) ─────────
+   所有元素共用同一 duration,keyframes 百分比即时间轴:
+   0-9%(≈0.41s) 坠落(光轨+纵向拉伸+倾斜转正) → 9-24% 解锁(外圈/闪光/光晕/星点)
+   → 20-34%(≈1.56s 前) 徽章左移+信息条遮罩揭示+文字依次上移 → 停留 → 91-100% 失焦淡出。
+   基础规则一律写「终态」,初/中间态全在 keyframes 里(reduced-motion 关动画即得终态布局)。 */
 .ach-toast {
   position: fixed;
   left: 50%;
@@ -9,28 +13,182 @@
   z-index: 90; /* 市场/设置浮层(50)之上,右上系统 toast(100)之下 */
   pointer-events: none;
   -webkit-app-region: no-drag;
+  width: 340px;  /* 长度固定 */
+  height: 52px;
+  animation: ach-t-wrap 4.6s var(--ease-out) both;
+}
+/* 系列徽章配色:本体底色 --medal-bg / 光效色 --medal-fx(未定级用 accent,灰色闪光太丧) */
+.ach-toast[data-tier='off']    { --medal-bg: var(--bg-card); --medal-fx: var(--accent); --medal-ink: var(--text-muted); }
+.ach-toast[data-tier='bronze'] { --medal-bg: #b87333; --medal-fx: #c98a4b; --medal-ink: #fff; }
+.ach-toast[data-tier='silver'] { --medal-bg: #a9a9a9; --medal-fx: #c4c4c4; --medal-ink: #fff; }
+.ach-toast[data-tier='gold']   { --medal-bg: #d4af37; --medal-fx: #e2c35b; --medal-ink: #fff; }
+
+/* 信息条:徽章左锚,背景/边框随 clip-path 从徽章后方向右揭示(非淡入) */
+.ach-toast-body {
+  position: absolute;
+  inset: 0 0 0 26px; /* 左缘藏在徽章中心之后 */
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 16px 10px 13px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  padding: 0 16px 0 40px;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: 26px;
   box-shadow: var(--card-shadow);
-  animation: ach-toast-life 3.15s var(--ease-out) both;
-  will-change: filter, opacity;
+  animation: ach-t-body 4.6s var(--ease-out) both;
 }
-.ach-toast > svg { width: 18px; height: 18px; color: var(--text-muted); flex: none; }
-.ach-toast-sub { font-size: 10.5px; color: var(--text-muted); letter-spacing: 0.02em; }
-.ach-toast-title { font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.35; }
-@keyframes ach-toast-life {
-  0%   { opacity: 0; filter: blur(6px) brightness(1.5); } /* 过曝+模糊 */
-  8%   { opacity: 1; filter: blur(0) brightness(1); }     /* ≈250ms 凝聚显形 */
-  90%  { opacity: 1; filter: blur(0) brightness(1); }     /* 停留 */
-  100% { opacity: 0; filter: blur(3px) brightness(1); }   /* ≈315ms 轻微失焦淡出 */
+.ach-toast-sub {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  animation: ach-t-sub 4.6s var(--ease-out) both;
+}
+.ach-toast-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: ach-t-title 4.6s var(--ease-out) both;
+}
+
+/* 徽章:终态停在左端;坠落/停驻期经 keyframes 平移到容器水平中点(+118px) */
+.ach-toast-badge {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--medal-bg);
+  color: var(--medal-ink);
+  border: 1px solid var(--border);
+  box-shadow: var(--card-shadow);
+  animation: ach-t-badge 4.6s cubic-bezier(0.22, 0.9, 0.32, 1) both;
+  will-change: transform;
+}
+.ach-toast-badge > svg { width: 22px; height: 22px; position: relative; z-index: 1; }
+/* 纵向光轨:坠落期跟在徽章上方,落定即熄 */
+.ach-toast-badge::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 62%;
+  width: 7px;
+  height: 88px;
+  margin-left: -3.5px;
+  border-radius: 4px;
+  background: linear-gradient(to top, color-mix(in srgb, var(--medal-fx) 60%, transparent), transparent);
+  animation: ach-t-trail 4.6s linear both;
+}
+/* 圆形外圈:解锁时扩出,终态留余辉 */
+.ach-toast-ring {
+  position: absolute;
+  inset: -4px;
+  border: 2px solid var(--medal-fx);
+  border-radius: 50%;
+  opacity: 0.35; /* 终态余辉 */
+  animation: ach-t-ring 4.6s var(--ease-out) both;
+}
+/* 中心闪光(短促)与径向光晕 */
+.ach-toast-flash {
+  position: absolute;
+  inset: 13px;
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0;
+  animation: ach-t-flash 4.6s var(--ease-out) both;
+}
+.ach-toast-glow {
+  position: absolute;
+  inset: -34px;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--medal-fx) 50%, transparent), transparent 68%);
+  opacity: 0;
+  animation: ach-t-glow 4.6s var(--ease-out) both;
+}
+/* 星点:s1/s2 射出后留在原位微光(终态「少量星点」),s3/s4 射出即逝 */
+.ach-toast-spark {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: var(--medal-fx);
+  opacity: 0;
+}
+.ach-toast-spark.s1 { --sx: -8px;  --sy: -34px; opacity: 0.35; animation: ach-t-spark-stay 4.6s var(--ease-out) both; }
+.ach-toast-spark.s2 { --sx: 32px;  --sy: -24px; opacity: 0.35; animation: ach-t-spark-stay 4.6s var(--ease-out) both; }
+.ach-toast-spark.s3 { --sx: -32px; --sy: 12px;  animation: ach-t-spark-fade 4.6s var(--ease-out) both; }
+.ach-toast-spark.s4 { --sx: 26px;  --sy: 30px;  animation: ach-t-spark-fade 4.6s var(--ease-out) both; }
+
+@keyframes ach-t-wrap { /* 整体只管淡出(轻微失焦);出队监听此动画名 */
+  0%, 91% { opacity: 1; filter: none; }
+  100%    { opacity: 0; filter: blur(3px); }
+}
+@keyframes ach-t-badge {
+  0%  { transform: translate(118px, -104px) rotate(-9deg) scale(1, 1.22); opacity: 0; }
+  2%  { opacity: 1; }
+  9%  { transform: translate(118px, 0) rotate(-4deg) scale(1, 1); }      /* 减速落定 */
+  13% { transform: translate(118px, 0) rotate(0deg); }                    /* 转正,无回弹 */
+  21% { transform: translate(118px, 0); }                                 /* 闪光期停驻中点 */
+  29% { transform: translate(0, 0); }                                     /* 左移就位 */
+  100% { transform: translate(0, 0); }
+}
+@keyframes ach-t-trail {
+  0%       { opacity: 0.9; }
+  8%       { opacity: 0.7; }
+  12%, 100% { opacity: 0; }
+}
+@keyframes ach-t-ring {
+  0%, 9%  { transform: scale(0.4); opacity: 0; }
+  13%     { transform: scale(1.12); opacity: 1; }
+  19%     { transform: scale(1); opacity: 0.9; }
+  32%, 100% { transform: scale(1); opacity: 0.35; } /* 余辉 */
+}
+@keyframes ach-t-flash {
+  0%, 9.5% { transform: scale(0); opacity: 0; }
+  12%      { transform: scale(1); opacity: 0.95; }
+  17%, 100% { transform: scale(1.65); opacity: 0; }
+}
+@keyframes ach-t-glow {
+  0%, 9.5% { opacity: 0; }
+  13%      { opacity: 0.7; }
+  24%, 100% { opacity: 0; }
+}
+@keyframes ach-t-spark-stay {
+  0%, 10% { transform: translate(0, 0) scale(0); opacity: 0; }
+  14%     { opacity: 1; }
+  22%     { transform: translate(var(--sx), var(--sy)) scale(1); opacity: 0.7; }
+  32%, 100% { transform: translate(var(--sx), var(--sy)) scale(1); opacity: 0.35; } /* 静止微光 */
+}
+@keyframes ach-t-spark-fade {
+  0%, 10% { transform: translate(0, 0) scale(0); opacity: 0; }
+  13%     { opacity: 1; }
+  24%, 100% { transform: translate(var(--sx), var(--sy)) scale(0.6); opacity: 0; }
+}
+@keyframes ach-t-body {
+  0%, 20% { clip-path: inset(0 100% 0 0 round 26px); } /* 藏在徽章后 */
+  31%, 100% { clip-path: inset(0 0 0 0 round 26px); }  /* 向右遮罩揭示 */
+}
+@keyframes ach-t-sub {
+  0%, 27% { opacity: 0; transform: translateY(7px); }
+  33%, 100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes ach-t-title {
+  0%, 30% { opacity: 0; transform: translateY(7px); }
+  36%, 100% { opacity: 1; transform: translateY(0); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ach-toast { animation: none; } /* 出队由 3.6s timeout 兜底 */
+  /* 关掉全部动画即静态终态布局;出队由 5.2s timeout 兜底 */
+  .ach-toast, .ach-toast * { animation: none !important; }
 }
 
 /* ── 面板:系列头(点数/进度条/勋章) ───────────────────────────── */

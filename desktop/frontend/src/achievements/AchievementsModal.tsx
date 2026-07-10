@@ -29,6 +29,7 @@ export function AchievementsModal(): React.ReactElement {
   const total = active.achievements.reduce((sum, a) => sum + a.points, 0)
   const tier = medalTier(active, pts)
   const nextTier = TIERS.find((tr) => pts < active.medals[tr]) ?? null
+  const MedalIcon = active.icon || Trophy // 系列共用徽章 = 系列图标(toast 同款)
 
   return (
     <div className="settings-page">
@@ -74,7 +75,7 @@ export function AchievementsModal(): React.ReactElement {
               title={nextTier
                 ? `${t(`achievements.medal.${nextTier}`)} · ${t('achievements.pts', { n: active.medals[nextTier] })}`
                 : t('achievements.medal.gold')}>
-              <Trophy />
+              <MedalIcon />
             </div>
           </div>
 
