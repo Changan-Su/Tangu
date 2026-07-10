@@ -7,12 +7,14 @@
  */
 
 /* ── 经典 Classic(id 沿用 cream;= 原 lovable 配色;亦即 :root 默认)──────────── */
-/* 2026-07-10 二改:奶油→「经典」,底族以 #f8f7f6 为基调中性化(去黄,留一丝暖);暗侧不动。base.css :root 同步。 */
+/* 2026-07-10 三改:经典 = custom seed #f8f7f6 的静态定格——9 个 seed 派生键(accent 族/bg/sidebar/card/user-bg)
+ * 逐字节取 customSkinVars('#f8f7f6') 亮/暗输出(lovableData.ts),其余键即 custom 的回退面,天然一致。
+ * 改这套值须重跑 customSkinVars 对齐,别手调。base.css :root(.dark) 同步。 */
 :root[data-skin='cream'] {
-  --bg: #f8f7f6;
-  --bg-card: #fdfdfc;
+  --bg: #f6f6f7;
+  --bg-card: #fcfcfd;
   --bg-glass: rgba(248, 247, 246, 0.9);
-  --sidebar-bg: #f2f1ef;
+  --sidebar-bg: #efeff0;
   --text: #1c1c1c;
   --text-light: rgba(28, 28, 28, 0.82);
   --text-muted: #5f5f5d;
@@ -20,11 +22,11 @@
   --text-ghost: rgba(28, 28, 28, 0.28);
   --border: #eae9e7;
   --shadow: rgba(0, 0, 0, 0.05);
-  --accent: #1c1c1c;
-  --accent-hover: #000000;
-  --accent-light: rgba(28, 28, 28, 0.05);
-  --accent-rgb: 28, 28, 28;
-  --on-accent: #fbfbfa;
+  --accent: #f8f7f6;
+  --accent-hover: #d5d4d4;
+  --accent-light: rgba(248, 247, 246, 0.1);
+  --accent-rgb: 248, 247, 246;
+  --on-accent: #161018;
   --green: #4f6f52;
   --danger: #a3503f;
   --danger-light: rgba(163, 80, 63, 0.08);
@@ -32,16 +34,16 @@
   --overlay-light: rgba(28, 28, 28, 0.04);
   --overlay-medium: rgba(28, 28, 28, 0.07);
   --overlay-strong: rgba(28, 28, 28, 0.14);
-  --user-bg: rgba(28, 28, 28, 0.04);
+  --user-bg: rgba(248, 247, 246, 0.1);
   --tool-bg: rgba(28, 28, 28, 0.03);
   --tool-text: #5f5f5d;
   --glow: radial-gradient(110% 75% at 82% -12%, rgba(191, 188, 182, 0.14), transparent 56%);
 }
 :root.dark[data-skin='cream'] {
-  --bg: #1c1a16;
-  --bg-card: #262219;
+  --bg: #2a292b;
+  --bg-card: #353538;
   --bg-glass: rgba(28, 26, 22, 0.9);
-  --sidebar-bg: #211e18;
+  --sidebar-bg: #323235;
   --text: #f2efe8;
   --text-light: rgba(242, 239, 232, 0.82);
   --text-muted: #a8a096;
@@ -49,11 +51,11 @@
   --text-ghost: rgba(242, 239, 232, 0.3);
   --border: #34302a;
   --shadow: rgba(0, 0, 0, 0.4);
-  --accent: #ece7dd;
-  --accent-hover: #fffaf0;
-  --accent-light: rgba(236, 231, 221, 0.1);
-  --accent-rgb: 236, 231, 221;
-  --on-accent: #1c1a16;
+  --accent: #f8f7f6;
+  --accent-hover: #f9f8f8;
+  --accent-light: rgba(248, 247, 246, 0.16);
+  --accent-rgb: 248, 247, 246;
+  --on-accent: #161018;
   --green: #8fb295;
   --danger: #d99080;
   --danger-light: rgba(217, 144, 128, 0.12);
@@ -61,7 +63,7 @@
   --overlay-light: rgba(242, 239, 232, 0.05);
   --overlay-medium: rgba(242, 239, 232, 0.08);
   --overlay-strong: rgba(242, 239, 232, 0.15);
-  --user-bg: rgba(242, 239, 232, 0.06);
+  --user-bg: rgba(248, 247, 246, 0.16);
   --tool-bg: rgba(242, 239, 232, 0.04);
   --tool-text: #a8a096;
   --glow: radial-gradient(110% 75% at 82% -12%, rgba(214, 188, 150, 0.14), transparent 56%);

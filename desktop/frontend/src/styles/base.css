@@ -7,11 +7,11 @@
  * 词表 = LCL 统一设计语言契约(.tangu-lovable);值拷自 Forsion-LCL/src/tangu/tangu.css。
  * 字体保留 CJK 回退(PingFang/雅黑)以渲染中文。组件只引用这些语义变量,换肤=整块替换 token。 */
 :root {
-  /* 「经典」底(id cream) 2026-07-10 二改(与 skins.css cream 同步):以 #f8f7f6 为基调中性化,去黄留一丝暖。 */
-  --bg: #f8f7f6;
-  --bg-card: #fdfdfc;
+  /* 「经典」(id cream) 2026-07-10 三改:= custom seed #f8f7f6 的静态定格(customSkinVars 亮输出),与 skins.css cream 同步。 */
+  --bg: #f6f6f7;
+  --bg-card: #fcfcfd;
   --bg-glass: rgba(248, 247, 246, 0.9);
-  --sidebar-bg: #f2f1ef;
+  --sidebar-bg: #efeff0;
   --text: #1c1c1c;
   --text-light: rgba(28, 28, 28, 0.82);
   --text-muted: #5f5f5d;
@@ -20,10 +20,10 @@
   --border: #eae9e7;
   --border-width: 1px;
   --shadow: rgba(0, 0, 0, 0.05);
-  --accent: #1c1c1c;
-  --accent-hover: #000000;
-  --accent-light: rgba(28, 28, 28, 0.05);
-  --accent-rgb: 28, 28, 28;
+  --accent: #f8f7f6;
+  --accent-hover: #d5d4d4;
+  --accent-light: rgba(248, 247, 246, 0.1);
+  --accent-rgb: 248, 247, 246;
   --green: #4f6f52;
   --danger: #a3503f;
   --danger-light: rgba(163, 80, 63, 0.08);
@@ -39,7 +39,7 @@
   --font-ui: 'Hanken Grotesk', ui-sans-serif, system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --font-body: var(--font-ui);
   --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-  --user-bg: rgba(28, 28, 28, 0.04);
+  --user-bg: rgba(248, 247, 246, 0.1);
   --tool-bg: rgba(28, 28, 28, 0.03);
   --tool-text: #5f5f5d;
   --panel-blur: none;
@@ -57,7 +57,7 @@
   /* 「agent 切换」同款灵动曲线(轻微过冲);用于展开/弹出等微动效,全局统一 taste */
   --ease-spring: cubic-bezier(0.2, 0.8, 0.3, 1);
   /* ── LCL 高程 token(扁平开关 html[data-flat='1'] 置空;P1 shell 暂未消费,前置铺垫) ── */
-  --on-accent: #fbfbfa;
+  --on-accent: #161018;
   --inset: rgba(255, 255, 255, 0.2) 0 0.5px 0 0 inset, rgba(0, 0, 0, 0.2) 0 0 0 0.5px inset, rgba(0, 0, 0, 0.05) 0 1px 2px 0;
   --focus: rgba(0, 0, 0, 0.1) 0 4px 12px;
   --card-shadow: 0 1px 2px rgba(42, 36, 26, 0.04), 0 10px 26px rgba(42, 36, 26, 0.05);
@@ -70,10 +70,10 @@
  * 其中性色(text/border/overlay/semantic/shadow)回退到本块,accent/bg 由内联 customSkinVars 覆盖。
  * 没有这块时,暗色下会泄漏亮色 :root 中性色到深底上(= 之前「暗色完全异常」的根因)。 */
 :root.dark {
-  --bg: #1c1a16;
-  --bg-card: #262219;
+  --bg: #2a292b;
+  --bg-card: #353538;
   --bg-glass: rgba(28, 26, 22, 0.9);
-  --sidebar-bg: #211e18;
+  --sidebar-bg: #323235;
   --text: #f2efe8;
   --text-light: rgba(242, 239, 232, 0.82);
   --text-muted: #a8a096;
@@ -81,11 +81,11 @@
   --text-ghost: rgba(242, 239, 232, 0.3);
   --border: #34302a;
   --shadow: rgba(0, 0, 0, 0.4);
-  --accent: #ece7dd;
-  --accent-hover: #fffaf0;
-  --accent-light: rgba(236, 231, 221, 0.1);
-  --accent-rgb: 236, 231, 221;
-  --on-accent: #1c1a16;
+  --accent: #f8f7f6;
+  --accent-hover: #f9f8f8;
+  --accent-light: rgba(248, 247, 246, 0.16);
+  --accent-rgb: 248, 247, 246;
+  --on-accent: #161018;
   --green: #8fb295;
   --danger: #d99080;
   --danger-light: rgba(217, 144, 128, 0.12);
@@ -93,7 +93,7 @@
   --overlay-light: rgba(242, 239, 232, 0.05);
   --overlay-medium: rgba(242, 239, 232, 0.08);
   --overlay-strong: rgba(242, 239, 232, 0.15);
-  --user-bg: rgba(242, 239, 232, 0.06);
+  --user-bg: rgba(248, 247, 246, 0.16);
   --tool-bg: rgba(242, 239, 232, 0.04);
   --tool-text: #a8a096;
   --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 26px rgba(0, 0, 0, 0.35);
