@@ -1,7 +1,7 @@
 {
   "id": "zhi",
   "name": "知",
-  "description": "白纸蓝笔 · AFFiNE 官方观感内置版。色值/阴影/半径/字栈 1:1 取自 @toeverything/theme@1.1.23:纯白纸面 + 灰阶文字梯队 + Inter 字栈。中性底任何配色下恒定;四个配色位内置官方强调色(蓝为默认招牌/红/绿/靛),自定义配色的 seed 照常穿透可换任意强调色。",
+  "description": "白纸蓝笔 · AFFiNE 官方观感内置版。色值/阴影/半径/字栈 1:1 取自 @toeverything/theme@1.1.23:纯白纸面 + 灰阶文字梯队 + Inter 字栈。中性底任何配色下恒定;默认位为官方蓝招牌,珊瑚/柔青/薰衣草与全家桶统一强调色,自定义配色的 seed 照常穿透。",
   "version": "1.0.0",
   "author": "Forsion",
   "supportsDarkMode": true,
@@ -15,6 +15,6 @@
     "accent": "#1e96eb",
     "title": { "text": "知" },
     "tagline": "白纸蓝笔 · AFFiNE 观感",
-    "swatches": ["#1e96eb", "#eb4335", "#10cb86", "#7d91ff"]
+    "swatches": ["#1e96eb", "#ff8a6b", "#4d8794", "#8b7fd6"]
   }
 }
