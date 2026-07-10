@@ -1,5 +1,5 @@
 /**
- * AFFiNE — 官方配色 1:1 还原。
+ * 知 — 白纸蓝笔(AFFiNE 官方观感内置版;前身=磁盘主题包 affine,2026-07-10 转正定名)。
  * 全部色值/阴影/半径/字栈取自 @toeverything/theme@1.1.23(AFFiNE 仓库锁定的主题包版本)
  * dist/style.css 的 [data-theme=light] / [data-theme=dark] 两块原值,手工映射到 LCL 契约;
  * 个别 LCL 有而 AFFiNE 没有的键(text-light/overlay 梯队/hover 强调/user-bg/glow)按其体系推导,逐处注明。
@@ -15,7 +15,7 @@
  */
 
 /* ─── 结构层:AFFiNE 半径(元素 4 / 菜单 8 / popover 12 原值)+ 官方阴影体系 + Inter 字栈(补 CJK) ─── */
-[data-theme='affine'] {
+[data-theme='zhi'] {
   --border-width: 1px;
   --radius-sm: 4px;
   --radius-md: 8px;
@@ -30,7 +30,7 @@
   --btn-shadow: 0px 0px 1px 0px rgba(0, 0, 0, 0.12), 0px 1px 5px 0px rgba(0, 0, 0, 0.12);
   --icon-shadow: 0px 0px 1px 0px rgba(0, 0, 0, 0.12);
 }
-.dark[data-theme='affine'] {
+.dark[data-theme='zhi'] {
   /* shadow-1 / button-shadow 暗侧原值 */
   --card-shadow: 0px 0px 4px 0px rgba(0, 0, 0, 0.24);
   --btn-shadow: 0px 0px 1px 0px rgba(0, 0, 0, 0.2), 0px 1px 5px 0px rgba(0, 0, 0, 0.2);
@@ -38,7 +38,7 @@
 }
 
 /* ─── 亮色·通吃块:AFFiNE 中性底 + 官方蓝强调(cream 默认位;custom 被内联 seed 压过) ─── */
-:root[data-theme='affine'][data-skin] {
+:root[data-theme='zhi'][data-skin] {
   --bg: #ffffff;                              /* background-primary */
   --bg-card: #fbfbfc;                         /* background-overlay-panel(AFFiNE 极扁平,面板与纸面几乎同色靠边线/阴影分层) */
   --bg-glass: rgba(255, 255, 255, 0.9);
@@ -70,7 +70,7 @@
 }
 
 /* ─── 暗色·通吃块:纸面 #141414 / 侧栏 #252525 / 官方暗侧微调蓝 #1c9ee4 ─── */
-:root.dark[data-theme='affine'][data-skin] {
+:root.dark[data-theme='zhi'][data-skin] {
   --bg: #141414;                              /* background-primary */
   --bg-card: #1e1e1e;                         /* background-overlay-panel */
   --bg-glass: rgba(20, 20, 20, 0.9);
@@ -105,7 +105,7 @@
  *     tint 亮 .10 暗 .16、气泡 亮 .08 暗 .14 —— 与 custom seed 的观感规则一致,只有蓝用官方 tint 面) ─── */
 
 /* coral → AFFiNE 红(v1 error 原值 #eb4335 / 暗侧 #bc362a) */
-:root[data-theme='affine'][data-skin='coral'] {
+:root[data-theme='zhi'][data-skin='coral'] {
   --accent: #eb4335;
   --accent-hover: #ca3a2e;
   --accent-light: rgba(235, 67, 53, 0.1);
@@ -113,7 +113,7 @@
   --on-accent: #ffffff;
   --user-bg: rgba(235, 67, 53, 0.08);
 }
-:root.dark[data-theme='affine'][data-skin='coral'] {
+:root.dark[data-theme='zhi'][data-skin='coral'] {
   --accent: #bc362a;
   --accent-hover: #c85a50;
   --accent-light: rgba(188, 54, 42, 0.16);
@@ -123,7 +123,7 @@
 }
 
 /* teal → AFFiNE 绿(v1 success 原值 #10cb86 / 暗侧 #0da26b) */
-:root[data-theme='affine'][data-skin='teal'] {
+:root[data-theme='zhi'][data-skin='teal'] {
   --accent: #10cb86;
   --accent-hover: #0eaf73;
   --accent-light: rgba(16, 203, 134, 0.1);
@@ -131,7 +131,7 @@
   --on-accent: #ffffff;
   --user-bg: rgba(16, 203, 134, 0.08);
 }
-:root.dark[data-theme='affine'][data-skin='teal'] {
+:root.dark[data-theme='zhi'][data-skin='teal'] {
   --accent: #0da26b;
   --accent-hover: #39b386;
   --accent-light: rgba(13, 162, 107, 0.16);
@@ -141,7 +141,7 @@
 }
 
 /* lavender → AFFiNE 靛(v1 secondary 原值 #7d91ff / 暗侧 #9096f5) */
-:root[data-theme='affine'][data-skin='lavender'] {
+:root[data-theme='zhi'][data-skin='lavender'] {
   --accent: #7d91ff;
   --accent-hover: #6c7ddb;
   --accent-light: rgba(125, 145, 255, 0.1);
@@ -149,7 +149,7 @@
   --on-accent: #ffffff;
   --user-bg: rgba(125, 145, 255, 0.08);
 }
-:root.dark[data-theme='affine'][data-skin='lavender'] {
+:root.dark[data-theme='zhi'][data-skin='lavender'] {
   --accent: #9096f5;
   --accent-hover: #a4a9f7;
   --accent-light: rgba(144, 150, 245, 0.16);

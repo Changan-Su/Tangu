@@ -7,17 +7,18 @@
  */
 
 /* ── 奶油 Cream(= 原 lovable 配色;亦即 :root 默认)──────────────────────── */
+/* 2026-07-10 淡化:用户反馈米黄越来越黄。色度砍半(bg 10→5),只留「淡淡的」暖底;暗侧不动。base.css :root 同步。 */
 :root[data-skin='cream'] {
-  --bg: #f7f4ed;
-  --bg-card: #fefdf9;
-  --bg-glass: rgba(247, 244, 237, 0.9);
-  --sidebar-bg: #f3efe7;
+  --bg: #f9f8f4;
+  --bg-card: #fefdfb;
+  --bg-glass: rgba(249, 248, 244, 0.9);
+  --sidebar-bg: #f4f2ec;
   --text: #1c1c1c;
   --text-light: rgba(28, 28, 28, 0.82);
   --text-muted: #5f5f5d;
   --text-faint: rgba(28, 28, 28, 0.4);
   --text-ghost: rgba(28, 28, 28, 0.28);
-  --border: #efece4;
+  --border: #ecebe5;
   --shadow: rgba(0, 0, 0, 0.05);
   --accent: #1c1c1c;
   --accent-hover: #000000;
@@ -34,7 +35,7 @@
   --user-bg: rgba(28, 28, 28, 0.04);
   --tool-bg: rgba(28, 28, 28, 0.03);
   --tool-text: #5f5f5d;
-  --glow: radial-gradient(110% 75% at 82% -12%, rgba(214, 188, 150, 0.3), transparent 56%);
+  --glow: radial-gradient(110% 75% at 82% -12%, rgba(206, 192, 168, 0.16), transparent 56%);
 }
 :root.dark[data-skin='cream'] {
   --bg: #1c1a16;

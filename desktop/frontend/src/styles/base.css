@@ -7,16 +7,17 @@
  * 词表 = LCL 统一设计语言契约(.tangu-lovable);值拷自 Forsion-LCL/src/tangu/tangu.css。
  * 字体保留 CJK 回退(PingFang/雅黑)以渲染中文。组件只引用这些语义变量,换肤=整块替换 token。 */
 :root {
-  --bg: #f7f4ed;
-  --bg-card: #fefdf9;
-  --bg-glass: rgba(247, 244, 237, 0.9);
-  --sidebar-bg: #f3efe7;
+  /* 奶油底 2026-07-10 淡化(与 skins.css cream 同步):色度砍半,只留淡淡的暖调。 */
+  --bg: #f9f8f4;
+  --bg-card: #fefdfb;
+  --bg-glass: rgba(249, 248, 244, 0.9);
+  --sidebar-bg: #f4f2ec;
   --text: #1c1c1c;
   --text-light: rgba(28, 28, 28, 0.82);
   --text-muted: #5f5f5d;
   --text-faint: rgba(28, 28, 28, 0.4);
   --text-ghost: rgba(28, 28, 28, 0.28);
-  --border: #efece4;
+  --border: #ecebe5;
   --border-width: 1px;
   --shadow: rgba(0, 0, 0, 0.05);
   --accent: #1c1c1c;
@@ -98,7 +99,7 @@
   --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 26px rgba(0, 0, 0, 0.35);
   --btn-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   --icon-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --glow: radial-gradient(110% 75% at 82% -12%, rgba(214, 188, 150, 0.14), transparent 56%);
+  --glow: radial-gradient(110% 75% at 82% -12%, rgba(206, 192, 168, 0.12), transparent 56%);
   --overlay-scrim: rgba(0, 0, 0, 0.55);
 }
 

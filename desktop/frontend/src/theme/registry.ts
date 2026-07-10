@@ -77,7 +77,7 @@ export interface SkinInfo {
 }
 
 const SKINS: SkinInfo[] = [
-  { id: 'cream', accent: '#1c1c1c', bg: '#f7f4ed' },
+  { id: 'cream', accent: '#1c1c1c', bg: '#f9f8f4' },
   { id: 'coral', accent: '#ff8a6b', bg: '#fbf5ef' },
   { id: 'teal', accent: '#4d8794', bg: '#f5f5f7' },
   { id: 'lavender', accent: '#8b7fd6', bg: '#f4eef7' },
