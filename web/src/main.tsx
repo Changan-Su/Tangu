@@ -4,10 +4,25 @@
  * 主模块求值」——静态 import 会被提升到 body 之前执行,而 amadeus/api.ts 在模块求值时就捕获
  * window.amadeus,dbStore/noteViewStore 也在模块级判断 window.amadeus 并订阅事件。
  */
-import { getApiBase, getToken, installWebShim, redirectToLogin } from './webShim'
+import { getApiBase, getToken, installWebShim, redirectToLogin, requireLoginForPage } from './webShim'
 import { createCloudAmadeusBridge, setCloudNotify } from './amadeus/cloudBridge'
+import { installCloudCollab } from './amadeus/cloudCollab'
 
-if (installWebShim()) {
+const path = location.pathname
+
+if (path.startsWith('/share/')) {
+  // P3 公开分享 viewer:无鉴权、不加载主应用(轻量独立页)。
+  void import('./sharePage')
+    .then((m) => m.mountSharePage(decodeURIComponent(path.slice('/share/'.length)).replace(/\/+$/, '')))
+    .catch((e) => console.error('[tangu-web] share page failed:', e))
+} else if (path.startsWith('/invite/')) {
+  // P2 邀请接受页:需登录(回跳回本页),不加载主应用。
+  if (requireLoginForPage()) {
+    void import('./invitePage')
+      .then((m) => m.mountInvitePage(decodeURIComponent(path.slice('/invite/'.length)).replace(/\/+$/, '')))
+      .catch((e) => console.error('[tangu-web] invite page failed:', e))
+  }
+} else if (installWebShim()) {
   // 已登录:同步工厂,不发网络请求;首个 Amadeus/Calendar 视图挂载时经 ensureAmadeusReady →
   // restoreVault 才真正连云(GET /vaults → tree → SSE → asset-token)。
   window.amadeus = createCloudAmadeusBridge({
@@ -15,6 +30,8 @@ if (installWebShim()) {
     getToken,
     onAuthError: redirectToLogin,
   })
+  // P2/P3 协同与分享面(web 专属;共享 UI 据 window.amadeusCollab 解闸)。
+  installCloudCollab({ apiBase: getApiBase(), getToken })
 
   // window.tangu / window.amadeus 就位后再加载桌面端启动模块(@ → ../desktop/frontend/src)。
   void import('@/main')

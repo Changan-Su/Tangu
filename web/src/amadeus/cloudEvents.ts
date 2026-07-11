@@ -23,6 +23,9 @@ export interface CloudEventsCfg {
   onDbChange(path: string): void
   /** 已在此处 300ms 防抖。 */
   onStructureChange(): void
+  /** P2 presence(可选):增量事件 / 连上时的全量名册。 */
+  onPresence?(p: unknown): void
+  onPresenceRoster?(list: unknown): void
 }
 
 interface ChangeRecord {
@@ -104,6 +107,12 @@ export function startCloudEvents(cfg: CloudEventsCfg): () => void {
     })
     src.addEventListener('change', (e) => handleChange((e as MessageEvent).data as string))
     src.addEventListener('reset', () => recoverGap())
+    src.addEventListener('presence', (e) => {
+      try { cfg.onPresence?.(JSON.parse((e as MessageEvent).data as string)) } catch { /* ignore */ }
+    })
+    src.addEventListener('presence-roster', (e) => {
+      try { cfg.onPresenceRoster?.(JSON.parse((e as MessageEvent).data as string)) } catch { /* ignore */ }
+    })
     src.onerror = () => {
       src.close()
       if (es === src) es = null

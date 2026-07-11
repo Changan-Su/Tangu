@@ -15,9 +15,30 @@ function readToken(): string {
   try { return localStorage.getItem(TOKEN_KEY) || '' } catch { return '' }
 }
 
-function gotoLogin(): void {
-  const ret = location.origin + (import.meta.env.BASE_URL || '/')
+function gotoLogin(returnUrl?: string): void {
+  const ret = returnUrl ?? location.origin + (import.meta.env.BASE_URL || '/')
   location.replace('/auth?redirect=' + encodeURIComponent(ret) + '&app=tangu-web')
+}
+
+/** 捕获 /auth 回跳的 ?token=(落盘 + 清 URL)。邀请页等非主应用入口复用。 */
+export function captureTokenFromUrl(): void {
+  try {
+    const u = new URL(location.href)
+    const tok = u.searchParams.get('token')
+    if (tok) {
+      localStorage.setItem(TOKEN_KEY, tok)
+      u.searchParams.delete('token')
+      history.replaceState(null, '', u.toString())
+    }
+  } catch { /* private mode / 老浏览器 */ }
+}
+
+/** 需要登录的独立页(如 /invite/*):有 token → true;无 → 跳登录并回到当前页,返回 false。 */
+export function requireLoginForPage(): boolean {
+  captureTokenFromUrl()
+  if (readToken()) return true
+  gotoLogin(location.origin + location.pathname)
+  return false
 }
 
 // —— 供 Amadeus 云端桥(src/amadeus/*)复用的三件套:同一 token 键、同一 API 基址、同一登录跳转。 ——

@@ -39,6 +39,7 @@ import type {
 } from '@amadeus-shared/ipc'
 import { createCloudHttp, is404, is409, HttpError } from './cloudHttp'
 import { startCloudEvents } from './cloudEvents'
+import { pushPresence, setRoster } from './cloudPresence'
 import { buildAssetUrl, installCloudAssetUrls } from './cloudAssets'
 import {
   attachmentPaths,
@@ -89,6 +90,17 @@ const nowIso = (): string => new Date().toISOString()
 const DESKTOP_ONLY = '此操作仅桌面端可用'
 const CONFLICT_TOAST = '云端已有更新，已加载最新版本（本次未保存的修改被覆盖）'
 
+// ── 活动 vault(P2 共享:可以打开别人的共享库)───────────────────────────────────
+/** localStorage 覆盖键:存 vault id;缺省/失效 → 自己的 default vault。 */
+export const ACTIVE_VAULT_KEY = 'amadeus.cloudVaultId'
+
+let activeVaultResolver: (() => Promise<string>) | null = null
+
+/** 活动 vault id(与桥内 ensureVault 同源;cloudCollab 复用,勿自行解析防两套真相)。 */
+export function ensureActiveVault(): Promise<string> {
+  return activeVaultResolver ? activeVaultResolver() : Promise.resolve('default')
+}
+
 /** 同步工厂:内部状态全在闭包;网络在各方法内 ensureVault() 后才发生。 */
 export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
   // randomUUID 需要 secure context(https/localhost);http 内网部署兜底随机串,别让工厂抛挂白屏。
@@ -113,13 +125,27 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
     if (vaultPromise) return vaultPromise
     vaultPromise = (async () => {
       const r = await http.get<{ vaults: VaultDto[] }>('/amadeus/vaults') // 服务端自动建 default + 种子 Calendar.db
-      const v = r.vaults.find((x) => x.id === 'default') ?? r.vaults[0]
+      // P2:localStorage 可指定活动 vault(含别人共享给我的);不在列表 → 可能是共享库(listVaults 只回自有),
+      // 经 shared-with-me 验证后采用;仍无 → 静默回落自己的(被移出共享/失效)。
+      let want: string | null = null
+      try { want = localStorage.getItem(ACTIVE_VAULT_KEY) } catch { /* ignore */ }
+      if (want && !r.vaults.some((x) => x.id === want)) {
+        try {
+          const shared = await http.get<{ items: Array<{ vaultId: string }> }>('/amadeus/shared-with-me')
+          if (shared.items.some((it) => it.vaultId === want)) { vaultId = want; return want }
+        } catch { /* 验证失败 → 回落自有 */ }
+      }
+      const v =
+        (want ? r.vaults.find((x) => x.id === want) : undefined) ??
+        r.vaults.find((x) => x.id === 'default') ??
+        r.vaults[0]
       vaultId = v?.id ?? 'default'
       return vaultId
     })()
     vaultPromise.catch(() => { vaultPromise = null }) // 失败可重试
     return vaultPromise
   }
+  activeVaultResolver = ensureVault
 
   // ---- path → seq(乐观并发基准;只由自己的 GET/PUT 更新) ---------------------
   const seqMap = new Map<string, number>()
@@ -232,6 +258,8 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
       onPageChange: (p) => fireExternal(p),
       onDbChange: (p) => fireDb(p),
       onStructureChange: () => { invalidateTree(); fireStructure() },
+      onPresence: pushPresence,
+      onPresenceRoster: setRoster,
     })
     window.addEventListener('beforeunload', () => { stopEvents?.() })
   }
@@ -743,6 +771,30 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
         migrateSeq(oldPath, newPath, moved.seq)
         invalidateTree()
         return newPath
+      }),
+
+    // ponytail: 云端只做移动(服务端 move 保文件 id);桌面版的 title 同步 + 全库引用重写暂缺,
+    // 裸名 ![[库名]] 引用靠服务端 basename 兜底仍可解析,带路径引用会断 —— 要补齐做服务端 renameDb 端点。
+    renameDbFile: (oldPath, newBaseName) =>
+      enqueue([oldPath], async () => {
+        await ensureVault()
+        const norm = oldPath.replace(/\\/g, '/')
+        let base = newBaseName.trim().replace(/[\\/]/g, '')
+        if (base.toLowerCase().endsWith('.db')) base = base.slice(0, -3)
+        if (!base) throw new Error('名称不能为空')
+        const dir = dirnamePosix(norm)
+        const newPath = dir ? `${dir}/${base}.db` : `${base}.db`
+        if (newPath === norm) return { newPath, rewrittenPages: [] }
+        let moved: MoveResultDto
+        try {
+          moved = await http.post<MoveResultDto>(`/amadeus/vaults/${encodeURIComponent(vid())}/move`, { from: norm, to: newPath })
+        } catch (e) {
+          if (is409(e)) throw new Error('目标文件已存在')
+          throw e
+        }
+        migrateSeq(norm, newPath, moved.seq)
+        invalidateTree()
+        return { newPath, rewrittenPages: [] }
       }),
   }
 }
