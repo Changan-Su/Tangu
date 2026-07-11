@@ -15,6 +15,10 @@ import { pageKey, resolvePageName } from '@amadeus-shared/links'
 import { patchFmExtraText } from '@amadeus-shared/db/pageFrontmatter'
 import { amadeus } from '../api'
 import { computeFdChildren, fdDirOf, isNoteMd, nearestFd, noteOfFd } from '../lib/fd'
+import { resolveFileName } from '../lib/vaultFiles'
+import { makeUndoStack, type Snap } from '../lib/undoHistory'
+import { useUiStore } from './uiStore'
+import { track } from '../../achievements/store'
 
 export interface BlockState {
   id: BlockId
@@ -92,15 +96,52 @@ function appendToEnd(root: StackNode, id: BlockId): void {
   }
 }
 
+/** 把 id 所在的「单列多子」行拆开,让 id 独占一行(前段留原行、后段成新行);
+ *  多列行/已独占行原样不动。原地修改 root,返回 id 所在行的下标(找不到块返回 null)。
+ *  这是分栏 Notion 化的关键:页面块常年堆在同一行同一列里,行级分栏会把整页劈两半。 */
+function isolateBlockRow(root: StackNode, id: BlockId): number | null {
+  const loc = locate(root, id)
+  if (!loc) return null
+  const row = root.children[loc.rowIdx]
+  if (row.columns.length !== 1 || row.columns[0].children.length <= 1) return loc.rowIdx
+  const col = row.columns[0]
+  const before = col.children.slice(0, loc.childIdx)
+  const self = col.children[loc.childIdx]
+  const after = col.children.slice(loc.childIdx + 1)
+  const mkRow = (children: { ref: BlockId }[]): RowNode => ({
+    type: 'row',
+    id: generateRowId(),
+    columns: [{ id: generateColumnId(), width: 1, children }],
+  })
+  const rows: RowNode[] = []
+  let selfRow: RowNode
+  if (before.length) {
+    col.children = before // 原行(保行/列 id)装前段
+    rows.push(row)
+    selfRow = mkRow([self])
+  } else {
+    col.children = [self] // 无前段:原行即本块行
+    selfRow = row
+  }
+  rows.push(selfRow)
+  if (after.length) rows.push(mkRow(after))
+  root.children.splice(loc.rowIdx, 1, ...rows)
+  return root.children.indexOf(selfRow)
+}
+
 export type Status = 'idle' | 'loading' | 'ready' | 'saving'
 export type FocusPlace = 'start' | 'end'
 
 interface PageState {
   vaultRoot: string | null
+  /** 胶囊滑块所在侧:local=用户自选 vault,cloud=云镜像目录(仅桌面;web/mobile 恒 local)。 */
+  vaultSide: 'local' | 'cloud'
   pages: string[]
   folders: string[]
   /** Non-page files (attachments/.db/…), vault-relative — shown in the vault tree. */
   files: string[]
+  /** 页面 emoji 图标(fm icon: 键;path → emoji)。桌面索引供给,其余端为空表。 */
+  icons: Record<string, string>
   activePage: string | null
   manifest: PageManifest | null
   blocks: Record<BlockId, BlockState>
@@ -116,6 +157,10 @@ interface PageState {
 
   openVault(): Promise<void>
   restoreVault(): Promise<void>
+  /** Local↔Cloud 全局切活动 vault(树/编辑器/聚合全跟随);仅桌面(window.amadeusSync)。 */
+  switchVaultSide(side: 'local' | 'cloud'): Promise<void>
+  /** 启动时从主进程取当前侧(lastVault 可能落在云镜像)。 */
+  initVaultSide(): Promise<void>
   refreshPages(): Promise<void>
   loadPage(path: string): Promise<void>
   createPage(): Promise<void>
@@ -140,6 +185,15 @@ interface PageState {
   syncFdChildren(parentNotePath: string): Promise<void>
   /** 对一批路径,找各自所属 .fd 的父笔记并同步 children(去重)。 */
   syncFdParentsOf(paths: string[]): Promise<void>
+  /** 设置/清除页面 emoji 图标(写 fm icon: 键;活动页走内存 fmExtra 防 clobber)。 */
+  setPageIcon(pagePath: string, icon: string | null): Promise<void>
+  /** 设置/清除页面封面(fm cover: 键 = http URL 或 vault 相对路径;同 icon 双路写)。 */
+  setPageCover(pagePath: string, cover: string | null): Promise<void>
+  /** 设置封面纵向焦点(fm cover_y: 0-100 百分比,object-position 用;拖拽调焦点落盘)。 */
+  setPageCoverY(pagePath: string, y: number | null): Promise<void>
+  /** 新建笔记后请求把光标落到标题栏(Notion 式:先命名);一次性,NoteTitle 加载到该页时消费。 */
+  focusTitleFor: string | null
+  consumeTitleFocus(): void
 
   /** Refresh both the page list and the folder list from disk. */
   refreshStructure(): Promise<void>
@@ -178,8 +232,10 @@ interface PageState {
   setDnd(activeId: string | null, overId: string | null): void
   /** Split: pull a block into a new column on one side of a row (Notion-style columns). */
   addColumnWithBlock(rowId: RowId, id: BlockId, side: 'left' | 'right'): void
-  /** Split the block's OWN row: pull it out into a new column beside it(菜单式分栏,免拖拽)。 */
+  /** 分栏(Notion 语义):本块独占一行后与新空块并排成两栏;焦点落新栏。 */
   splitToColumn(id: BlockId, side: 'left' | 'right'): void
+  /** 拖到某块左/右边缘:仅与那一块并排成行(自动把它从「大杂烩行」里拆出来)。 */
+  pairBlocks(dragId: BlockId, targetId: BlockId, side: 'left' | 'right'): void
   /** Pull a block into a brand-new full-width row after the given row index. */
   addRowWithBlock(afterRowIndex: number, id: BlockId): void
   /** Resize the divider between two adjacent columns (leftFraction of their combined width). */
@@ -192,6 +248,10 @@ interface PageState {
   /** Force any pending debounced save to disk now, so the main index is fresh before navigating/searching. */
   flushSave(): Promise<void>
   reconcileExternal(path: string): Promise<void>
+
+  /** 文档级撤销/重做(Cmd+Z / Cmd+Shift+Z / Cmd+Y):覆盖块内文字 + 块的增删/合并/移动/斜杠转换。 */
+  undo(): void
+  redo(): void
 
   _commit(manifest: PageManifest, blocks?: Record<BlockId, BlockState>): void
 }
@@ -218,11 +278,26 @@ export const usePageStore = create<PageState>((set, get) => {
     }, 400)
   }
 
+  // 文档级撤销/重做:快照 = {manifest, blocks}。两者恒以不可变替换更新(mutation 一律 spread 出新对象),
+  // 故存引用即安全 —— 旧快照不会被后续改动就地篡改。struct(结构变更,经 _commit)每步一快照;
+  // edit(打字,setBlockContent)按 ~500ms 同类合并成一步,避免逐字建步。
+  // 文档级撤销栈:快照 data = {manifest, blocks}。两者恒以不可变替换更新(mutation 一律 spread 出新对象),
+  // 存引用即安全 —— 旧快照不会被后续改动就地篡改。纯栈逻辑(打字合并 + 跨页数据安全守卫)见 undoHistory.ts。
+  type Doc = { manifest: PageManifest | null; blocks: Record<BlockId, BlockState> }
+  const history = makeUndoStack<Doc>()
+  const snapNow = (): Snap<Doc> => {
+    const s = get()
+    return { page: s.activePage, data: { manifest: s.manifest, blocks: s.blocks } }
+  }
+  const pushUndo = (kind: 'edit' | 'struct'): void => history.push(snapNow(), kind, Date.now())
+
   return {
     vaultRoot: null,
+    vaultSide: 'local',
     pages: [],
     folders: [],
     files: [],
+    icons: {},
     activePage: null,
     manifest: null,
     blocks: {},
@@ -233,6 +308,11 @@ export const usePageStore = create<PageState>((set, get) => {
     dndOverId: null,
     linkGraphVersion: 0,
     pendingWikiCreate: null,
+    focusTitleFor: null,
+
+    consumeTitleFocus() {
+      set({ focusTitleFor: null })
+    },
 
     setDnd(activeId, overId) {
       set({ dndActiveId: activeId, dndOverId: overId })
@@ -280,6 +360,7 @@ export const usePageStore = create<PageState>((set, get) => {
       const prevContent = blocks[prevId]?.content ?? ''
       const curContent = blocks[id]?.content ?? ''
       const merged = prevContent && curContent ? `${prevContent}\n\n${curContent}` : prevContent + curContent
+      pushUndo('struct') // 快照清白的合并前状态;下面 deleteBlock→_commit 的 struct 快照会被 500ms 同类合并掉
       set((s) => ({ blocks: { ...s.blocks, [prevId]: { ...s.blocks[prevId], content: merged } } }))
       get().deleteBlock(id) // commits manifest + schedules a save that persists merged content
       get().requestFocus(prevId, 'end')
@@ -290,8 +371,10 @@ export const usePageStore = create<PageState>((set, get) => {
         const info = await amadeus.openVault()
         if (!info) return
         // files 先清空再异步补齐;迟到的结果只在 vault 未再切换时落盘(防旧库文件列表污染新库的树)。
-        set({ vaultRoot: info.root, pages: info.pages, folders: info.folders ?? [], files: [], error: null })
+        // 用户手选文件夹 = 本地侧(主进程同步记 localVault)。
+        set({ vaultRoot: info.root, vaultSide: 'local', pages: info.pages, folders: info.folders ?? [], files: [], error: null })
         void amadeus.listFiles?.().then((files) => { if (get().vaultRoot === info.root) set({ files }) }).catch(() => {})
+        void amadeus.pageIcons?.().then((icons) => { if (get().vaultRoot === info.root) set({ icons }) }).catch(() => {})
         if (info.pages.length > 0) await get().loadPage(info.pages[0])
       } catch (e) {
         set({ error: String(e) })
@@ -304,11 +387,49 @@ export const usePageStore = create<PageState>((set, get) => {
         if (!info) return
         set({ vaultRoot: info.root, pages: info.pages, folders: info.folders ?? [], files: [], error: null })
         void amadeus.listFiles?.().then((files) => { if (get().vaultRoot === info.root) set({ files }) }).catch(() => {})
+        void amadeus.pageIcons?.().then((icons) => { if (get().vaultRoot === info.root) set({ icons }) }).catch(() => {})
         const target =
           info.lastPage && info.pages.includes(info.lastPage) ? info.lastPage : info.pages[0]
         if (target) await get().loadPage(target)
       } catch (e) {
         set({ error: String(e) })
+      }
+    },
+
+    async switchVaultSide(side) {
+      const api = window.amadeusSync
+      if (!api?.switchSide || get().vaultSide === side) return
+      try {
+        const info = await api.switchSide(side)
+        if (!info) return
+        set({
+          vaultSide: side,
+          vaultRoot: info.root,
+          pages: info.pages,
+          folders: info.folders ?? [],
+          files: [],
+          icons: {}, // 换库必清:图标是 path 键,跨库残留会张冠李戴
+          error: null,
+        })
+        void amadeus.listFiles?.().then((files) => { if (get().vaultRoot === info.root) set({ files }) }).catch(() => {})
+        void amadeus.pageIcons?.().then((icons) => { if (get().vaultRoot === info.root) set({ icons }) }).catch(() => {})
+        const target = info.lastPage && info.pages.includes(info.lastPage) ? info.lastPage : info.pages[0]
+        if (target) await get().loadPage(target)
+        else set({ activePage: null, manifest: null, blocks: {} }) // 空库(如未登录的云侧):清编辑器,防旧库笔记误存新根
+      } catch (e) {
+        set({ error: String(e) })
+      }
+    },
+
+    async initVaultSide() {
+      const api = window.amadeusSync
+      if (!api?.get) return
+      try {
+        const st = await api.get()
+        const side = (st as { side?: 'local' | 'cloud' } | null)?.side
+        if (side) set({ vaultSide: side })
+      } catch {
+        /* 旧主进程无此接口:保持 local */
       }
     },
 
@@ -355,8 +476,9 @@ export const usePageStore = create<PageState>((set, get) => {
       }
       const path = join(base)
       const page = await amadeus.newPage(path)
+      track('note.create')
       await get().refreshPages()
-      set({ activePage: path, ...hydrate(page), status: 'ready' })
+      set({ activePage: path, ...hydrate(page), status: 'ready', focusTitleFor: path })
     },
 
     async renamePage(newName) {
@@ -396,6 +518,47 @@ export const usePageStore = create<PageState>((set, get) => {
       }
     },
 
+    async setPageCover(pagePath, cover) {
+      const patch = { cover: cover ?? undefined }
+      const { activePage, manifest } = get()
+      if (pagePath === activePage && manifest) {
+        const next = patchFmExtraText(manifest.fmExtra ?? '', patch)
+        if (next !== null && next !== (manifest.fmExtra ?? '')) get().setFmExtra(next)
+      } else {
+        await amadeus.setPageFrontmatter?.(pagePath, patch)
+      }
+    },
+
+    async setPageCoverY(pagePath, y) {
+      const patch = { cover_y: y ?? undefined }
+      const { activePage, manifest } = get()
+      if (pagePath === activePage && manifest) {
+        const next = patchFmExtraText(manifest.fmExtra ?? '', patch)
+        if (next !== null && next !== (manifest.fmExtra ?? '')) get().setFmExtra(next)
+      } else {
+        await amadeus.setPageFrontmatter?.(pagePath, patch)
+      }
+    },
+
+    async setPageIcon(pagePath, icon) {
+      const patch = { icon: icon ?? undefined }
+      // 乐观更新本地表(索引重建有延迟);下次 refreshStructure 以索引为准
+      set((st) => {
+        const icons = { ...st.icons }
+        if (icon) icons[pagePath] = icon
+        else delete icons[pagePath]
+        return { icons }
+      })
+      const { activePage, manifest } = get()
+      if (pagePath === activePage && manifest) {
+        // 活动页:改内存 fmExtra 走防抖保存(外科写会被 save() 用旧 fmExtra 盖回,同 syncFdChildren)
+        const next = patchFmExtraText(manifest.fmExtra ?? '', patch)
+        if (next !== null && next !== (manifest.fmExtra ?? '')) get().setFmExtra(next)
+      } else {
+        await amadeus.setPageFrontmatter?.(pagePath, patch)
+      }
+    },
+
     openWikiLink(name, sourcePath) {
       const raw = name.trim()
       if (!raw) return
@@ -403,6 +566,14 @@ export const usePageStore = create<PageState>((set, get) => {
       const match = resolvePageName(raw, get().pages, src)
       if (match) {
         void get().loadPage(match)
+        return
+      }
+      // 文件命名空间([[xxx.db]]/[[photo.png]],页面未命中才轮到):.db 应用内开
+      // (渲染层不 import 宿主 openDb,发事件由 amadeusOverlays 接;无监听的宿主静默),其余系统程序打开。
+      const file = resolveFileName(raw, get().files, src)
+      if (file) {
+        if (/\.db$/i.test(file)) window.dispatchEvent(new CustomEvent('amadeus:open-db', { detail: { path: file } }))
+        else void amadeus.openVaultFile?.(file)?.catch(() => {})
         return
       }
       // 未解析:询问而非静默建根。源须是笔记(.db 独立视图等无 .fd 语义 → 走根兜底)。
@@ -416,8 +587,9 @@ export const usePageStore = create<PageState>((set, get) => {
         await get().flushSave() // 换页前落盘,防待存的上一页内容被丢/写错对象
         const path = `${base}.md`
         const page = await amadeus.newPage(path)
+        track('note.create')
         await get().refreshPages()
-        set({ activePage: path, ...hydrate(page), status: 'ready' })
+        set({ activePage: path, ...hydrate(page), status: 'ready', focusTitleFor: path })
       } catch (e) {
         set({ error: String(e) })
       }
@@ -436,8 +608,9 @@ export const usePageStore = create<PageState>((set, get) => {
           await get().flushSave()
           const path = /\.md$/i.test(clean) ? clean : `${clean}.md`
           const page = await amadeus.newPage(path)
+          track('note.create')
           await get().refreshStructure()
-          set({ activePage: path, ...hydrate(page), status: 'ready' })
+          set({ activePage: path, ...hydrate(page), status: 'ready', focusTitleFor: path })
           return
         }
         if (sourcePath) {
@@ -469,7 +642,9 @@ export const usePageStore = create<PageState>((set, get) => {
       for (let i = 1; globalKeys.has(pageKey(base)) || inFd.has(`${base}.md`.toLowerCase()); i++) base = `${stem}-${i}`
       const path = `${fd}/${base}.md`
       await amadeus.newPage(path) // mkdir -p 语义:desktop atomicWrite / cloud materializeParents / mobile 同
+      track('note.create')
       await get().syncFdChildren(parentPath) // 内含 refreshStructure
+      set({ focusTitleFor: path }) // 打开后落光标到标题栏(调用方负责 loadPage 导航)
       return path
     },
 
@@ -505,6 +680,7 @@ export const usePageStore = create<PageState>((set, get) => {
         amadeus.listFiles?.() ?? [], // 旧 preload(无 listFiles)下优雅降级为空
       ])
       set({ pages, folders, files })
+      void amadeus.pageIcons?.().then((icons) => set({ icons })).catch(() => {})
     },
 
     async deletePage(pagePath) {
@@ -518,19 +694,24 @@ export const usePageStore = create<PageState>((set, get) => {
         clearTimeout(saveTimer) // don't let a pending save resurrect the deleted page
         saveTimer = null
       }
+      // 桌面端优先移入回收站(.trash,可恢复);缺 trash API 的端保持硬删。
+      const trash = amadeus.trashEntry?.bind(amadeus)
       try {
-        await amadeus.deletePage(pagePath)
+        if (trash) await trash(pagePath)
+        else await amadeus.deletePage(pagePath)
       } catch (e) {
         set({ error: String(e) })
         return
       }
       if (hasFd) {
         try {
-          await amadeus.deleteFolder(fd)
+          if (trash) await trash(fd)
+          else await amadeus.deleteFolder(fd)
         } catch (e) {
           set({ error: String(e) }) // 失败 = 孤儿 .fd,树里按普通文件夹可见,可手动处理
         }
       }
+      if (trash) useUiStore.getState().notify('已移入回收站')
       await get().refreshStructure()
       await get().syncFdParentsOf([pagePath]) // 删的若是别人的 .fd 子文件,更新那位父亲的 children
       if (activeInside) {
@@ -614,7 +795,12 @@ export const usePageStore = create<PageState>((set, get) => {
         saveTimer = null
       }
       try {
-        await amadeus.deleteFolder(folderPath)
+        if (amadeus.trashEntry) {
+          await amadeus.trashEntry(folderPath)
+          useUiStore.getState().notify('已移入回收站')
+        } else {
+          await amadeus.deleteFolder(folderPath)
+        }
       } catch (e) {
         set({ error: String(e) })
         return
@@ -628,6 +814,7 @@ export const usePageStore = create<PageState>((set, get) => {
     },
 
     setBlockContent(id, content) {
+      pushUndo('edit')
       set((s) => ({ blocks: { ...s.blocks, [id]: { ...s.blocks[id], content } } }))
       scheduleSave()
     },
@@ -764,15 +951,54 @@ export const usePageStore = create<PageState>((set, get) => {
     },
 
     splitToColumn(id, side) {
+      // Notion 语义:本块先独占一行,再与一个新空块并排成两栏(原先在「大杂烩行」里
+      // 一分就与前面所有块劈开 —— 实报已修);焦点落新空栏。
       const m = get().manifest
-      if (!m) return
-      const loc = locate(m.root, id)
-      if (!loc) return
-      const row = m.root.children[loc.rowIdx]
+      const page = get().activePage
+      if (!m || !page) return
+      const root = clone(m.root)
+      const rowIdx = isolateBlockRow(root, id)
+      if (rowIdx === null) return
+      const row = root.children[rowIdx]
       if (row.columns.length >= 4) return // ponytail: 4 列封顶,再多没法读
-      // 整行只有这一个块时分栏无意义(拆出去原行就空了)。
-      if (row.columns.length === 1 && row.columns[0].children.length === 1) return
-      get().addColumnWithBlock(row.id, id, side)
+      const newId = nextBlockId(Object.keys(m.blocks))
+      const col: ColumnNode = { id: generateColumnId(), width: 1, children: [{ ref: newId }] }
+      if (side === 'left') row.columns.unshift(col)
+      else row.columns.push(col)
+      const w = 1 / row.columns.length
+      row.columns.forEach((c) => (c.width = w))
+      const entry: BlockEntry = { type: 'markdown' }
+      const blocks = { ...get().blocks, [newId]: { id: newId, type: 'markdown', content: '' } }
+      get()._commit({ ...m, root, blocks: { ...m.blocks, [newId]: entry } }, blocks)
+      get().requestFocus(newId, 'start')
+    },
+
+    pairBlocks(dragId, targetId, side) {
+      // 拖到某块左/右边缘 = 只与那一块并排(先隔离目标行,拖块进同行新列);4 列封顶时退回行尾。
+      const m = get().manifest
+      if (!m || dragId === targetId) return
+      const root = clone(m.root)
+      const dragLoc = locate(root, dragId)
+      if (!dragLoc) return
+      const [ref] = root.children[dragLoc.rowIdx].columns[dragLoc.colIdx].children.splice(dragLoc.childIdx, 1)
+      cleanup(root) // 拖空的列/行先清,防后续索引漂移
+      const rowIdx = isolateBlockRow(root, targetId)
+      if (rowIdx === null) {
+        appendToEnd(root, ref.ref) // 目标消失:兜底回页尾,绝不丢块
+      } else {
+        const row = root.children[rowIdx]
+        if (row.columns.length >= 4) {
+          appendToEnd(root, ref.ref)
+        } else {
+          const col: ColumnNode = { id: generateColumnId(), width: 1, children: [ref] }
+          if (side === 'left') row.columns.unshift(col)
+          else row.columns.push(col)
+          const w = 1 / row.columns.length
+          row.columns.forEach((c) => (c.width = w))
+        }
+      }
+      cleanup(root)
+      get()._commit({ ...m, root })
     },
 
     addColumnWithBlock(rowId, id, side) {
@@ -881,7 +1107,21 @@ export const usePageStore = create<PageState>((set, get) => {
       }
     },
 
+    undo() {
+      const r = history.undo(snapNow())
+      if (!r) return
+      set({ manifest: r.data.manifest, blocks: r.data.blocks })
+      scheduleSave()
+    },
+    redo() {
+      const r = history.redo(snapNow())
+      if (!r) return
+      set({ manifest: r.data.manifest, blocks: r.data.blocks })
+      scheduleSave()
+    },
+
     _commit(manifest, blocks) {
+      pushUndo('struct')
       set(blocks ? { manifest, blocks } : { manifest })
       scheduleSave()
     },

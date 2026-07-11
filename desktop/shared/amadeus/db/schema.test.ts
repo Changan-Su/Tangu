@@ -94,4 +94,26 @@ describe('db schema', () => {
     const bad = { ...SAMPLE, columns: [{ id: 'c1', name: 'x', type: 'text', width: -10 }] }
     expect(parseDb(JSON.stringify(bad)).ok).toBe(false)
   })
+
+  it('views(多视图)往返无损;旧文件缺 views 照常解析;未知视图类型放行(前向兼容)', () => {
+    const db: DbFile = {
+      ...SAMPLE,
+      views: [
+        { id: 'v1', name: '表格', type: 'table' },
+        { id: 'v2', name: '按状态', type: 'kanban', groupBy: 'c7' },
+        { id: 'v3', name: '排期', type: 'calendar', dateCol: 'c5' },
+        { id: 'v4', name: '将来的类型', type: 'timeline' }, // 未知类型:结构放行,渲染端回退表格
+      ],
+    }
+    const r = parseDb(serializeDb(db))
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.data).toEqual(db)
+    // 旧文件(无 views)向后兼容
+    const legacy = parseDb(serializeDb(SAMPLE))
+    expect(legacy.ok).toBe(true)
+    if (legacy.ok) expect(legacy.data.views).toBeUndefined()
+    // 空视图 id 是坏数据
+    const bad = { ...SAMPLE, views: [{ id: '', name: 'x', type: 'table' }] }
+    expect(parseDb(JSON.stringify(bad)).ok).toBe(false)
+  })
 })

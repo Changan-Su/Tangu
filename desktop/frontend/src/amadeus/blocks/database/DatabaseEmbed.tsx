@@ -2,7 +2,7 @@
  *  数据经 dbStore 按 ref 共享 → 同一 db 的多处嵌入(同页多块/多标签)实时互通、写穿防抖落盘。
  *  排序仅视图态不写盘(文件 rows 顺序即规范顺序);列类型切换非破坏(coerceForDisplay 宽容显示)。
  *  弹层(选项/列菜单)用 fixed 定位:表格外层是 overflow 滚动层,absolute 会被裁剪。 */
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import {
   COLUMN_TYPES,
   coerceForDisplay,
@@ -12,7 +12,12 @@ import {
   type DbColumn,
   type DbFile,
   type DbRow,
+  type DbView,
+  type DbViewFilter,
+  type DbViewType,
 } from '@amadeus-shared/db/schema'
+import { FILTER_OPS, OP_LABEL, STAT_LABEL, UNARY_OPS, applyFilters, computeStat, statOptionsFor } from '@amadeus-shared/db/viewQuery'
+import { fmtCalDate, parseCalDate, splitSide } from '@amadeus-shared/db/calDate'
 import { deriveColumns, fmValueToCell } from '@amadeus-shared/db/pageFrontmatter'
 import { allPropertyTypes, getPropertyType, resolveBaseType, usePropertyTypesVersion } from './propertyTypes'
 import { linkTarget, resolvePageName } from '@amadeus-shared/links'
@@ -21,24 +26,43 @@ import { renameDb } from '../../lib/dbFileOps'
 import { useNoteViewStore } from '../../store/noteViewStore'
 import { usePageStore } from '../../store/pageStore'
 import { amadeus } from '../../api'
+import {
+  CheckBoxCheckLinearIcon, DatabaseKanbanViewIcon, DatabaseListViewIcon, DatabaseTableViewIcon,
+  DateTimeIcon, FilterIcon, FolderIcon, ImageIcon, LinkIcon, MultiSelectIcon, NumberIcon, PageIcon,
+  PlusIcon, SingleSelectIcon, TextIcon, TodayIcon,
+} from '../../components/icons'
 
-const TYPE_META: Record<ColumnType, { icon: string; label: string }> = {
-  text: { icon: '¶', label: '文本' },
-  number: { icon: '#', label: '数字' },
-  checkbox: { icon: '☑', label: '勾选' },
-  date: { icon: '📅', label: '日期' },
-  select: { icon: '◉', label: '单选' },
-  multiselect: { icon: '⊞', label: '多选' },
-  url: { icon: '🔗', label: '链接' },
-  page: { icon: '📄', label: 'Page Name' },
+const TYPE_META: Record<ColumnType, { icon: ReactNode; label: string }> = {
+  text: { icon: <TextIcon />, label: '文本' },
+  number: { icon: <NumberIcon />, label: '数字' },
+  checkbox: { icon: <CheckBoxCheckLinearIcon />, label: '勾选' },
+  date: { icon: <DateTimeIcon />, label: '日期' },
+  select: { icon: <SingleSelectIcon />, label: '单选' },
+  multiselect: { icon: <MultiSelectIcon />, label: '多选' },
+  url: { icon: <LinkIcon />, label: '链接' },
+  page: { icon: <PageIcon />, label: 'Page Name' },
 }
 
 /** 列元数据(图标/名):自定义注册类型优先,否则 primitive TYPE_META,再否则回退显示 type 字符串。 */
-const colMeta = (type: string): { icon: string; label: string } => {
+const colMeta = (type: string): { icon: ReactNode; label: string } => {
   const custom = getPropertyType(type)
   if (custom) return { icon: custom.icon, label: custom.label }
   return TYPE_META[type as ColumnType] ?? { icon: '·', label: type }
 }
+
+// ── 多视图(AFFiNE/Notion 式):views 存 .db;缺 = 单「表格」默认视图(旧文件零迁移) ──
+const VIEW_META: Record<DbViewType, { icon: ReactNode; label: string }> = {
+  table: { icon: <DatabaseTableViewIcon />, label: '表格' },
+  kanban: { icon: <DatabaseKanbanViewIcon />, label: '看板' },
+  calendar: { icon: <TodayIcon />, label: '日历' },
+  gallery: { icon: <ImageIcon />, label: '画廊' },
+}
+/** 未知视图类型(前向兼容)回退表格观感的元数据。 */
+const viewMeta = (t: string): { icon: ReactNode; label: string } => VIEW_META[t as DbViewType] ?? VIEW_META.table
+const DEFAULT_VIEW: DbView = { id: 'v-default', name: '表格', type: 'table' }
+const viewsOf = (d: DbFile): DbView[] => (d.views?.length ? d.views : [DEFAULT_VIEW])
+/** 日历可用的日期列:primitive/自定义 baseType=date,或内置 calendarDate(baseType=text 需点名)。 */
+const isDateish = (c: DbColumn): boolean => resolveBaseType(c.type) === 'date' || c.type === 'calendarDate'
 
 /** chip 色板类:label 简单字符串哈希 → 'amx-chip-c0'..'amx-chip-c9',同名恒同色。
  *  色板是内容色(区分选项)而非主题色,10 色定义在 amadeus-host.css 的 .amx-db 段。 */
@@ -52,14 +76,22 @@ const chipClass = (label: string): string => {
 const clampW = (w: number): number => Math.min(800, Math.max(100, w))
 
 interface Pop {
-  kind: 'options' | 'colmenu' | 'folder'
+  kind: 'options' | 'colmenu' | 'folder' | 'viewmenu' | 'addview' | 'row' | 'filters' | 'stat'
   colId?: string
   rowId?: string
+  viewId?: string
   x: number
   y: number
 }
 
-export function DatabaseEmbed({ target, pagePath }: { target: string; pagePath: string }) {
+export function DatabaseEmbed({ target, pagePath, initialView, onViewChange }: {
+  target: string
+  pagePath: string
+  /** 嵌入语法 `![[db|视图名]]` 里的激活视图名(存笔记 md,每处嵌入各记各的;不落 .db、不参与云同步)。 */
+  initialView?: string | null
+  /** 用户切视图时回写笔记的嵌入块 md(改成 `![[db|新视图名]]`);null = 回到默认(去掉管道段)。 */
+  onViewChange?: (viewName: string | null) => void
+}) {
   const entry = useDbStore((s) => s.entries[target])
   useEffect(() => {
     void useDbStore.getState().load(pagePath, target)
@@ -89,11 +121,16 @@ export function DatabaseEmbed({ target, pagePath }: { target: string; pagePath: 
       </div>
     )
   }
-  return <DbTable dbRef={target} db={entry.data} pagePath={pagePath} />
+  return <DbTable dbRef={target} db={entry.data} pagePath={pagePath} initialView={initialView} onViewChange={onViewChange} />
 }
 
-function DbTable({ dbRef, db, pagePath }: { dbRef: string; db: DbFile; pagePath: string }) {
-  const [sort, setSort] = useState<{ colId: string; dir: 'asc' | 'desc' } | null>(null)
+function DbTable({ dbRef, db, pagePath, initialView, onViewChange }: {
+  dbRef: string
+  db: DbFile
+  pagePath: string
+  initialView?: string | null
+  onViewChange?: (viewName: string | null) => void
+}) {
   const [pop, setPop] = useState<Pop | null>(null)
   // 拖拽改宽的过程态:pointermove 只写这里驱动 gridTemplateColumns 即时反馈,pointerup 才落进 column。
   const [liveWidths, setLiveWidths] = useState<Record<string, number>>({})
@@ -113,6 +150,42 @@ function DbTable({ dbRef, db, pagePath }: { dbRef: string; db: DbFile; pagePath:
 
   const identityId = db.columns[0]?.id
   const isIdentity = (colId: string): boolean => colId === identityId
+
+  // 视图:激活项是本嵌入的局部态(同 db 多处嵌入各看各的,切 tab 不写盘);视图定义存 .db。
+  // 激活视图初值:从嵌入语法的视图名(initialView)按名字解析;找不到=null(回退首个视图)。
+  const [viewId, setViewId] = useState<string | null>(() => viewsOf(db).find((v) => v.name === initialView)?.id ?? null)
+  const views = viewsOf(db)
+  const view = views.find((v) => v.id === viewId) ?? views[0]
+  // 用户显式切/建视图:置激活 + 把视图名回写进笔记的嵌入块 md(持久化,每处嵌入各记各的)。
+  const pickView = (v: DbView): void => { setViewId(v.id); onViewChange?.(v.name) }
+  const addView = (type: DbViewType): void => {
+    const v: DbView = { id: dbId(), name: VIEW_META[type].label, type }
+    m((d) => ({ ...d, views: [...viewsOf(d), v] }))
+    pickView(v)
+    setPop(null)
+  }
+  const patchView = (id: string, patch: Partial<DbView>): void => {
+    m((d) => ({ ...d, views: viewsOf(d).map((v) => (v.id === id ? { ...v, ...patch } : v)) }))
+    if (id === viewId && patch.name) onViewChange?.(patch.name) // 改名活动视图 → 同步嵌入引用,免下次重挂失配
+  }
+  const delView = (id: string): void => {
+    m((d) => {
+      const rest = viewsOf(d).filter((v) => v.id !== id)
+      return { ...d, views: rest.length ? rest : [DEFAULT_VIEW] }
+    })
+    if (viewId === id) { setViewId(null); onViewChange?.(null) } // 删的是活动视图 → 嵌入回到默认(去管道段)
+    setPop(null)
+  }
+  // 排序自 2.7 起落盘在视图上(不再是切页即丢的临时态)。
+  const sort = view.sort ?? null
+  /** 列的筛选/统计求值语义:日历日期列(基类 text)按 date 求值,其余走 baseType。 */
+  const kindOf = (colId: string): ColumnType | null => {
+    const c = db.columns.find((x) => x.id === colId)
+    if (!c) return null
+    return isDateish(c) ? 'date' : resolveBaseType(c.type)
+  }
+  /** 本视图可见列:首列(身份列)恒可见。 */
+  const visCols = db.columns.filter((c, i) => i === 0 || !(view.hidden ?? []).includes(c.id))
 
   // 行数据源:笔记视图从 store 合成(cell key = 列 id = frontmatter 键;page 列 = 笔记标题)。
   const baseRows: DbRow[] = useMemo(() => {
@@ -145,9 +218,19 @@ function DbTable({ dbRef, db, pagePath }: { dbRef: string; db: DbFile; pagePath:
       }),
     }))
   }
-  const addRow = (): void => {
-    if (isNoteView) return void nv().addNote(noteFolder as string)
-    m((d) => ({ ...d, rows: [...d.rows, { id: dbId(), cells: {} }] }))
+  /** 新行,可带初值(看板加卡入组/日历日格加行);笔记视图 = 建笔记后逐键写 frontmatter。 */
+  const addRow = (initial?: Record<string, CellValue>): void => {
+    if (isNoteView) {
+      void nv().addNote(noteFolder as string).then((p) => {
+        if (!initial) return
+        for (const [k, v] of Object.entries(initial)) {
+          const col = db.columns.find((c) => c.id === k)
+          if (col && col.type !== 'page') nv().setProp(noteFolder as string, p, k, v, resolveBaseType(col.type))
+        }
+      })
+      return
+    }
+    m((d) => ({ ...d, rows: [...d.rows, { id: dbId(), cells: initial ?? {} }] }))
   }
   const delRow = (rowId: string): void => {
     if (isNoteView) {
@@ -199,6 +282,33 @@ function DbTable({ dbRef, db, pagePath }: { dbRef: string; db: DbFile; pagePath:
       ),
     }))
 
+  /** 卡片/事件标题 = 首列(身份列)显示值。 */
+  const rowTitle = (r: DbRow): string => {
+    const c0 = db.columns[0]
+    if (!c0) return '未命名'
+    const v = coerceForDisplay(r.cells[c0.id], resolveBaseType(c0.type))
+    const s = Array.isArray(v) ? v.join(', ') : v == null ? '' : String(v)
+    return s.trim() || '未命名'
+  }
+  /** 行编辑器弹层比通用弹层高(~440px),钳位单独放宽,免得底部卡片的编辑器跑出屏外。 */
+  const openRow = (e: ReactMouseEvent, rowId: string): void => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setPop({ kind: 'row', rowId, x: Math.min(r.left, window.innerWidth - 340), y: Math.min(r.bottom + 4, Math.max(12, window.innerHeight - 460)) })
+  }
+  /** 看板/日历引导:一键补齐可分组/可上历的列(笔记视图列 id = frontmatter 键,撞键则不动)。 */
+  const addStatusCol = (): void =>
+    m((d) => {
+      const id = isNoteView ? '状态' : dbId()
+      if (isNoteView && d.columns.some((c) => c.id === id)) return d
+      return { ...d, columns: [...d.columns, { id, name: '状态', type: 'select', options: ['待办', '进行中', '完成'] }] }
+    })
+  const addDateCol = (): void =>
+    m((d) => {
+      const id = isNoteView ? '日期' : dbId()
+      if (isNoteView && d.columns.some((c) => c.id === id)) return d
+      return { ...d, columns: [...d.columns, { id, name: '日期', type: 'calendarDate' }] }
+    })
+
   // 笔记视图:切换数据来源文件夹 → 并集推导列(导入该文件夹笔记的 frontmatter 键)。
   const setFolder = async (folder: string): Promise<void> => {
     const props = await amadeus.listPageProps(folder)
@@ -208,13 +318,14 @@ function DbTable({ dbRef, db, pagePath }: { dbRef: string; db: DbFile; pagePath:
   }
 
   const setColSort = (colId: string, dir: 'asc' | 'desc' | null): void =>
-    setSort(dir === null ? null : { colId, dir })
+    patchView(view.id, { sort: dir === null ? undefined : { colId, dir } })
 
-  // 仅视图态排序:不动文件里的 rows 顺序。
+  // 行管道:每视图筛选 → 每视图排序(都存在视图配置里;不动文件 rows 顺序)。
   const rows = useMemo(() => {
-    if (!sort) return baseRows
+    const filtered = applyFilters(baseRows, view.filters, kindOf)
+    if (!sort) return filtered
     const col = db.columns.find((c) => c.id === sort.colId)
-    if (!col) return baseRows
+    if (!col) return filtered
     const custom = getPropertyType(col.type)
     const base = resolveBaseType(col.type)
     const key = (r: DbRow): string | number => {
@@ -224,13 +335,14 @@ function DbTable({ dbRef, db, pagePath }: { dbRef: string; db: DbFile; pagePath:
       if (base === 'checkbox') return v === true ? 1 : 0
       return Array.isArray(v) ? v.join(', ') : String(v ?? '')
     }
-    return [...baseRows].sort((a, b) => {
+    return [...filtered].sort((a, b) => {
       const ka = key(a)
       const kb = key(b)
       const cmp = typeof ka === 'number' && typeof kb === 'number' ? ka - kb : String(ka).localeCompare(String(kb), 'zh')
       return sort.dir === 'asc' ? cmp : -cmp
     })
-  }, [baseRows, db.columns, sort])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- kindOf 只依赖 db.columns(已在列)
+  }, [baseRows, db.columns, sort, view.filters])
 
   const openPop = (e: ReactMouseEvent, p: Omit<Pop, 'x' | 'y'>): void => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -280,14 +392,17 @@ function DbTable({ dbRef, db, pagePath }: { dbRef: string; db: DbFile; pagePath:
     const w = liveWidths[c.id] ?? c.width
     return w === undefined ? 'minmax(140px, 1fr)' : `${clampW(w)}px`
   }
-  const gridCols = `28px ${db.columns.map(colW).join(' ')} 36px`
+  const gridCols = `28px ${visCols.map(colW).join(' ')} 36px`
   const popCol = pop ? db.columns.find((c) => c.id === pop.colId) : undefined
-  const popRow = pop?.rowId ? db.rows.find((r) => r.id === pop.rowId) : undefined
+  // 从合成后的 rows 找(而非 db.rows):笔记视图的行 id = 笔记路径,db.rows 恒空,
+  // 旧写法让笔记视图的 select 选项弹层永远开不出来。
+  const popRow = pop?.rowId ? rows.find((r) => r.id === pop.rowId) : undefined
+  const popView = pop?.viewId ? views.find((v) => v.id === pop.viewId) : undefined
 
   return (
     <div className="amx-db">
       <div className="amx-db-head">
-        <span aria-hidden>{isNoteView ? '🗂' : '𝄜'}</span>
+        <span className="amx-db-headicon" aria-hidden>{isNoteView ? <DatabaseListViewIcon /> : <DatabaseTableViewIcon />}</span>
         <input
           className="amx-db-name"
           value={db.name}
@@ -298,10 +413,41 @@ function DbTable({ dbRef, db, pagePath }: { dbRef: string; db: DbFile; pagePath:
         />
         {isNoteView && (
           <button className="amx-db-linkbtn" onClick={(e) => openPop(e, { kind: 'folder' })} title="选择数据来源文件夹(行 = 该文件夹里的笔记)">
-            📁 {noteFolder || '整库'}
+            <FolderIcon /> {noteFolder || '整库'}
           </button>
         )}
         <span className="amx-db-count">{rows.length} 行</span>
+      </div>
+
+      <div className="amx-db-viewbar" role="tablist">
+        {views.map((v) => (
+          <button
+            key={v.id}
+            className="amx-db-viewtab"
+            role="tab"
+            aria-selected={v.id === view.id}
+            data-active={v.id === view.id || undefined}
+            onClick={(e) => { if (v.id === view.id) openPop(e, { kind: 'viewmenu', viewId: v.id }); else pickView(v) }}
+            onContextMenu={(e) => { e.preventDefault(); openPop(e, { kind: 'viewmenu', viewId: v.id }) }}
+            title={v.id === view.id ? '再次点击配置视图(改名/分组/删除)' : v.name}
+          >
+            {viewMeta(v.type).icon}
+            <span>{v.name}</span>
+          </button>
+        ))}
+        <button className="amx-db-viewadd" onClick={(e) => openPop(e, { kind: 'addview' })} title="添加视图" aria-label="add view">
+          <PlusIcon />
+        </button>
+        <span className="amx-db-viewbar-sp" />
+        <button
+          className="amx-db-filterbtn"
+          data-on={(view.filters?.length ?? 0) > 0 || undefined}
+          onClick={(e) => openPop(e, { kind: 'filters' })}
+          title="筛选(本视图)"
+        >
+          <FilterIcon />
+          筛选{(view.filters?.length ?? 0) > 0 && ` ${view.filters!.length}`}
+        </button>
       </div>
 
       {db.columns.length === 0 ? (
@@ -309,11 +455,17 @@ function DbTable({ dbRef, db, pagePath }: { dbRef: string; db: DbFile; pagePath:
           没有列。
           <button className="amx-db-linkbtn" onClick={addCol}>＋ 添加列</button>
         </div>
+      ) : view.type === 'kanban' ? (
+        <KanbanBody db={db} rows={rows} view={view} visCols={visCols} setCell={setCell} addRow={addRow} openRow={openRow} rowTitle={rowTitle} addStatusCol={addStatusCol} />
+      ) : view.type === 'calendar' ? (
+        <CalendarBody db={db} rows={rows} view={view} addRow={addRow} openRow={openRow} rowTitle={rowTitle} addDateCol={addDateCol} />
+      ) : view.type === 'gallery' ? (
+        <GalleryBody db={db} rows={rows} visCols={visCols} addRow={addRow} openRow={openRow} rowTitle={rowTitle} />
       ) : (
         <div className="amx-db-scroll">
           <div className="amx-db-row amx-db-hrow" style={{ gridTemplateColumns: gridCols }}>
             <div />
-            {db.columns.map((col) => (
+            {visCols.map((col) => (
               <div className="amx-db-th" key={col.id}>
                 <button className="amx-db-thbtn" onClick={(e) => openPop(e, { kind: 'colmenu', colId: col.id })} title={`${colMeta(col.type).label} · 点击打开列菜单`}>
                   <span className="amx-db-th-icon" aria-hidden>{colMeta(col.type).icon}</span>
@@ -334,7 +486,7 @@ function DbTable({ dbRef, db, pagePath }: { dbRef: string; db: DbFile; pagePath:
           {rows.map((row) => (
             <div className="amx-db-row" key={row.id} style={{ gridTemplateColumns: gridCols }}>
               <button className="amx-db-rowdel" onClick={() => delRow(row.id)} title="删除行" aria-label="delete row">✕</button>
-              {db.columns.map((col) => (
+              {visCols.map((col) => (
                 <div className="amx-db-cell" key={col.id} data-coltype={resolveBaseType(col.type)}>
                   <Cell row={row} col={col} pagePath={pagePath} setCell={setCell} openOptions={(e) => openPop(e, { kind: 'options', colId: col.id, rowId: row.id })} />
                 </div>
@@ -343,7 +495,27 @@ function DbTable({ dbRef, db, pagePath }: { dbRef: string; db: DbFile; pagePath:
             </div>
           ))}
 
-          <button className="amx-db-addrow" onClick={addRow}>＋ 新行</button>
+          <button className="amx-db-addrow" onClick={() => addRow()}>＋ 新行</button>
+
+          <div className="amx-db-row amx-db-statsrow" style={{ gridTemplateColumns: gridCols }}>
+            <div />
+            {visCols.map((col) => {
+              const stat = view.stats?.[col.id]
+              const kind = kindOf(col.id) ?? 'text'
+              return (
+                <button
+                  key={col.id}
+                  className="amx-db-stat"
+                  data-on={stat || undefined}
+                  onClick={(e) => openPop(e, { kind: 'stat', colId: col.id })}
+                  title="页脚统计(本视图,基于筛选后的行)"
+                >
+                  {stat ? `${STAT_LABEL[stat] ?? stat} ${computeStat(rows, col.id, kind, stat)}` : '统计'}
+                </button>
+              )
+            })}
+            <div />
+          </div>
         </div>
       )}
 
@@ -361,36 +533,88 @@ function DbTable({ dbRef, db, pagePath }: { dbRef: string; db: DbFile; pagePath:
         </PopShell>
       )}
       {pop && popCol && popRow && pop.kind === 'options' && (
-        <PopShell x={pop.x} y={pop.y} onClose={() => setPop(null)}>
-          <OptionPopover
-            col={popCol}
-            value={coerceForDisplay(popRow.cells[popCol.id], resolveBaseType(popCol.type))}
-            multi={popCol.type === 'multiselect'}
-            onPick={(label) => {
-              setCell(popRow.id, popCol.id, label === '' ? undefined : label)
-              setPop(null)
-            }}
-            onToggle={(label) => {
-              const cur = coerceForDisplay(popRow.cells[popCol.id], 'multiselect') as string[]
-              const next = cur.includes(label) ? cur.filter((x) => x !== label) : [...cur, label]
-              setCell(popRow.id, popCol.id, next.length ? next : undefined)
-            }}
-            onCreate={(label) => {
-              createOption(popCol.id, label)
-              if (popCol.type === 'multiselect') {
-                const cur = coerceForDisplay(popRow.cells[popCol.id], 'multiselect') as string[]
-                if (!cur.includes(label)) setCell(popRow.id, popCol.id, [...cur, label])
-              } else {
-                setCell(popRow.id, popCol.id, label)
-                setPop(null)
-              }
-            }}
-          />
-        </PopShell>
+        <OptionsPop x={pop.x} y={pop.y} col={popCol} row={popRow} setCell={setCell} createOption={createOption} onClose={() => setPop(null)} />
       )}
       {pop && pop.kind === 'folder' && (
         <PopShell x={pop.x} y={pop.y} onClose={() => setPop(null)}>
           <FolderPopover current={noteFolder ?? ''} onPick={(f) => void setFolder(f)} />
+        </PopShell>
+      )}
+      {pop && pop.kind === 'viewmenu' && popView && (
+        <PopShell x={pop.x} y={pop.y} onClose={() => setPop(null)}>
+          <ViewMenu
+            view={popView}
+            columns={db.columns}
+            onRename={(name) => patchView(popView.id, { name })}
+            onPickGroupBy={(id) => patchView(popView.id, { groupBy: id })}
+            onPickDateCol={(id) => patchView(popView.id, { dateCol: id })}
+            onToggleHidden={(colId) => {
+              const cur = popView.hidden ?? []
+              const next = cur.includes(colId) ? cur.filter((x) => x !== colId) : [...cur, colId]
+              patchView(popView.id, { hidden: next.length ? next : undefined })
+            }}
+            onDelete={views.length > 1 ? () => delView(popView.id) : undefined}
+          />
+        </PopShell>
+      )}
+      {pop && pop.kind === 'filters' && (
+        <PopShell x={pop.x} y={pop.y} onClose={() => setPop(null)}>
+          <FiltersPop
+            view={view}
+            columns={db.columns}
+            kindOf={kindOf}
+            onChange={(filters) => patchView(view.id, { filters: filters.length ? filters : undefined })}
+          />
+        </PopShell>
+      )}
+      {pop && popCol && pop.kind === 'stat' && (
+        <PopShell x={pop.x} y={pop.y} onClose={() => setPop(null)}>
+          <div className="amx-db-pop-sec">页脚统计 · {popCol.name}</div>
+          <div className="amx-db-pop-list">
+            <button
+              className="amx-db-opt"
+              onClick={() => {
+                const s = { ...view.stats }
+                delete s[popCol.id]
+                patchView(view.id, { stats: Object.keys(s).length ? s : undefined })
+                setPop(null)
+              }}
+            >
+              无
+              {!view.stats?.[popCol.id] && <span className="amx-db-opt-check">✓</span>}
+            </button>
+            {statOptionsFor(kindOf(popCol.id) ?? 'text').map((s) => (
+              <button key={s} className="amx-db-opt" onClick={() => { patchView(view.id, { stats: { ...view.stats, [popCol.id]: s } }); setPop(null) }}>
+                {STAT_LABEL[s]}
+                {view.stats?.[popCol.id] === s && <span className="amx-db-opt-check">✓</span>}
+              </button>
+            ))}
+          </div>
+        </PopShell>
+      )}
+      {pop && pop.kind === 'addview' && (
+        <PopShell x={pop.x} y={pop.y} onClose={() => setPop(null)}>
+          <div className="amx-db-pop-sec">添加视图</div>
+          <div className="amx-db-pop-list">
+            {(Object.keys(VIEW_META) as DbViewType[]).map((t) => (
+              <button key={t} className="amx-db-opt" onClick={() => addView(t)}>
+                <span className="amx-db-th-icon" aria-hidden>{VIEW_META[t].icon}</span>
+                {VIEW_META[t].label}
+              </button>
+            ))}
+          </div>
+        </PopShell>
+      )}
+      {pop && pop.kind === 'row' && popRow && (
+        <PopShell x={pop.x} y={pop.y} onClose={() => setPop(null)}>
+          <RowEditor
+            db={db}
+            row={popRow}
+            pagePath={pagePath}
+            setCell={setCell}
+            createOption={createOption}
+            onDelete={() => { delRow(popRow.id); setPop(null) }}
+          />
         </PopShell>
       )}
     </div>
@@ -420,12 +644,13 @@ function Cell({
   const v = coerceForDisplay(row.cells[col.id], resolveBaseType(col.type))
 
   /** [[目标]] 点击:linkTarget 剥 |别名 与 #锚点(与 Markdown 块同语义);已存在页面优先
-   *  (v2.1 这类带点号页名不被误判为附件),未命中且带非 .md 扩展名才当附件系统打开。 */
+   *  (v2.1 这类带点号页名不被误判为附件),未命中且带非 .md/.db 扩展名才当附件系统打开
+   *  (.db 落给 openWikiLink 的文件分支 → 应用内 db tab,不再被系统程序打开原始 JSON)。 */
   const openLink = (raw: string): void => {
     const t = linkTarget(raw)
     const st = usePageStore.getState()
     if (resolvePageName(t, st.pages, pagePath)) return void st.openWikiLink(t.replace(/\.md$/i, ''), pagePath)
-    if (/\.[a-z0-9]{1,8}$/i.test(t) && !/\.md$/i.test(t)) return void amadeus.openAttachment(pagePath, t)
+    if (/\.[a-z0-9]{1,8}$/i.test(t) && !/\.(md|db)$/i.test(t)) return void amadeus.openAttachment(pagePath, t)
     st.openWikiLink(t.replace(/\.md$/i, ''), pagePath) // 未解析 → 询问创建(源 = 本 .db 所在处)
   }
 
@@ -751,11 +976,481 @@ function FolderPopover({ current, onPick }: { current: string; onPick: (f: strin
         {folders === null && <div className="amx-db-blank">读取中…</div>}
         {folders?.map((f) => (
           <button key={f || '__root'} className="amx-db-opt" onClick={() => onPick(f)}>
-            <span aria-hidden>📁</span> {f || '整库(顶层笔记)'}
+            <span className="amx-db-th-icon" aria-hidden><FolderIcon /></span> {f || '整库(顶层笔记)'}
             {f === current && <span className="amx-db-opt-check">✓</span>}
           </button>
         ))}
       </div>
     </>
+  )
+}
+
+// ── 多视图:选项弹层复用 / 视图菜单 / 行编辑器 / 卡片 / 看板 / 日历 / 画廊 ─────────────
+
+/** select/multiselect 选项弹层连同取值/切换/新增语义:表格单元格与行编辑器两处共用。 */
+function OptionsPop({ x, y, col, row, setCell, createOption, onClose }: {
+  x: number
+  y: number
+  col: DbColumn
+  row: DbRow
+  setCell: (rowId: string, colId: string, v: CellValue | undefined) => void
+  createOption: (colId: string, label: string) => void
+  onClose: () => void
+}) {
+  const multi = col.type === 'multiselect'
+  return (
+    <PopShell x={x} y={y} onClose={onClose}>
+      <OptionPopover
+        col={col}
+        value={coerceForDisplay(row.cells[col.id], resolveBaseType(col.type))}
+        multi={multi}
+        onPick={(label) => {
+          setCell(row.id, col.id, label === '' ? undefined : label)
+          onClose()
+        }}
+        onToggle={(label) => {
+          const cur = coerceForDisplay(row.cells[col.id], 'multiselect') as string[]
+          const next = cur.includes(label) ? cur.filter((x) => x !== label) : [...cur, label]
+          setCell(row.id, col.id, next.length ? next : undefined)
+        }}
+        onCreate={(label) => {
+          createOption(col.id, label)
+          if (multi) {
+            const cur = coerceForDisplay(row.cells[col.id], 'multiselect') as string[]
+            if (!cur.includes(label)) setCell(row.id, col.id, [...cur, label])
+          } else {
+            setCell(row.id, col.id, label)
+            onClose()
+          }
+        }}
+      />
+    </PopShell>
+  )
+}
+
+/** 视图 tab 菜单:改名 + 按类型的配置(看板分组列/日历日期列)+ 列显隐 + 删除(最后一个不可删)。 */
+function ViewMenu({ view, columns, onRename, onPickGroupBy, onPickDateCol, onToggleHidden, onDelete }: {
+  view: DbView
+  columns: DbColumn[]
+  onRename: (name: string) => void
+  onPickGroupBy: (colId: string) => void
+  onPickDateCol: (colId: string) => void
+  onToggleHidden: (colId: string) => void
+  onDelete?: () => void
+}) {
+  const selectCols = columns.filter((c) => resolveBaseType(c.type) === 'select')
+  const dateCols = columns.filter(isDateish)
+  // 有效选中 = 视图记的列仍存在则用之,否则回落首个可用列(与视图体的解析一致)。
+  const effective = (want: string | undefined, cands: DbColumn[]): string | undefined =>
+    want && cands.some((c) => c.id === want) ? want : cands[0]?.id
+  const pickList = (cands: DbColumn[], picked: string | undefined, onPick: (id: string) => void, empty: string): ReactNode => (
+    <div className="amx-db-pop-list">
+      {cands.map((c) => (
+        <button key={c.id} className="amx-db-opt" onClick={() => onPick(c.id)}>
+          <span className="amx-db-th-icon" aria-hidden>{colMeta(c.type).icon}</span>
+          {c.name}
+          {picked === c.id && <span className="amx-db-opt-check">✓</span>}
+        </button>
+      ))}
+      {cands.length === 0 && <div className="amx-db-blank">{empty}</div>}
+    </div>
+  )
+  return (
+    <>
+      <input
+        className="amx-db-pop-input"
+        autoFocus
+        defaultValue={view.name}
+        onBlur={(e) => { const n = e.target.value.trim(); if (n && n !== view.name) onRename(n) }}
+        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+      />
+      {view.type === 'kanban' && (
+        <>
+          <div className="amx-db-pop-sec">分组列(单选)</div>
+          {pickList(selectCols, effective(view.groupBy, selectCols), onPickGroupBy, '还没有单选列')}
+        </>
+      )}
+      {view.type === 'calendar' && (
+        <>
+          <div className="amx-db-pop-sec">日期列</div>
+          {pickList(dateCols, effective(view.dateCol, dateCols), onPickDateCol, '还没有日期列')}
+        </>
+      )}
+      {columns.length > 1 && (
+        <>
+          <div className="amx-db-pop-sec">列显示(本视图)</div>
+          <div className="amx-db-pop-list">
+            {columns.slice(1).map((c) => {
+              const hidden = (view.hidden ?? []).includes(c.id)
+              return (
+                <button key={c.id} className="amx-db-opt" onClick={() => onToggleHidden(c.id)} data-dim={hidden || undefined}>
+                  <span className="amx-db-th-icon" aria-hidden>{colMeta(c.type).icon}</span>
+                  {c.name}
+                  {!hidden && <span className="amx-db-opt-check">✓</span>}
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
+      {onDelete ? (
+        <button className="amx-db-opt amx-db-opt-danger" onClick={onDelete}>删除视图</button>
+      ) : (
+        <div className="amx-db-pop-sec">最后一个视图不可删除</div>
+      )}
+    </>
+  )
+}
+
+/** 每视图筛选编辑:扁平 AND 条件列表(列 / op / 值),原生 select 走天下。 */
+function FiltersPop({ view, columns, kindOf, onChange }: {
+  view: DbView
+  columns: DbColumn[]
+  kindOf: (colId: string) => ColumnType | null
+  onChange: (filters: DbViewFilter[]) => void
+}) {
+  const filters = view.filters ?? []
+  const patch = (i: number, p: Partial<DbViewFilter>): void =>
+    onChange(filters.map((f, j) => (j === i ? { ...f, ...p } : f)))
+  const opsFor = (colId: string): string[] => FILTER_OPS[kindOf(colId) ?? 'text']
+  return (
+    <>
+      <div className="amx-db-pop-sec">筛选(全部满足;本视图)</div>
+      {filters.map((f, i) => {
+        const kind = kindOf(f.colId) ?? 'text'
+        const col = columns.find((c) => c.id === f.colId)
+        const unary = UNARY_OPS.has(f.op)
+        return (
+          <div key={i} className="amx-db-fltrow">
+            <select
+              className="amx-db-fltsel"
+              value={f.colId}
+              onChange={(e) => {
+                const colId = e.target.value
+                onChange(filters.map((x, j) => (j === i ? { colId, op: opsFor(colId)[0], value: undefined } : x)))
+              }}
+            >
+              {columns.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+              {!col && <option value={f.colId}>({f.colId})</option>}
+            </select>
+            <select className="amx-db-fltsel" value={f.op} onChange={(e) => patch(i, { op: e.target.value, ...(UNARY_OPS.has(e.target.value) ? { value: undefined } : null) })}>
+              {opsFor(f.colId).map((op) => (
+                <option key={op} value={op}>{OP_LABEL[op] ?? op}</option>
+              ))}
+              {!opsFor(f.colId).includes(f.op) && <option value={f.op}>{OP_LABEL[f.op] ?? f.op}</option>}
+            </select>
+            {!unary && kind === 'select' && (
+              <select className="amx-db-fltsel" value={String(f.value ?? '')} onChange={(e) => patch(i, { value: e.target.value })}>
+                <option value="">…</option>
+                {(col?.options ?? []).map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+            )}
+            {!unary && kind === 'multiselect' && (
+              <select className="amx-db-fltsel" value={String(f.value ?? '')} onChange={(e) => patch(i, { value: e.target.value })}>
+                <option value="">…</option>
+                {(col?.options ?? []).map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+            )}
+            {!unary && kind === 'date' && (
+              <input className="amx-db-fltin" type="date" value={String(f.value ?? '')} onChange={(e) => patch(i, { value: e.target.value || undefined })} />
+            )}
+            {!unary && kind === 'number' && (
+              <input className="amx-db-fltin" type="number" value={f.value == null ? '' : String(f.value)} onChange={(e) => patch(i, { value: e.target.value === '' ? undefined : Number(e.target.value) })} />
+            )}
+            {!unary && kind !== 'select' && kind !== 'multiselect' && kind !== 'date' && kind !== 'number' && (
+              <input className="amx-db-fltin" value={String(f.value ?? '')} placeholder="值…" onChange={(e) => patch(i, { value: e.target.value || undefined })} />
+            )}
+            <button className="amx-db-fltdel" onClick={() => onChange(filters.filter((_, j) => j !== i))} title="移除条件" aria-label="remove filter">✕</button>
+          </div>
+        )
+      })}
+      {filters.length === 0 && <div className="amx-db-blank">还没有条件。</div>}
+      <button
+        className="amx-db-opt"
+        onClick={() => {
+          const c = columns[0]
+          if (c) onChange([...filters, { colId: c.id, op: opsFor(c.id)[0] }])
+        }}
+      >
+        ＋ 添加条件
+      </button>
+      {filters.length > 0 && (
+        <button className="amx-db-opt amx-db-opt-clear" onClick={() => onChange([])}>清除全部</button>
+      )}
+    </>
+  )
+}
+
+/** 行详情编辑:全列纵排,复用表格同款 Cell(看板/日历/画廊点卡即编辑);select 选项开嵌套弹层。 */
+function RowEditor({ db, row, pagePath, setCell, createOption, onDelete }: {
+  db: DbFile
+  row: DbRow
+  pagePath: string
+  setCell: (rowId: string, colId: string, v: CellValue | undefined) => void
+  createOption: (colId: string, label: string) => void
+  onDelete: () => void
+}) {
+  const [opt, setOpt] = useState<{ colId: string; x: number; y: number } | null>(null)
+  const optCol = opt ? db.columns.find((c) => c.id === opt.colId) : undefined
+  return (
+    <div className="amx-db-roweditor">
+      {db.columns.map((col) => (
+        <div key={col.id} className="amx-db-rowed-field" data-coltype={resolveBaseType(col.type)}>
+          <span className="amx-db-rowed-label">
+            <span className="amx-db-th-icon" aria-hidden>{colMeta(col.type).icon}</span>
+            {col.name}
+          </span>
+          <div className="amx-db-rowed-cell">
+            <Cell
+              row={row}
+              col={col}
+              pagePath={pagePath}
+              setCell={setCell}
+              openOptions={(e) => {
+                const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                setOpt({ colId: col.id, x: Math.min(r.left, window.innerWidth - 250), y: Math.min(r.bottom + 4, window.innerHeight - 260) })
+              }}
+            />
+          </div>
+        </div>
+      ))}
+      <button className="amx-db-opt amx-db-opt-danger" onClick={onDelete}>删除行</button>
+      {opt && optCol && (
+        <OptionsPop x={opt.x} y={opt.y} col={optCol} row={row} setCell={setCell} createOption={createOption} onClose={() => setOpt(null)} />
+      )}
+    </div>
+  )
+}
+
+/** 卡片上的只读属性预览:空值不占行;select/多选 → chips,勾选 → 只在为真时点名列名,
+ *  calendarDate → 人类可读,其余 → 文本。 */
+function cellPreview(col: DbColumn, v: CellValue | undefined): ReactNode | null {
+  const base = resolveBaseType(col.type)
+  const d = coerceForDisplay(v, base)
+  if (base === 'checkbox') return d === true ? <span className="amx-db-card-check">✓ {col.name}</span> : null
+  if (base === 'select') return d ? <span className={`amx-db-chip ${chipClass(d as string)}`}>{d as string}</span> : null
+  if (base === 'multiselect') {
+    const arr = d as string[]
+    return arr.length ? <>{arr.map((t) => <span key={t} className={`amx-db-chip ${chipClass(t)}`}>{t}</span>)}</> : null
+  }
+  let s = Array.isArray(d) ? d.join(', ') : d == null ? '' : String(d)
+  if (col.type === 'calendarDate') s = fmtCalDate(parseCalDate(s)) || s
+  return s ? <span className="amx-db-card-text">{s}</span> : null
+}
+
+/** 看板/画廊共用卡片:标题 + 前几个非空属性预览。 */
+function RowCard({ db, row, title, onClick, cols, skipColId, max = 3, draggable, onDragStart }: {
+  db: DbFile
+  row: DbRow
+  title: string
+  onClick: (e: ReactMouseEvent) => void
+  /** 预览用的列集(视图可见列);缺 = 全列。首列(标题)恒跳过。 */
+  cols?: DbColumn[]
+  /** 不预览的列(看板分组列,泳道本身已表达)。 */
+  skipColId?: string
+  max?: number
+  draggable?: boolean
+  onDragStart?: (e: ReactDragEvent) => void
+}) {
+  const previews: ReactNode[] = []
+  for (const col of (cols ?? db.columns).slice(1)) {
+    if (previews.length >= max) break
+    if (col.id === skipColId) continue
+    const node = cellPreview(col, row.cells[col.id])
+    if (node) previews.push(<div className="amx-db-card-prop" key={col.id}>{node}</div>)
+  }
+  return (
+    <div className="amx-db-card" role="button" tabIndex={0} draggable={draggable} onDragStart={onDragStart} onClick={onClick}>
+      <div className="amx-db-card-title">{title}</div>
+      {previews}
+    </div>
+  )
+}
+
+/** 看板:按单选列分组为泳道(选项序 + 未分组),HTML5 拖卡跨道改组值;组内顺序 = 行序。 */
+function KanbanBody({ db, rows, view, visCols, setCell, addRow, openRow, rowTitle, addStatusCol }: {
+  db: DbFile
+  rows: DbRow[]
+  view: DbView
+  visCols: DbColumn[]
+  setCell: (rowId: string, colId: string, v: CellValue | undefined) => void
+  addRow: (initial?: Record<string, CellValue>) => void
+  openRow: (e: ReactMouseEvent, rowId: string) => void
+  rowTitle: (r: DbRow) => string
+  addStatusCol: () => void
+}) {
+  const groupCol =
+    db.columns.find((c) => c.id === view.groupBy && resolveBaseType(c.type) === 'select') ??
+    db.columns.find((c) => resolveBaseType(c.type) === 'select')
+  if (!groupCol) {
+    return (
+      <div className="amx-db-state">
+        看板按单选列分组,这张表还没有单选列。
+        <button className="amx-db-linkbtn" onClick={addStatusCol}>＋ 添加「状态」单选列</button>
+      </div>
+    )
+  }
+  const opts = groupCol.options ?? []
+  const lanes: Array<string | null> = [...opts, null] // null = 未分组(含选项已被删的孤值)
+  const laneRows = (opt: string | null): DbRow[] =>
+    rows.filter((r) => {
+      const v = coerceForDisplay(r.cells[groupCol.id], 'select') as string
+      return opt === null ? !v || !opts.includes(v) : v === opt
+    })
+  const onDrop = (opt: string | null) => (e: ReactDragEvent): void => {
+    e.preventDefault()
+    const id = e.dataTransfer.getData('text/plain')
+    if (id) setCell(id, groupCol.id, opt ?? undefined)
+  }
+  return (
+    <div className="amx-db-kanban">
+      {lanes.map((opt) => {
+        const cards = laneRows(opt)
+        return (
+          <div key={opt ?? '__none'} className="amx-db-lane" onDragOver={(e) => e.preventDefault()} onDrop={onDrop(opt)}>
+            <div className="amx-db-lane-head">
+              {opt ? <span className={`amx-db-chip ${chipClass(opt)}`}>{opt}</span> : <span className="amx-db-lane-none">未分组</span>}
+              <span className="amx-db-lane-count">{cards.length}</span>
+            </div>
+            <div className="amx-db-lane-cards">
+              {cards.map((r) => (
+                <RowCard
+                  key={r.id}
+                  db={db}
+                  row={r}
+                  title={rowTitle(r)}
+                  cols={visCols}
+                  skipColId={groupCol.id}
+                  draggable
+                  onDragStart={(e) => { e.dataTransfer.setData('text/plain', r.id); e.dataTransfer.effectAllowed = 'move' }}
+                  onClick={(e) => openRow(e, r.id)}
+                />
+              ))}
+            </div>
+            <button className="amx-db-lane-add" onClick={() => addRow(opt ? { [groupCol.id]: opt } : undefined)}>
+              <PlusIcon /> 新卡片
+            </button>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+const pad2 = (n: number): string => String(n).padStart(2, '0')
+const fmtYmd = (d: Date): string => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+
+/** 日历:按日期列(date / calendarDate)铺月栅格,周日起始(与 Calendar Space 一致);
+ *  区间值逐日铺条;日格 ＋ 新行带当日初值。42 格恒定,月份切换高度不跳。 */
+function CalendarBody({ db, rows, view, addRow, openRow, rowTitle, addDateCol }: {
+  db: DbFile
+  rows: DbRow[]
+  view: DbView
+  addRow: (initial?: Record<string, CellValue>) => void
+  openRow: (e: ReactMouseEvent, rowId: string) => void
+  rowTitle: (r: DbRow) => string
+  addDateCol: () => void
+}) {
+  const [ym, setYm] = useState(() => {
+    const n = new Date()
+    return { y: n.getFullYear(), m: n.getMonth() }
+  })
+  const dateCol = db.columns.find((c) => c.id === view.dateCol && isDateish(c)) ?? db.columns.find(isDateish)
+  if (!dateCol) {
+    return (
+      <div className="amx-db-state">
+        日历需要一个日期列(日期 / 日历日期)。
+        <button className="amx-db-linkbtn" onClick={addDateCol}>＋ 添加「日期」列</button>
+      </div>
+    )
+  }
+  // 单日与区间统一走 parseCalDate('YYYY-MM-DD' 本身就是合法单日)。
+  const spanOf = (r: DbRow): { s: string; e: string } | null => {
+    const raw = r.cells[dateCol.id]
+    const c = typeof raw === 'string' ? parseCalDate(raw) : null
+    if (!c) return null
+    const s = splitSide(c.start).date
+    const e = c.end ? splitSide(c.end).date : s
+    return { s, e: e >= s ? e : s }
+  }
+  const lead = new Date(ym.y, ym.m, 1).getDay()
+  const cells = Array.from({ length: 42 }, (_, i) => new Date(ym.y, ym.m, 1 - lead + i))
+  const byDay = new Map<string, DbRow[]>()
+  for (const r of rows) {
+    const sp = spanOf(r)
+    if (!sp) continue
+    for (const d of cells) {
+      const k = fmtYmd(d)
+      if (k >= sp.s && k <= sp.e) {
+        const arr = byDay.get(k)
+        if (arr) arr.push(r)
+        else byDay.set(k, [r])
+      }
+    }
+  }
+  const todayK = fmtYmd(new Date())
+  return (
+    <div className="amx-db-cal">
+      <div className="amx-db-cal-nav">
+        <button className="amx-db-cal-btn" onClick={() => setYm(({ y, m }) => (m === 0 ? { y: y - 1, m: 11 } : { y, m: m - 1 }))} aria-label="prev month">‹</button>
+        <span className="amx-db-cal-title">{ym.y} 年 {ym.m + 1} 月</span>
+        <button className="amx-db-cal-btn" onClick={() => setYm(({ y, m }) => (m === 11 ? { y: y + 1, m: 0 } : { y, m: m + 1 }))} aria-label="next month">›</button>
+        <button className="amx-db-linkbtn" onClick={() => { const n = new Date(); setYm({ y: n.getFullYear(), m: n.getMonth() }) }}>今天</button>
+        <span className="amx-db-cal-colhint" title="日历所用的日期列(在视图 tab 菜单里换)">
+          <span className="amx-db-th-icon" aria-hidden>{colMeta(dateCol.type).icon}</span>
+          {dateCol.name}
+        </span>
+      </div>
+      <div className="amx-db-cal-grid">
+        {['日', '一', '二', '三', '四', '五', '六'].map((w) => (
+          <div className="amx-db-cal-dow" key={w}>{w}</div>
+        ))}
+        {cells.map((d) => {
+          const k = fmtYmd(d)
+          const dayRows = byDay.get(k) ?? []
+          const inMonth = d.getMonth() === ym.m
+          return (
+            <div className={`amx-db-cal-day${inMonth ? '' : ' amx-db-cal-out'}${k === todayK ? ' amx-db-cal-today' : ''}`} key={k}>
+              <div className="amx-db-cal-dayhead">
+                <span className="amx-db-cal-num">{d.getDate()}</span>
+                <button className="amx-db-cal-add" onClick={() => addRow({ [dateCol.id]: k })} title="在这天新建" aria-label={`add row on ${k}`}>
+                  <PlusIcon />
+                </button>
+              </div>
+              {dayRows.map((r) => (
+                <button className="amx-db-ev" key={r.id} onClick={(e) => openRow(e, r.id)} title={rowTitle(r)}>{rowTitle(r)}</button>
+              ))}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/** 画廊:卡片栅格,点卡开行编辑。 */
+function GalleryBody({ db, rows, visCols, addRow, openRow, rowTitle }: {
+  db: DbFile
+  rows: DbRow[]
+  visCols: DbColumn[]
+  addRow: (initial?: Record<string, CellValue>) => void
+  openRow: (e: ReactMouseEvent, rowId: string) => void
+  rowTitle: (r: DbRow) => string
+}) {
+  return (
+    <div className="amx-db-gallery">
+      {rows.map((r) => (
+        <RowCard key={r.id} db={db} row={r} title={rowTitle(r)} cols={visCols} max={4} onClick={(e) => openRow(e, r.id)} />
+      ))}
+      <button className="amx-db-card amx-db-card-add" onClick={() => addRow()}>
+        <PlusIcon /> 新卡片
+      </button>
+    </div>
   )
 }

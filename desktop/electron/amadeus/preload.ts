@@ -3,6 +3,7 @@
 
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { IPC, type AmadeusApi } from '@amadeus-shared/ipc'
+import { SYNC_IPC } from './sync/ipcKeys'
 
 const api: AmadeusApi = {
   openVault: () => ipcRenderer.invoke(IPC.openVault),
@@ -46,6 +47,14 @@ const api: AmadeusApi = {
   renameFolder: (folderPath, newName) => ipcRenderer.invoke(IPC.renameFolder, folderPath, newName),
   deleteFolder: (folderPath) => ipcRenderer.invoke(IPC.deleteFolder, folderPath),
   moveFolder: (folderPath, destFolder) => ipcRenderer.invoke(IPC.moveFolder, folderPath, destFolder),
+  trashEntry: (rel) => ipcRenderer.invoke(IPC.trashEntry, rel),
+  listTrash: () => ipcRenderer.invoke(IPC.listTrash),
+  restoreTrash: (name) => ipcRenderer.invoke(IPC.restoreTrash, name),
+  deleteTrashEntry: (name) => ipcRenderer.invoke(IPC.deleteTrashEntry, name),
+  emptyTrash: () => ipcRenderer.invoke(IPC.emptyTrash),
+  pageIcons: () => ipcRenderer.invoke(IPC.pageIcons),
+  fetchLinkMeta: (url) => ipcRenderer.invoke(IPC.fetchLinkMeta, url),
+  searchImages: (q) => ipcRenderer.invoke(IPC.searchImages, q),
   onStructureChange: (cb) => {
     const listener = (): void => cb()
     ipcRenderer.on(IPC.structureChange, listener)
@@ -73,3 +82,65 @@ const api: AmadeusApi = {
 }
 
 contextBridge.exposeInMainWorld('amadeus', api)
+
+// 云同步(桌面专属,不进三端共享的 AmadeusApi 契约;web/mobile 下为 undefined)。
+contextBridge.exposeInMainWorld('amadeusSync', {
+  get: () => ipcRenderer.invoke(SYNC_IPC.get),
+  setEnabled: (on: boolean) => ipcRenderer.invoke(SYNC_IPC.setEnabled, on),
+  syncNow: () => ipcRenderer.invoke(SYNC_IPC.syncNow),
+  switchSide: (side: 'local' | 'cloud') => ipcRenderer.invoke(SYNC_IPC.switchSide, side),
+  onStatus: (cb: (s: unknown) => void) => {
+    const listener = (_e: IpcRendererEvent, s: unknown): void => cb(s)
+    ipcRenderer.on(SYNC_IPC.status, listener)
+    return () => {
+      ipcRenderer.removeListener(SYNC_IPC.status, listener)
+    }
+  },
+})
+
+// 页面级共享/发布/presence(与 web 的 cloudCollab 同构;HTTP 在主进程,token 不下发)。
+const collabCall = (fn: string, ...args: unknown[]): Promise<any> => ipcRenderer.invoke(SYNC_IPC.collabCall, fn, args)
+contextBridge.exposeInMainWorld('amadeusCollab', {
+  listVaults: () => collabCall('listVaults'),
+  activeVaultId: () => collabCall('activeVaultId'),
+  // 桌面无「切库」:共享内容在镜像的 与我共享/ 里,SharedWithMeSection 用 localPath 直开。
+  switchVault: () => {},
+  pageShare: (path: string) => collabCall('pageShare', path),
+  createPageShare: (path: string, opts: unknown) => collabCall('createPageShare', path, opts),
+  updatePageShare: (id: string, patch: unknown) => collabCall('updatePageShare', id, patch),
+  revokePageShare: (id: string) => collabCall('revokePageShare', id),
+  setParticipantRole: (id: string, userId: string, role: string) => collabCall('setParticipantRole', id, userId, role),
+  removeParticipant: (id: string, userId: string) => collabCall('removeParticipant', id, userId),
+  sharedWithMe: () => collabCall('sharedWithMe'),
+  leaveShare: (id: string) => collabCall('leaveShare', id),
+  inviteUrl: (token: string) => `${linkBase}/invite/${token}`,
+  publishes: () => collabCall('publishes'),
+  createPublish: (mode: string, path: string) => collabCall('createPublish', mode, path),
+  revokePublish: (token: string) => collabCall('revokePublish', token),
+  publishUrl: (token: string) => `${linkBase}/share/${token}`,
+  heartbeat: (page: string | null) => {
+    void collabCall('heartbeat', page)
+    if (!hbTimer) hbTimer = setInterval(() => void collabCall('heartbeat', page), 30_000)
+    hbPage = page
+  },
+  stopHeartbeat: () => {
+    if (hbTimer) { clearInterval(hbTimer); hbTimer = null }
+  },
+  onPresence: (cb: (list: unknown) => void) => {
+    const listener = (_e: IpcRendererEvent, list: unknown): void => cb(list)
+    ipcRenderer.on(SYNC_IPC.presence, listener)
+    return () => {
+      ipcRenderer.removeListener(SYNC_IPC.presence, listener)
+    }
+  },
+  myUserId: () => cachedUserId,
+})
+
+// linkBase / userId:preload 加载时一次性取(登录态变化重启 app 生效;sync 面同款语义)。
+let linkBase = ''
+let cachedUserId: string | null = null
+let hbTimer: ReturnType<typeof setInterval> | null = null
+let hbPage: string | null = null
+void hbPage
+void collabCall('linkBase').then((b) => { linkBase = String(b ?? '') }).catch(() => {})
+void collabCall('myUserId').then((u) => { cachedUserId = (u as string | null) ?? null }).catch(() => {})

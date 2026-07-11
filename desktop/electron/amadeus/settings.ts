@@ -6,9 +6,22 @@ import path from 'node:path'
 import { app } from 'electron'
 import { isDevMode } from '../forsionHome'
 
+export interface AmadeusCloudSyncConfig {
+  /** 缺省视为启用(登录即同步);仅显式 false 停用。 */
+  enabled?: boolean
+  /** 云端 vault id(首次启用时解析并固定)。 */
+  vaultId?: string
+  /** 回声抑制用设备标识(X-Amadeus-Client)。 */
+  deviceId?: string
+}
+
 export interface AmadeusConfig {
+  /** 当前活动 vault 根(= 渲染端所见;agent 的 amadeus_* 工具实时跟随它)。 */
   lastVault?: string
+  /** 最近一次的「本地侧」vault 根;活动侧切到云镜像时靠它切回来。 */
+  localVault?: string
   lastPage?: string
+  cloudSync?: AmadeusCloudSyncConfig
 }
 
 let cache: AmadeusConfig | null = null

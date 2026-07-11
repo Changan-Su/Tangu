@@ -58,6 +58,72 @@
 }
 .t2s-dim { opacity: 0.7; flex-shrink: 0; }
 
+/* Local|Cloud 胶囊滑块(VaultSideSwitch):等宽双选项,滑块弹性平移 + 文字颜色过渡。
+ * 常驻 Amadeus 工作区各子 view 开头(笔记树/全文搜索/标签)。整体 no-drag(Electron 拖窗区兜底)。 */
+.t2s-vaultseg {
+  position: relative;
+  display: flex;
+  height: 26px;
+  margin: 12px 10px 8px;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--overlay-light, rgba(127, 127, 127, 0.08));
+  -webkit-app-region: no-drag;
+  flex-shrink: 0;
+}
+.t2s-vaultseg-thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc(50% - 2px);
+  border-radius: 999px;
+  background: var(--surface, var(--bg));
+  border: var(--border-width, 1px) solid var(--border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.07);
+  /* 克制的弹性:轻微过冲即收,不弹跳 */
+  transition: transform 0.3s cubic-bezier(0.32, 1.25, 0.5, 1);
+  will-change: transform;
+}
+.t2s-vaultseg-thumb[data-side='cloud'] { transform: translateX(100%); }
+.t2s-vaultseg button {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 0;
+  min-width: 0;
+  border: none;
+  background: none;
+  border-radius: 999px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-faint, var(--text-muted));
+  cursor: pointer;
+  transition: color 0.25s var(--ease-out, ease);
+}
+.t2s-vaultseg button.on { color: var(--text); }
+.t2s-vaultseg[data-busy] button { cursor: default; }
+.t2s-vaultseg-hint {
+  margin: 0 12px 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.t2s-vaultseg-login {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border: var(--border-width, 1px) solid var(--border);
+  border-radius: 999px;
+  background: var(--surface, transparent);
+  color: var(--accent-ink, var(--accent));
+  font-size: 11px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.t2s-vaultseg-login:hover { background: var(--accent-light); }
+
 /* (账号卡 + 设置已移到左侧 ribbon 底部,原 .t2s-footer 已退役) */
 
 /* 文件面板:工作区展开后的磁盘文件树 */
@@ -95,6 +161,9 @@
 
 /* 滚动区 */
 .t2s-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 8px 12px; }
+/* 常驻底部区(sticky footer):笔记的回收站 / 会话的添加本地工作区+已归档 —— 不随列表滚走。
+ * 归档展开可能很长 → 自身 max-height + 滚动,绝不无限撑高把列表挤没。 */
+.t2s-foot { flex: 0 0 auto; -webkit-app-region: no-drag; border-top: var(--border-width, 1px) solid var(--border); padding: 4px 8px 8px; max-height: 45vh; overflow-y: auto; }
 .t2s-hint { padding: 10px; font-size: 12.5px; color: var(--text-muted); }
 
 /* 顶部入口行 */

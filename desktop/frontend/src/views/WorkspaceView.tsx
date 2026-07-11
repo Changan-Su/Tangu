@@ -22,6 +22,7 @@ import { usePageStore } from '@amadeus/store/pageStore'
 import type { WorkspaceDescriptor } from '../types'
 import { autoWorkspaceMode, type WorkspaceMode } from './workspaceMode'
 import { useCodeStudio } from '../stores/codeStudioStore'
+import { VaultSideSwitch } from '../components/VaultSideSwitch'
 
 /** 当前活动主 leaf 的视图类型(订阅 mainTabs 驱动重算;焦点在侧栏时 activeMainPanel 有组内回退)。 */
 function useActiveMainType(): string | null {
@@ -32,8 +33,9 @@ function useActiveMainType(): string | null {
 }
 
 /** 文件模式体:appStore 接线(≈ 原 FilesView),编辑器场景注入合成的 vault 工作区并定位笔记目录。
- *  vault 场景手风琴用本地 state(初始/跟随 vault),不写全局 activeWorkspaceKey(那是会话侧的联动)。 */
-function FilesBody({ vaultCtx }: { vaultCtx: { root: string; noteDir: string | null } | null }) {
+ *  vault 场景手风琴用本地 state(初始/跟随 vault),不写全局 activeWorkspaceKey(那是会话侧的联动)。
+ *  sideFilter(左栏胶囊):cloud=只看云端工作区,local=只看本地(不混);undefined=不过滤(右栏)。 */
+function FilesBody({ vaultCtx, sideFilter }: { vaultCtx: { root: string; noteDir: string | null } | null; sideFilter?: 'local' | 'cloud' }) {
   const s = useApp(useShallow((state) => ({
     workspaces: state.workspaces,
     setFilePreview: state.setFilePreview,
@@ -45,15 +47,19 @@ function FilesBody({ vaultCtx }: { vaultCtx: { root: string; noteDir: string | n
   useEffect(() => { setLocalKey(vaultKey) }, [vaultKey])
   const workspaces = useMemo<WorkspaceDescriptor[]>(() => {
     const base = s.workspaces()
-    if (!vaultCtx) return base
-    const vaultWs: WorkspaceDescriptor = {
-      key: vaultKey!,
-      name: vaultCtx.root.split(/[\\/]/).filter(Boolean).pop() || 'Vault',
-      kind: 'local',
-      path: vaultCtx.root,
-    }
-    return [vaultWs, ...base.filter((w) => w.path !== vaultCtx.root)] // 同目录已是会话工作区 → 去重
-  }, [s, vaultCtx, vaultKey])
+    const merged = (() => {
+      if (!vaultCtx) return base
+      const vaultWs: WorkspaceDescriptor = {
+        key: vaultKey!,
+        name: vaultCtx.root.split(/[\\/]/).filter(Boolean).pop() || 'Vault',
+        kind: 'local',
+        path: vaultCtx.root,
+      }
+      return [vaultWs, ...base.filter((w) => w.path !== vaultCtx.root)] // 同目录已是会话工作区 → 去重
+    })()
+    if (!sideFilter) return merged
+    return merged.filter((w) => (sideFilter === 'cloud' ? w.kind === 'cloud' : w.kind !== 'cloud'))
+  }, [s, vaultCtx, vaultKey, sideFilter])
   // Coding Space:主区 focus 为工作台时,点文件不另开 wsfile tab,而是喂给主区 Code 面板(codeStudioStore)。
   const mainType = useActiveMainType()
   const onOpenPreview = mainType === 'code-studio'
@@ -101,14 +107,19 @@ export function WorkspaceView({ leaf }: ViewProps) {
     return { root: vaultRoot, noteDir: segs.length ? `${vaultRoot}/${segs.join('/')}` : null }
   }, [mode, mainType, vaultRoot, activePage])
 
+  // 左栏胶囊(Local|Cloud):全局切笔记 vault + 过滤会话/文件到对应侧(不混);右栏不显示、不过滤。
+  const vaultSide = usePageStore((s) => s.vaultSide)
+  const sideFilter = loc === 'left' && window.amadeusSync ? vaultSide : undefined
+
   const body: ReactNode =
-    mode === 'sessions' ? <SessionsView />
-    : mode === 'files' ? <FilesBody vaultCtx={vaultCtx} />
+    mode === 'sessions' ? <SessionsView sideFilter={sideFilter} />
+    : mode === 'files' ? <FilesBody vaultCtx={vaultCtx} sideFilter={sideFilter} />
     : hasNotes ? <AmadeusPagesView />
     : <div className="t2sw-empty">{t('workspace.notesUnavailable')}</div>
 
   return (
     <div className="t2sw">
+      {loc === 'left' && <VaultSideSwitch />}
       <div className="t2sw-head">
         {MODE_KEYS.filter((m) => m.id !== 'notes' || hasNotes).map((m) => (
           <button

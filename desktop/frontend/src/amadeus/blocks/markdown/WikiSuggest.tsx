@@ -1,18 +1,23 @@
-// Popup for [[ autocomplete. Suggests pages (fuzzy) and lets the user insert one.
+// Popup for [[ autocomplete. Suggests pages AND vault files (fuzzy) and lets the user insert one.
 // Obsidian 式:候选不按 basename 去重 —— 每个路径一行(名字加粗 + 目录副标题),重名时插入
 // 带路径的链接 `dir/Name|Name`(「唯一即最短」);onPick 收到的就是最终 [[ ]] 内文。
+// 文件(.db/附件)候选保留扩展名(文件命名空间凭扩展名区分页面,见 lib/vaultFiles),带小图标。
 // Only intercepts navigation keys (Arrow/Enter/Tab/Esc) in the capture phase — letters
 // and Backspace fall through to ProseMirror so the in-document query keeps updating.
 
 import { useEffect, useState } from 'react'
 import { fuzzyScore } from '../../lib/fuzzy'
+import { isFileRef } from '../../lib/vaultFiles'
 import { pageKey } from '@amadeus-shared/links'
+import { AttachmentIcon, DatabaseTableViewIcon } from '../../components/icons'
 
 interface Props {
   query: string
   left: number
   top: number
   getPageNames: () => string[]
+  /** vault 非笔记文件(.db/附件);缺 = 只补全页面(PlainMarkdownEditor)。 */
+  getFiles?: () => string[]
   /** 参数 = 最终 [[ ]] 内文(裸名或 `dir/Name|Name`);创建行传原查询串。 */
   onPick: (linkInner: string) => void
   onClose: () => void
@@ -23,10 +28,16 @@ interface Props {
 interface Cand {
   path: string
   base: string
+  /** 文件候选(保留扩展名);页面候选为 false。 */
+  file: boolean
 }
 
 function baseName(p: string): string {
   return (p.split(/[\\/]/).pop() ?? p).replace(/\.md$/i, '')
+}
+
+function fileBase(p: string): string {
+  return p.split(/[\\/]/).pop() ?? p
 }
 
 function dirOf(p: string): string {
@@ -35,13 +46,19 @@ function dirOf(p: string): string {
   return i === -1 ? '' : q.slice(0, i)
 }
 
-export function WikiSuggest({ query, left, top, getPageNames, onPick, onClose, allowCreate = true }: Props) {
+/** 重名判定 key:页面剥 .md 小写(pageKey),文件含扩展名小写 —— 两命名空间天然分立。 */
+const candKey = (c: Cand): string => (c.file ? c.base.toLowerCase() : pageKey(c.base))
+
+export function WikiSuggest({ query, left, top, getPageNames, getFiles, onPick, onClose, allowCreate = true }: Props) {
   const [active, setActive] = useState(0)
 
-  const cands: Cand[] = getPageNames().map((p) => ({ path: p, base: baseName(p) }))
+  const cands: Cand[] = [
+    ...getPageNames().map((p) => ({ path: p, base: baseName(p), file: false })),
+    ...(getFiles?.() ?? []).map((p) => ({ path: p, base: fileBase(p), file: true })),
+  ]
   const dupes = new Map<string, number>()
-  for (const c of cands) dupes.set(pageKey(c.base), (dupes.get(pageKey(c.base)) ?? 0) + 1)
-  // 名字命中优先(+1000)、仅路径命中垫底;sort 稳定 → 同分保持入参顺序(@ 提及 recents-first 不乱)。
+  for (const c of cands) dupes.set(candKey(c), (dupes.get(candKey(c)) ?? 0) + 1)
+  // 名字命中优先(+1000)、仅路径命中垫底;sort 稳定 → 同分保持入参顺序(@ 提及 recents-first 不乱,页面先于文件)。
   const scored = cands
     .map((c) => {
       const sName = fuzzyScore(query, c.base)
@@ -52,14 +69,17 @@ export function WikiSuggest({ query, left, top, getPageNames, onPick, onClose, a
   scored.sort((a, b) => b.s - a.s)
   const results = scored.slice(0, 8).map((x) => x.c)
   const q = query.trim()
-  const showCreate = allowCreate && q.length > 0 && !cands.some((c) => pageKey(c.base) === pageKey(q))
+  // 查询串本身像文件名([[xxx.db]])时不给「新建链接」:createWikiPage 会造出 xxx.db.md 怪胎。
+  const showCreate =
+    allowCreate && q.length > 0 && !isFileRef(q) && !cands.some((c) => candKey(c) === pageKey(q))
   const total = results.length + (showCreate ? 1 : 0)
 
   /** 「唯一即最短」:basename 全库唯一 → 裸名;重名 → `dir/Name|Name`(路径解析 + 别名显示)。 */
-  const linkInner = (c: Cand): string =>
-    (dupes.get(pageKey(c.base)) ?? 0) > 1
-      ? `${c.path.replace(/\\/g, '/').replace(/\.md$/i, '')}|${c.base}`
-      : c.base
+  const linkInner = (c: Cand): string => {
+    if ((dupes.get(candKey(c)) ?? 0) <= 1) return c.base
+    const path = c.path.replace(/\\/g, '/')
+    return `${c.file ? path : path.replace(/\.md$/i, '')}|${c.base}`
+  }
 
   useEffect(() => {
     setActive(0)
@@ -104,7 +124,7 @@ export function WikiSuggest({ query, left, top, getPageNames, onPick, onClose, a
     <div className="wiki-suggest" style={{ left, top }} role="menu">
       {results.map((c, i) => (
         <button
-          key={c.path}
+          key={(c.file ? 'f:' : 'p:') + c.path}
           className="wiki-item"
           data-active={i === active || undefined}
           onMouseEnter={() => setActive(i)}
@@ -114,7 +134,14 @@ export function WikiSuggest({ query, left, top, getPageNames, onPick, onClose, a
           }}
           role="menuitem"
         >
-          <span className="wiki-item-name">{c.base}</span>
+          <span className="wiki-item-name">
+            {c.file && (
+              <span className="wiki-item-ficon" aria-hidden>
+                {/\.db$/i.test(c.base) ? <DatabaseTableViewIcon /> : <AttachmentIcon />}
+              </span>
+            )}
+            {c.base}
+          </span>
           <span className="wiki-item-path">{dirOf(c.path) || '/'}</span>
         </button>
       ))}

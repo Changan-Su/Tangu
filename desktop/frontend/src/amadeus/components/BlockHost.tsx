@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useDroppable } from '@dnd-kit/core'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { stripPageBasename } from '@amadeus-shared/compiler/names'
@@ -6,6 +7,8 @@ import { toAssetUrl } from '@amadeus-shared/assets'
 import type { EmbedResolved } from '@amadeus-shared/ipc'
 import { getBlockType } from '../blocks/registry'
 import { DatabaseEmbed } from '../blocks/database/DatabaseEmbed'
+import { BookmarkCard } from './BookmarkCard'
+import { useBlockSelection } from '../store/blockSelection'
 import { usePageStore } from '../store/pageStore'
 import { amadeus } from '../api'
 
@@ -51,6 +54,7 @@ export const BlockHost = memo(function BlockHost({
     (s) => s.dndOverId === blockId && s.dndActiveId !== null && s.dndActiveId !== blockId,
   )
   const pagePath = usePageStore((s) => s.activePage ?? '')
+  const selected = useBlockSelection((s) => s.id === blockId)
   const linkVersion = usePageStore((s) => s.linkGraphVersion)
 
   const embedTarget = useMemo(() => {
@@ -72,9 +76,10 @@ export const BlockHost = memo(function BlockHost({
   // `![[xxx.db]]` → Database 嵌入(交互式表格,数据在独立 .db 文件;必须先于 embedFile 判定)。
   const embedDb = useMemo(() => {
     if (!embedTarget || embedImage) return null
-    const t = embedTarget.split('|')[0].trim()
+    const [rawPath, viewName] = embedTarget.split('|') // `![[tasks.db|看板]]` 的管道段 = 激活视图名(存笔记 md,不碰 .db)
+    const t = rawPath.trim()
     if (t.includes('#') || !DB_EXT_RE.test(t)) return null
-    return { name: t }
+    return { name: t, view: viewName?.trim() || null }
   }, [embedTarget, embedImage])
 
   // Non-image file (has an extension, no block anchor) → inline preview (pdf/video/audio) or file card.
@@ -86,6 +91,12 @@ export const BlockHost = memo(function BlockHost({
     return { name: t, kind, url: kind === 'other' ? '' : toAssetUrl(t) }
   }, [embedTarget, embedImage, embedDb])
   const [previewOpen, setPreviewOpen] = useState(true)
+
+  // 整块恰是一条裸 URL → 书签卡(og 元数据/YouTube 嵌入);md 落盘仍是那行 URL,零私有语法。
+  const bookmarkUrl = useMemo(() => {
+    const t = (block?.content ?? '').trim()
+    return !embedTarget && /^https?:\/\/\S+$/i.test(t) ? t : null
+  }, [block?.content, embedTarget])
 
   // Resolve a cross-note embed; re-resolve when the link graph changes (source edited externally).
   const [embed, setEmbed] = useState<EmbedResolved | null | 'loading'>('loading')
@@ -108,6 +119,17 @@ export const BlockHost = memo(function BlockHost({
 
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } =
     useSortable({ id: blockId })
+
+  // 块级左右边缘落点(Notion 式两栏配对):仅拖拽进行中且非自身时激活/显示。
+  const dndPairing = usePageStore((s) => s.dndActiveId !== null && s.dndActiveId !== blockId)
+  const leftEdge = useDroppable({ id: `bedge:${blockId}:left`, disabled: !dndPairing })
+  const rightEdge = useDroppable({ id: `bedge:${blockId}:right`, disabled: !dndPairing })
+  const blockEdges = dndPairing ? (
+    <>
+      <div ref={leftEdge.setNodeRef} className="block-edge" data-side="left" data-over={leftEdge.isOver || undefined} />
+      <div ref={rightEdge.setNodeRef} className="block-edge" data-side="right" data-over={rightEdge.isOver || undefined} />
+    </>
+  ) : null
 
   // Notion 式块菜单:点 ⠿(不动即点击,动 5px 起才是拖拽)或块上右键呼出;替代原右侧悬浮小图标列。
   const [blockMenu, setBlockMenu] = useState<{ x: number; y: number } | null>(null)
@@ -144,6 +166,7 @@ export const BlockHost = memo(function BlockHost({
         {...listeners}
         onClick={(e) => {
           e.stopPropagation()
+          useBlockSelection.getState().select(blockId) // Notion 式:点手柄=选中块(键盘删/复制可用)
           const r = e.currentTarget.getBoundingClientRect()
           setBlockMenu({ x: r.left, y: r.bottom + 4 })
         }}
@@ -180,13 +203,16 @@ export const BlockHost = memo(function BlockHost({
         ref={setNodeRef}
         className="block-host"
         data-block-id={blockId}
+        data-selected={selected || undefined}
         data-embed
         data-menu={blockMenu ? '' : undefined}
         data-dragging={isDragging || undefined}
         style={{ transform: CSS.Translate.toString(transform), transition }}
         onContextMenu={onCtxMenu}
+        onFocusCapture={() => { if (useBlockSelection.getState().id) useBlockSelection.getState().select(null) }}
       >
         {isDropTarget && <div className="drop-line" />}
+        {blockEdges}
         {dragHandle}
         <div className="block-body embed-image-body">
           <img
@@ -202,6 +228,32 @@ export const BlockHost = memo(function BlockHost({
     )
   }
 
+  // --- 裸 URL 块 → 书签卡(✎ 就地改地址;删除走块菜单) ---
+  if (bookmarkUrl) {
+    return (
+      <div
+        ref={setNodeRef}
+        className="block-host"
+        data-block-id={blockId}
+        data-selected={selected || undefined}
+        data-embed
+        data-menu={blockMenu ? '' : undefined}
+        data-dragging={isDragging || undefined}
+        style={{ transform: CSS.Translate.toString(transform), transition }}
+        onContextMenu={onCtxMenu}
+        onFocusCapture={() => { if (useBlockSelection.getState().id) useBlockSelection.getState().select(null) }}
+      >
+        {isDropTarget && <div className="drop-line" />}
+        {blockEdges}
+        {dragHandle}
+        <div className="block-body">
+          <BookmarkCard url={bookmarkUrl} onChangeUrl={(next) => setBlockContent(blockId, next)} />
+        </div>
+        {blockMenuNode}
+      </div>
+    )
+  }
+
   // --- Database transclusion (`![[tasks.db]]`) → interactive table (✕ removes the block, not the file) ---
   if (embedDb) {
     return (
@@ -209,16 +261,24 @@ export const BlockHost = memo(function BlockHost({
         ref={setNodeRef}
         className="block-host"
         data-block-id={blockId}
+        data-selected={selected || undefined}
         data-embed
         data-menu={blockMenu ? '' : undefined}
         data-dragging={isDragging || undefined}
         style={{ transform: CSS.Translate.toString(transform), transition }}
         onContextMenu={onCtxMenu}
+        onFocusCapture={() => { if (useBlockSelection.getState().id) useBlockSelection.getState().select(null) }}
       >
         {isDropTarget && <div className="drop-line" />}
+        {blockEdges}
         {dragHandle}
         <div className="block-body">
-          <DatabaseEmbed target={embedDb.name} pagePath={pagePath} />
+          <DatabaseEmbed
+            target={embedDb.name}
+            pagePath={pagePath}
+            initialView={embedDb.view}
+            onViewChange={(v) => setBlockContent(blockId, v ? `![[${embedDb.name}|${v}]]` : `![[${embedDb.name}]]`)}
+          />
         </div>
         {blockMenuNode}
       </div>
@@ -232,13 +292,16 @@ export const BlockHost = memo(function BlockHost({
         ref={setNodeRef}
         className="block-host"
         data-block-id={blockId}
+        data-selected={selected || undefined}
         data-embed
         data-menu={blockMenu ? '' : undefined}
         data-dragging={isDragging || undefined}
         style={{ transform: CSS.Translate.toString(transform), transition }}
         onContextMenu={onCtxMenu}
+        onFocusCapture={() => { if (useBlockSelection.getState().id) useBlockSelection.getState().select(null) }}
       >
         {isDropTarget && <div className="drop-line" />}
+        {blockEdges}
         {dragHandle}
         <div className="block-body">
           {embedFile.kind === 'other' ? (
@@ -294,13 +357,16 @@ export const BlockHost = memo(function BlockHost({
         ref={setNodeRef}
         className="block-host"
         data-block-id={blockId}
+        data-selected={selected || undefined}
         data-embed
         data-menu={blockMenu ? '' : undefined}
         data-dragging={isDragging || undefined}
         style={{ transform: CSS.Translate.toString(transform), transition }}
         onContextMenu={onCtxMenu}
+        onFocusCapture={() => { if (useBlockSelection.getState().id) useBlockSelection.getState().select(null) }}
       >
         {isDropTarget && <div className="drop-line" />}
+        {blockEdges}
         {dragHandle}
         <div className="block-body embed-body">
           <div className="embed-head">
@@ -357,10 +423,12 @@ export const BlockHost = memo(function BlockHost({
       ref={setNodeRef}
       className="block-host"
       data-block-id={blockId}
+      data-selected={selected || undefined}
       data-menu={blockMenu ? '' : undefined}
       data-dragging={isDragging || undefined}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       onContextMenu={onCtxMenu}
+        onFocusCapture={() => { if (useBlockSelection.getState().id) useBlockSelection.getState().select(null) }}
     >
       {isDropTarget && <div className="drop-line" />}
       {dragHandle}

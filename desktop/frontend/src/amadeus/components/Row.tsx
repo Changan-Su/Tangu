@@ -7,9 +7,11 @@ import { ColumnResizer } from './ColumnResizer'
 /** A horizontal row of columns, with resizers between them and edge drop-zones
  *  on each side (drop a block on an edge to split into a new column). */
 export function Row({ row }: { row: RowNode }) {
+  // 单列多子的「大杂烩行」不给行级边缘落点:行级配对会与整页所有块劈开(实报),块级边缘(BlockHost)接管。
+  const mega = row.columns.length === 1 && row.columns[0].children.length > 1
   return (
     <div className="row">
-      <EdgeZone rowId={row.id} side="left" />
+      {!mega && <EdgeZone rowId={row.id} side="left" />}
       <div className="row-cols">
         {row.columns.map((col, i) => (
           <Fragment key={col.id}>
@@ -24,7 +26,7 @@ export function Row({ row }: { row: RowNode }) {
           </Fragment>
         ))}
       </div>
-      <EdgeZone rowId={row.id} side="right" />
+      {!mega && <EdgeZone rowId={row.id} side="right" />}
     </div>
   )
 }

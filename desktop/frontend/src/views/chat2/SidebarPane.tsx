@@ -328,20 +328,25 @@ export const SidebarPane: React.FC<SidebarPaneProps> = (p) => {
               )
             })}
 
-            {window.tangu?.pickDirectory && <button className="t2s-add-ws" onClick={p.onAddWorkspace}><FolderPlus size={14} /> {t('sidebar.addLocalWorkspace')}</button>}
-
-            {p.archivedSessions.length > 0 && (
-              <>
-                <button className="t2s-srow t2s-archived-toggle" onClick={() => setShowArchived(!showArchived)}>
-                  <span className="t2s-chev"><Archive size={13} /></span>
-                  <span className="t2s-srow-title t2s-faint">{t('sidebar.archived', { count: p.archivedSessions.length })}</span>
-                </button>
-                {showArchived && p.archivedSessions.map(renderItem)}
-              </>
-            )}
           </>
         )}
       </div>
+
+      {/* 「添加本地工作区」+「已归档」常驻侧栏底部(sticky footer),不随会话列表滚走。 */}
+      {(window.tangu?.pickDirectory || p.archivedSessions.length > 0) && (
+        <div className="t2s-foot">
+          {window.tangu?.pickDirectory && <button className="t2s-add-ws" onClick={p.onAddWorkspace}><FolderPlus size={14} /> {t('sidebar.addLocalWorkspace')}</button>}
+          {p.archivedSessions.length > 0 && (
+            <>
+              <button className="t2s-srow t2s-archived-toggle" onClick={() => setShowArchived(!showArchived)}>
+                <span className="t2s-chev"><Archive size={13} /></span>
+                <span className="t2s-srow-title t2s-faint">{t('sidebar.archived', { count: p.archivedSessions.length })}</span>
+              </button>
+              {showArchived && p.archivedSessions.map(renderItem)}
+            </>
+          )}
+        </div>
+      )}
 
       {/* 个人中心卡片 + 设置已移到左侧 ribbon 底部(见 bootstrapEngine rb-settings / rb-account)。 */}
 

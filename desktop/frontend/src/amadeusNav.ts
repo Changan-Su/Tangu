@@ -37,6 +37,18 @@ export function openDb(dbPath: string): void {
   ws.openView('amadeus-db', { dbPath }, 'main')
 }
 
+/** 打开全文搜索视图(singleton:已开即激活)。 */
+export function openSearch(): void {
+  const ws = useWorkspace.getState()
+  const api = (ws as unknown as { api?: { panels: PanelLike[] } }).api
+  const hit = api?.panels.find((p) => p.params?.__type === 'amadeus-search')
+  if (hit) {
+    ws.activateLeaf(hit.id)
+    return
+  }
+  ws.openView('amadeus-search', {}, 'main')
+}
+
 /** resolve 时笔记必须真的加载完(调用方靠它定位/高亮块);超时兜底防 leaf 效果没接住。 */
 function waitForActive(path: string, timeoutMs = 3000): Promise<void> {
   if (usePageStore.getState().activePage === path) return Promise.resolve()

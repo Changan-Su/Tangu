@@ -74,8 +74,9 @@ export function PromptDialog({
   const [value, setValue] = useState(initial)
   const submit = (): void => {
     const v = value.trim()
-    onClose()
+    // 先 confirm 后 close:命令式包装(askString)在 close 里兜「取消」,顺序反了会把确定误判成取消
     if (v) onConfirm(v)
+    onClose()
   }
   return (
     <div className="dialog-overlay" onMouseDown={onClose}>

@@ -100,7 +100,8 @@ export const useNoteViewStore = create<NoteViewState>((set, get) => ({
   },
 
   async deleteNote(folder, notePath) {
-    await amadeus.deletePage(notePath)
+    if (amadeus.trashEntry) await amadeus.trashEntry(notePath) // 可恢复(回收站);缺位端硬删
+    else await amadeus.deletePage(notePath)
     await get().refresh(folder)
   },
 

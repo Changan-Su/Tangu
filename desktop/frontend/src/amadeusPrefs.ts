@@ -4,10 +4,14 @@ import { create } from 'zustand'
 import { usePageStore } from '@amadeus/store/pageStore'
 import { setRecentsProvider } from '@amadeus/lib/recents'
 
-interface Prefs { starred: string[]; recents: string[] }
+export interface Collection { name: string; query: string }
+interface Prefs { starred: string[]; recents: string[]; collections: Collection[] }
 interface PrefsState extends Prefs {
   toggleStar(path: string): void
   pushRecent(path: string): void
+  /** 集合 = 保存的全文搜索(同名覆盖)。 */
+  saveCollection(name: string, query: string): void
+  removeCollection(name: string): void
 }
 
 const RECENT_CAP = 20
@@ -22,10 +26,14 @@ const load = (): Prefs => {
     const v = k && localStorage.getItem(k)
     if (v) {
       const p = JSON.parse(v) as Partial<Prefs>
-      return { starred: Array.isArray(p.starred) ? p.starred : [], recents: Array.isArray(p.recents) ? p.recents : [] }
+      return {
+        starred: Array.isArray(p.starred) ? p.starred : [],
+        recents: Array.isArray(p.recents) ? p.recents : [],
+        collections: Array.isArray(p.collections) ? p.collections : [],
+      }
     }
   } catch { /* ignore */ }
-  return { starred: [], recents: [] }
+  return { starred: [], recents: [], collections: [] }
 }
 const persist = (p: Prefs): void => {
   try {
@@ -34,18 +42,31 @@ const persist = (p: Prefs): void => {
   } catch { /* ignore */ }
 }
 
+const snapshot = (s: PrefsState): Prefs => ({ starred: s.starred, recents: s.recents, collections: s.collections })
+
 export const useAmadeusPrefs = create<PrefsState>((set, get) => ({
   starred: [],
   recents: [],
+  collections: [],
   toggleStar: (path) => {
     const starred = get().starred.includes(path) ? get().starred.filter((p) => p !== path) : [...get().starred, path]
     set({ starred })
-    persist({ starred, recents: get().recents })
+    persist({ ...snapshot(get()), starred })
   },
   pushRecent: (path) => {
     const recents = [path, ...get().recents.filter((p) => p !== path)].slice(0, RECENT_CAP)
     set({ recents })
-    persist({ starred: get().starred, recents })
+    persist({ ...snapshot(get()), recents })
+  },
+  saveCollection: (name, query) => {
+    const collections = [...get().collections.filter((c) => c.name !== name), { name, query }]
+    set({ collections })
+    persist({ ...snapshot(get()), collections })
+  },
+  removeCollection: (name) => {
+    const collections = get().collections.filter((c) => c.name !== name)
+    set({ collections })
+    persist({ ...snapshot(get()), collections })
   },
 }))
 

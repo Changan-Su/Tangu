@@ -13,6 +13,11 @@ import { VaultWatcher } from './fs/watcher'
 import { VaultIndex } from './fs/vaultIndex'
 import { readConfig, writeConfig } from './settings'
 import { defaultWorkspaceDir, forsionHomeDir } from '../forsionHome'
+import { loadTanguCreds } from '../forsionAuth'
+import { fetchLinkMeta, searchImages } from './linkMeta'
+import { cloudVaultDir, legacyCloudVaultDir, migrateCloudMirrorDir, createSyncEngine } from './sync/engine'
+import { createCollabMain, planOf, type SharedBindingPlan } from './sync/collabMain'
+import { SYNC_IPC } from './sync/ipcKeys'
 
 const nowIso = (): string => new Date().toISOString()
 
@@ -58,6 +63,103 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
   const index = new VaultIndex(vault)
   let structureTimer: ReturnType<typeof setTimeout> | null = null
 
+  // 云镜像迁移到隐藏目录:必须早于任何引擎创建/启动(整目录 rename,保 shadow 一致)。
+  migrateCloudMirrorDir()
+
+  // 云同步引擎:云 vault = 固定本地镜像目录(cloudVaultDir),独立于用户自选 vault,自带 watcher。
+  // 引擎自己的写盘绕开 VaultManager 台账 → 活动 vault 是镜像时主 watcher 照常广播 →
+  // 渲染端刷新/索引全部走既有通道;对账按 hash 幂等消回推环。
+  // 多绑定:own 引擎(自己的云库,排除「与我共享/」)+ 每个已接受的页面共享一个引擎
+  // (镜像到 与我共享/<title>-<hash8>/,离线可读、双向同步;写权限由服务端按角色判)。
+  const collabMain = createCollabMain()
+  const presenceRoster = new Map<string, { userId: string; username: string; page: string | null; at: number }>()
+  const pushRoster = (): void => {
+    const now = Date.now()
+    for (const [k, p] of presenceRoster) if (now - p.at > 70_000) presenceRoster.delete(k)
+    getWindow()?.webContents.send(SYNC_IPC.presence, [...presenceRoster.values()])
+  }
+  const engineDeps = {
+    loadCreds: () => loadTanguCreds(),
+    onStatus: (s: unknown) => getWindow()?.webContents.send(SYNC_IPC.status, { ...(s as object), side: onCloudSide() ? 'cloud' : 'local' }),
+    onPresence: (_vaultId: string, d: unknown) => {
+      const p = d as { userId?: string; username?: string; page?: string | null; at?: number } | null
+      if (!p?.userId) return
+      presenceRoster.set(p.userId, { userId: p.userId, username: String(p.username ?? 'user'), page: p.page ?? null, at: Number(p.at) || Date.now() })
+      pushRoster()
+    },
+    onPresenceRoster: (_vaultId: string, d: unknown) => {
+      if (!Array.isArray(d)) return
+      for (const raw of d) {
+        const p = raw as { userId?: string; username?: string; page?: string | null; at?: number }
+        if (p?.userId) presenceRoster.set(p.userId, { userId: p.userId, username: String(p.username ?? 'user'), page: p.page ?? null, at: Number(p.at) || Date.now() })
+      }
+      pushRoster()
+    },
+  }
+  const sync = createSyncEngine(engineDeps)
+  /** 与我共享的绑定引擎(key=planOf hash8)。 */
+  const sharedEngines = new Map<string, { engine: ReturnType<typeof createSyncEngine>; plan: SharedBindingPlan }>()
+  let sharedPlans: SharedBindingPlan[] = []
+
+  const refreshSharedBindings = async (): Promise<void> => {
+    let items: Awaited<ReturnType<typeof collabMain.sharedWithMe>>
+    try {
+      items = await collabMain.sharedWithMe()
+    } catch {
+      return // 未登录/离线:保持现状,下次再刷
+    }
+    const plans = items.map((it) => planOf(it))
+    sharedPlans = plans
+    const want = new Set(plans.map((p) => p.key))
+    for (const [key, entry] of sharedEngines) {
+      if (!want.has(key)) {
+        entry.engine.stop()
+        sharedEngines.delete(key) // 共享被撤/自退:停同步;本地镜像文件保留(用户数据不擅删)
+      }
+    }
+    for (const plan of plans) {
+      if (sharedEngines.has(plan.key)) continue
+      const engine = createSyncEngine(engineDeps, {
+        localRoot: path.join(cloudVaultDir(), ...plan.localRelDir.split('/')),
+        shadowName: `amadeus-sync-share-${plan.key}`,
+        vaultId: plan.vaultId,
+        serverDir: plan.serverDir,
+        inScope: plan.inScope,
+      })
+      sharedEngines.set(plan.key, { engine, plan })
+      engine.start()
+    }
+  }
+
+  /** 活动 vault 是否就是云镜像(胶囊滑块的 Cloud 侧)。 */
+  const onCloudSide = (): boolean => vault.getRoot() === cloudVaultDir()
+  /** 按路径把应用内写事件路由到对应引擎(与我共享/<slug>/** → 该共享绑定;其余 → own)。 */
+  const routeNotify = (rel: string): { engine: ReturnType<typeof createSyncEngine>; rel: string } => {
+    const posix = rel.replace(/\\/g, '/')
+    for (const { engine, plan } of sharedEngines.values()) {
+      if (posix.startsWith(`${plan.localRelDir}/`)) return { engine, rel: posix.slice(plan.localRelDir.length + 1) }
+    }
+    return { engine: sync, rel: posix }
+  }
+  // 应用内写钩子只在活动 vault = 镜像时转发(精确 move 保服务端文件 id);其余场景引擎自带 watcher 兜底。
+  vault.setMutationHooks(
+    (rel, kind) => {
+      if (!onCloudSide()) return
+      const r = routeNotify(rel)
+      r.engine.notifyLocal(r.rel, kind)
+    },
+    (from, to) => {
+      if (!onCloudSide()) return
+      const f = routeNotify(from)
+      const t = routeNotify(to)
+      if (f.engine === t.engine) f.engine.notifyLocalMove(f.rel, t.rel)
+      else {
+        f.engine.notifyLocal(f.rel, 'remove')
+        t.engine.notifyLocal(t.rel, 'write')
+      }
+    },
+  )
+
   const watcher = new VaultWatcher(
     vault,
     (pagePath) => {
@@ -78,7 +180,102 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
       getWindow()?.webContents.send(IPC.dbChange, dbPath)
     },
   )
+
   const rememberPage = (pagePath: string): Promise<void> => writeConfig({ lastPage: pagePath })
+
+  /** 切到某个根:统一收口(setRoot + watcher + index + 返回渲染端所需载荷)。 */
+  const activateRoot = async (root: string, keepLastPage: boolean): Promise<{ root: string; pages: string[]; folders: string[]; lastPage?: string }> => {
+    vault.setRoot(root)
+    watcher.start(root)
+    const pages = await vault.listPages()
+    const folders = await vault.listFolders()
+    await index.build()
+    const { lastPage } = await readConfig()
+    return {
+      root,
+      pages,
+      folders,
+      lastPage: keepLastPage && lastPage && pages.includes(lastPage) ? lastPage : undefined,
+    }
+  }
+
+  ipcMain.handle(SYNC_IPC.get, () => ({ ...sync.getStatus(), side: onCloudSide() ? 'cloud' : 'local' }))
+  ipcMain.handle(SYNC_IPC.setEnabled, (_e, on: boolean) => sync.setEnabled(on))
+  ipcMain.handle(SYNC_IPC.syncNow, async () => {
+    void refreshSharedBindings() // 顺带发现新接受的共享
+    for (const { engine } of sharedEngines.values()) void engine.syncNow()
+    return sync.syncNow()
+  })
+
+  // ── collab(页面级共享/发布/presence):token 留主进程,渲染端经 window.amadeusCollab ──
+  ipcMain.handle(SYNC_IPC.collabCall, async (_e, fn: string, args: unknown[]) => {
+    const v = async (): Promise<string> => collabMain.ensureOwnVault()
+    const a = (i: number): string => String((args ?? [])[i] ?? '')
+    const obj = (i: number): any => (args ?? [])[i] ?? {}
+    switch (fn) {
+      case 'listVaults':
+        return (await collabMain.call<{ vaults: unknown[] }>('GET', '/vaults')).vaults
+      case 'activeVaultId':
+        return v()
+      case 'pageShare':
+        return collabMain.call('GET', `/vaults/${encodeURIComponent(await v())}/page-shares?path=${encodeURIComponent(a(0))}`)
+      case 'createPageShare':
+        return collabMain.call('POST', `/vaults/${encodeURIComponent(await v())}/page-shares`, { path: a(0), ...obj(1) })
+      case 'updatePageShare':
+        return collabMain.call('PATCH', `/vaults/${encodeURIComponent(await v())}/page-shares/${encodeURIComponent(a(0))}`, obj(1))
+      case 'revokePageShare':
+        return collabMain.call('DELETE', `/vaults/${encodeURIComponent(await v())}/page-shares/${encodeURIComponent(a(0))}`)
+      case 'setParticipantRole':
+        return collabMain.call('PATCH', `/vaults/${encodeURIComponent(await v())}/page-shares/${encodeURIComponent(a(0))}/members/${encodeURIComponent(a(1))}`, { role: a(2) })
+      case 'removeParticipant':
+        return collabMain.call('DELETE', `/vaults/${encodeURIComponent(await v())}/page-shares/${encodeURIComponent(a(0))}/members/${encodeURIComponent(a(1))}`)
+      case 'sharedWithMe': {
+        const items = await collabMain.sharedWithMe()
+        void refreshSharedBindings()
+        return items
+      }
+      case 'leaveShare': {
+        const me = collabMain.myUserId()
+        if (!me) throw new Error('未登录')
+        return collabMain.call('DELETE', `/vaults/${encodeURIComponent(await v())}/page-shares/${encodeURIComponent(a(0))}/members/${encodeURIComponent(me)}`)
+      }
+      case 'publishes':
+        return collabMain.call('GET', `/vaults/${encodeURIComponent(await v())}/shares`)
+      case 'createPublish': {
+        const r = await collabMain.call<{ token: string; mode: string; path: string }>('POST', `/vaults/${encodeURIComponent(await v())}/shares`, { mode: a(0), path: a(1) })
+        return { ...r, url: `${await collabMain.linkBase()}/share/${r.token}` }
+      }
+      case 'revokePublish':
+        return collabMain.call('DELETE', `/vaults/${encodeURIComponent(await v())}/shares/${encodeURIComponent(a(0))}`)
+      case 'myUserId':
+        return collabMain.myUserId()
+      case 'linkBase':
+        return collabMain.linkBase()
+      case 'heartbeat':
+        return collabMain.heartbeat(((args ?? [])[0] as string | null) ?? null, sharedPlans)
+      default:
+        throw new Error(`unknown collab fn: ${fn}`)
+    }
+  })
+
+  // 胶囊滑块:Local ↔ Cloud 全局切活动 vault。lastVault 恒 = 活动根(agent 工具实时跟随),
+  // localVault 记住本地侧根以便切回;云镜像根固定,不污染 localVault。
+  ipcMain.handle(SYNC_IPC.switchSide, async (_e, side: 'local' | 'cloud') => {
+    const cfg = await readConfig()
+    if (side === 'cloud') {
+      const dir = cloudVaultDir()
+      await fs.mkdir(dir, { recursive: true })
+      if (cfg.lastVault && cfg.lastVault !== dir) await writeConfig({ localVault: cfg.lastVault })
+      await writeConfig({ lastVault: dir })
+      return { ...(await activateRoot(dir, false)), side: 'cloud' }
+    }
+    const target = cfg.localVault && (await fs.stat(cfg.localVault).then((s) => s.isDirectory()).catch(() => false))
+      ? cfg.localVault
+      : null
+    if (!target) return { ...(await ensureDefaultVault()), side: 'local' }
+    await writeConfig({ lastVault: target })
+    return { ...(await activateRoot(target, false)), side: 'local' }
+  })
 
   /** 首启无 lastVault:自带默认工作区 ~/Forsion/Amadeus(dev→~/Forsion-Dev/Amadeus)+ 种子 Calendar.db。
    *  幂等:目录已存在不动,Calendar.db 已存在不覆盖(用户后来选过别的 vault 则走不到这里)。 */
@@ -91,41 +288,37 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
     } catch {
       await vault.writeTextFile('Calendar.db', serializeDb(seedCalendarDb()))
     }
-    watcher.start(root)
-    await writeConfig({ lastVault: root, lastPage: undefined })
-    await index.build()
-    return { root, pages: await vault.listPages(), folders: await vault.listFolders() }
+    await writeConfig({ lastVault: root, localVault: root, lastPage: undefined })
+    return activateRoot(root, false)
   }
 
   ipcMain.handle(IPC.openVault, async () => {
     const root = await vault.openDialog()
     if (!root) return null
-    watcher.start(root)
-    await writeConfig({ lastVault: root, lastPage: undefined })
-    await index.build()
-    return { root, pages: await vault.listPages(), folders: await vault.listFolders() }
+    await writeConfig({ lastVault: root, localVault: root, lastPage: undefined })
+    return activateRoot(root, false)
   })
 
   ipcMain.handle(IPC.restoreVault, async () => {
-    const { lastVault, lastPage } = await readConfig()
+    let { lastVault } = await readConfig()
     if (!lastVault) return ensureDefaultVault() // 首启:自带默认工作区 + 种子多维表(不再落欢迎页)
+    // 云镜像已迁隐藏目录:曾记在旧可见位置的活动根改指新位置(迁移已搬走内容)。
+    if (lastVault === legacyCloudVaultDir()) {
+      lastVault = cloudVaultDir()
+      await writeConfig({ lastVault })
+    }
     try {
       const stat = await fs.stat(lastVault)
       if (!stat.isDirectory()) return null
     } catch {
+      // 活动根曾是云镜像但目录还没建(如换机):兜底重建再进
+      if (lastVault === cloudVaultDir()) {
+        await fs.mkdir(lastVault, { recursive: true })
+        return activateRoot(lastVault, true)
+      }
       return null
     }
-    vault.setRoot(lastVault)
-    watcher.start(lastVault)
-    const pages = await vault.listPages()
-    const folders = await vault.listFolders()
-    await index.build()
-    return {
-      root: lastVault,
-      pages,
-      folders,
-      lastPage: lastPage && pages.includes(lastPage) ? lastPage : undefined,
-    }
+    return activateRoot(lastVault, true)
   })
 
   ipcMain.handle(IPC.listPages, () => vault.listPages())
@@ -428,6 +621,23 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
     return newPath
   })
 
+  // ── 回收站:移入/列出/恢复/彻底删/清空(.trash 点目录对扫描天然隐身,动索引的只有移入与恢复) ──
+  ipcMain.handle(IPC.trashEntry, async (_e, rel: string) => {
+    await vault.trashEntry(rel)
+    await index.build()
+  })
+  ipcMain.handle(IPC.listTrash, async () => vault.listTrash())
+  ipcMain.handle(IPC.restoreTrash, async (_e, name: string) => {
+    const restored = await vault.restoreTrash(name)
+    await index.build()
+    return restored
+  })
+  ipcMain.handle(IPC.deleteTrashEntry, async (_e, name: string) => vault.deleteTrashEntry(name))
+  ipcMain.handle(IPC.emptyTrash, async () => vault.emptyTrash())
+  ipcMain.handle(IPC.pageIcons, () => index.pageIcons())
+  ipcMain.handle(IPC.fetchLinkMeta, (_e, url: string) => fetchLinkMeta(url))
+  ipcMain.handle(IPC.searchImages, (_e, q: string) => searchImages(q))
+
   const pluginsDir = (): string | null => {
     const root = vault.getRoot()
     return root ? path.join(root, '.amadeus', 'plugins') : null
@@ -510,6 +720,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
     await fs.writeFile(path.join(pdir, 'manifest.json'), SAMPLE_MANIFEST, 'utf8')
     await fs.writeFile(path.join(pdir, 'main.js'), SAMPLE_MAIN, 'utf8')
   })
+
+  sync.start() // 云镜像同步独立于活动 vault,应用启动即拉起(未登录/显式停用时安静待命)
+  void refreshSharedBindings() // 与我共享的绑定引擎(未登录时静默,syncNow/共享列表访问时再刷)
 
   return { getVaultRoot: () => vault.getRoot() }
 }

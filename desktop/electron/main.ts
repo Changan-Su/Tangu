@@ -6,7 +6,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell, nativeImage, Notification } from 'electron'
 import { basename, dirname, join } from 'path'
 import { pathToFileURL } from 'url'
-import { readFile, writeFile, mkdir, chmod, readdir, stat, rename, cp, open as fsOpen, unlink, rm } from 'fs/promises'
+import { readFile, writeFile, mkdir, chmod, readdir, stat, lstat, rename, cp, open as fsOpen, unlink, rm } from 'fs/promises'
 import { existsSync } from 'fs'
 import { ensureCliInstalled } from './cliInstall'
 import { PRODUCT } from './product'
@@ -331,9 +331,15 @@ const DEFAULT_CONFIG: TanguStoredConfig = {
   ttsAutoSpeak: false,
 }
 
-/** 默认工作区目录(配置未填时兜底 ~/Tangu);best-effort 创建,失败不阻断。 */
+/** 默认工作区目录(配置未填时兜底):新用户 ~/Forsion(dev→~/Forsion-Dev);
+ *  仅当存在**真实** ~/Tangu 目录(老用户,迁移软链不算)才沿用 ~/Tangu。best-effort 创建。 */
 async function ensureDefaultWorkspaceDir(stored: TanguStoredConfig): Promise<string> {
-  const dir = stored.defaultWorkspaceDir?.trim() || join(app.getPath('home'), 'Tangu')
+  let dir = stored.defaultWorkspaceDir?.trim()
+  if (!dir) {
+    const legacy = join(app.getPath('home'), 'Tangu')
+    const isRealLegacyDir = await lstat(legacy).then((s) => s.isDirectory() && !s.isSymbolicLink()).catch(() => false)
+    dir = isRealLegacyDir ? legacy : forsionWorkspaceDir()
+  }
   await mkdir(dir, { recursive: true }).catch(() => {})
   return dir
 }

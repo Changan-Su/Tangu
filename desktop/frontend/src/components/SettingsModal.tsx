@@ -3,7 +3,7 @@
  * 在 Desktop 主界面内替换 Chat/Inspector 区域，而不是覆盖式弹窗。
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { X, ArrowLeft, Loader2, RefreshCw, Sun, Moon, RotateCcw, LogIn, LogOut, ExternalLink, KeyRound, Plus, Trash2, Plug, Search, Download, Sparkles, Wrench, Check, Globe2, QrCode, Smartphone, FolderOpen, Play } from 'lucide-react'
+import { X, ArrowLeft, Loader2, RefreshCw, Sun, Moon, RotateCcw, LogIn, LogOut, ExternalLink, KeyRound, Plus, Trash2, Plug, Search, Download, Sparkles, Wrench, Check, Globe2, QrCode, Smartphone, FolderOpen, Play, Trophy } from 'lucide-react'
 import { ThemeCard } from './ThemeCard'
 import { listLanguages, listSkins } from '../theme/registry'
 import { applyTheme } from '../theme/loader'
@@ -18,7 +18,7 @@ import {
 import type { WechatStatusResponse } from '../services/backendService'
 import { buildSessionLogPayload, sessionLogFilename } from '../services/sessionLog'
 import type {
-  AuthStatusInfo, BackendStatusInfo, DirectProviderConfig, DiscoveryResult, McpServerConfigEntry, MirrorTestResult, ModelsResponse,
+  AmadeusSyncStatus, AuthStatusInfo, BackendStatusInfo, DirectProviderConfig, DiscoveryResult, McpServerConfigEntry, MirrorTestResult, ModelsResponse,
   NormalAgentDef, SessionRecord, SkillInfo, StoredDesktopConfig, TanguDesktopConfig, ToolsResponse, UpdaterStatusInfo,
 } from '../types'
 import { SHOW_SYSTEM_PROMPT_KEY } from '../types'
@@ -41,6 +41,8 @@ import { PluginSettingsPage } from './PluginSettingsPage'
 import { AgentClisTab } from './AgentClisTab'
 import { QrImage } from './QrImage'
 import { likelyMainlandChina } from './OnboardingWizard'
+import { debugFireToast } from '../achievements/store'
+import { useTheme } from '../stores/themeStore'
 
 type StaticTab = 'general' | 'connection' | 'forsion' | 'model' | 'mcp' | 'hooks' | 'skills' | 'agents' | 'plugins' | 'amadeus-plugins' | 'agent-clis' | 'browser' | 'wechat' | 'notes' | 'spaces' | 'theme' | 'shortcuts' | 'advanced' | 'developer' | 'about'
 // 动态插件设置页用 `plugin:<id>`(Obsidian 式一级入口)。
@@ -114,6 +116,9 @@ export const SettingsModal: React.FC<{
   const [tab, setTab] = useState<Tab>(normalizeTab(p.initialTab))
   const [navQuery, setNavQuery] = useState('')
   const [appVersion, setAppVersion] = useState<string>('')
+  // custom 配色的独立背景色(强调/背景双取色器;走 themeStore,不经 props 链)。
+  const themeBgSeed = useTheme((s) => s.bgSeed)
+  const setBgSeedValue = useTheme((s) => s.setBgSeedValue)
   // 应用内自动更新状态(经 window.tangu.onUpdaterStatus 广播驱动;mac 仅检测引导手动下载)。
   const [upd, setUpd] = useState<UpdaterStatusInfo>({ phase: 'idle' })
   // 开发者模式:关于页连点版本号 10 次解锁(持久化);解锁后多出「开发者选项」tab。
@@ -294,6 +299,16 @@ export const SettingsModal: React.FC<{
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState('')
   const [syncSt, setSyncSt] = useState<SyncStatusResult | null>(null)
+
+  // ── Amadeus 云 vault 同步(桌面专属;window.amadeusSync 缺省时整段隐藏)──
+  const [noteSync, setNoteSync] = useState<AmadeusSyncStatus | null>(null)
+  const [noteSyncBusy, setNoteSyncBusy] = useState(false)
+  useEffect(() => {
+    const api = window.amadeusSync
+    if (!api) return
+    void api.get().then(setNoteSync).catch(() => {})
+    return api.onStatus(setNoteSync)
+  }, [])
 
   const doForsionLogout = async (): Promise<void> => {
     if (!window.tangu?.forsionLogout) return
@@ -783,7 +798,7 @@ export const SettingsModal: React.FC<{
                         </div>
                         <div className="hint" style={{ marginBottom: 10 }}>{t('settings.python.hint')}</div>
                         {likelyMainlandChina() && (stored.mirror || 'default') !== 'china' && (
-                          <div className="hint" style={{ marginBottom: 6, color: 'var(--accent)' }}>{t('settings.mirror.recommend')}</div>
+                          <div className="hint" style={{ marginBottom: 6, color: 'var(--accent-ink)' }}>{t('settings.mirror.recommend')}</div>
                         )}
                         <div className="hint" style={{ marginBottom: 6 }}>{t('settings.mirror.hint')}</div>
                         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
@@ -1061,6 +1076,59 @@ export const SettingsModal: React.FC<{
                       </div>
                       <div className="hint">{t('settings.notes.dailyHint')}</div>
                     </div>
+
+                    {window.amadeusSync && noteSync && (
+                      <div className="field">
+                        <label className="inline-check" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <input
+                            type="checkbox"
+                            checked={noteSync.enabled}
+                            disabled={noteSyncBusy}
+                            onChange={(e) => {
+                              setNoteSyncBusy(true)
+                              void window.amadeusSync!.setEnabled(e.target.checked)
+                                .then(setNoteSync)
+                                .finally(() => setNoteSyncBusy(false))
+                            }}
+                          />
+                          {t('settings.notes.cloudSyncLabel')}
+                        </label>
+                        <div className="hint">{t('settings.notes.cloudSyncHint')}</div>
+                        {noteSync.enabled && (
+                          <>
+                            <div className="settings-inline-row" style={{ marginTop: 6 }}>
+                              <button
+                                className="btn sm"
+                                disabled={noteSyncBusy || noteSync.state === 'syncing'}
+                                onClick={() => {
+                                  setNoteSyncBusy(true)
+                                  void window.amadeusSync!.syncNow().then(setNoteSync).finally(() => setNoteSyncBusy(false))
+                                }}
+                              >
+                                {noteSync.state === 'syncing' ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}{' '}
+                                {noteSync.state === 'syncing' ? t('settings.notes.cloudSyncSyncing') : t('settings.notes.cloudSyncNow')}
+                              </button>
+                              <span className="hint">
+                                {t(`settings.notes.cloudSyncState.${noteSync.state}`)}
+                                {noteSync.pending > 0 ? ` · ${t('settings.notes.cloudSyncPending', { n: String(noteSync.pending) })}` : ''}
+                                {' · '}
+                                {t('settings.forsion.lastSynced', {
+                                  time: noteSync.lastSyncAt ? new Date(noteSync.lastSyncAt).toLocaleString() : t('settings.forsion.never'),
+                                })}
+                              </span>
+                            </div>
+                            {noteSync.error && <div className="hint" style={{ color: 'var(--danger, #c00)' }}>{noteSync.error}</div>}
+                            {noteSync.skipped.length > 0 && (
+                              <div className="hint">
+                                {t('settings.notes.cloudSyncSkipped', { n: String(noteSync.skipped.length) })}:{' '}
+                                {noteSync.skipped.slice(0, 3).map((s) => s.path).join(', ')}
+                                {noteSync.skipped.length > 3 ? '…' : ''}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
                   </>
                 )}
 
@@ -1132,12 +1200,12 @@ export const SettingsModal: React.FC<{
                                   className={`file-row${selected ? ' active' : ''}`}
                                   onClick={() => { const v = selected ? '' : m.id; setDraft({ ...draft, imageModelId: v }); p.onConfigChange({ imageModelId: v }) }}
                                 >
-                                  <span className="file-name" style={{ color: selected ? 'var(--accent)' : undefined }}>{m.name}</span>
+                                  <span className="file-name" style={{ color: selected ? 'var(--accent-ink)' : undefined }}>{m.name}</span>
                                   {m.source === 'direct' && <span className="model-group-tag">{t('model.group.direct')}</span>}
                                   {!draft.imageModelId && m.id === cloudImageDefault && (
                                     <span className="model-group-tag">{t('settings.model.imageCloudDefaultTag')}</span>
                                   )}
-                                  {selected && <Check size={12} style={{ color: 'var(--accent)' }} />}
+                                  {selected && <Check size={12} style={{ color: 'var(--accent-ink)' }} />}
                                 </button>
                               )
                             })}
@@ -1406,8 +1474,8 @@ export const SettingsModal: React.FC<{
                                         className={`file-row${selected.has(id) ? ' active' : ''}`}
                                         onClick={() => toggle(id)}
                                       >
-                                        <span className="file-name" style={{ color: selected.has(id) ? 'var(--accent)' : undefined }}>{id}</span>
-                                        {selected.has(id) && <Check size={12} style={{ color: 'var(--accent)' }} />}
+                                        <span className="file-name" style={{ color: selected.has(id) ? 'var(--accent-ink)' : undefined }}>{id}</span>
+                                        {selected.has(id) && <Check size={12} style={{ color: 'var(--accent-ink)' }} />}
                                       </button>
                                     ))}
                                   </div>
@@ -1976,6 +2044,27 @@ export const SettingsModal: React.FC<{
                         </div>
                       </div>
                     )}
+                    {p.themeSkin === 'custom' && (
+                      <div className="field">
+                        <label>{t('settings.theme.customBgLabel')}</label>
+                        <div className="field-row" style={{ alignItems: 'center', gap: 10 }}>
+                          <input
+                            type="color"
+                            value={themeBgSeed || '#f8f7f6'}
+                            onChange={(e) => setBgSeedValue(e.target.value)}
+                            aria-label={t('settings.theme.customBgLabel')}
+                            style={{ width: 48, height: 32, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                          />
+                          <span className="hint" style={{ fontFamily: 'var(--font-mono)' }}>
+                            {themeBgSeed || t('settings.theme.customBgFollow')}
+                          </span>
+                          {themeBgSeed && (
+                            <button className="btn ghost sm" onClick={() => setBgSeedValue('')}>{t('settings.theme.customBgClear')}</button>
+                          )}
+                        </div>
+                        <div className="hint" style={{ marginTop: 4 }}>{t('settings.theme.customBgHint')}</div>
+                      </div>
+                    )}
                     <div className="field">
                       <label>{t('settings.theme.modeLabel')}</label>
                       <div className="seg">
@@ -2301,6 +2390,15 @@ export const SettingsModal: React.FC<{
                       <div className="hint">{t('settings.developer.testUpdateHint')}</div>
                     </div>
                     <div className="field">
+                      <label>{t('settings.developer.achToastLabel')}</label>
+                      <div>
+                        <button className="btn ghost sm" onClick={() => debugFireToast()}>
+                          <Trophy size={12} /> {t('settings.developer.achToast')}
+                        </button>
+                      </div>
+                      <div className="hint">{t('settings.developer.achToastHint')}</div>
+                    </div>
+                    <div className="field">
                       <button
                         className="btn ghost sm"
                         onClick={() => {
@@ -2345,7 +2443,7 @@ export const SettingsModal: React.FC<{
                           {t('about.version')} {appVersion || CHANGELOG[0]?.version || '—'}
                         </div>
                         {devMode ? (
-                          <div className="hint" style={{ marginTop: 2, color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <div className="hint" style={{ marginTop: 2, color: 'var(--accent-ink)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                             <Wrench size={11} /> {t('about.devUnlocked')}
                           </div>
                         ) : devClicks >= 5 ? (

@@ -5,11 +5,13 @@ import { useEffect, useState, type KeyboardEvent } from 'react'
 import { usePageStore } from '@amadeus/store/pageStore'
 import { useUiStore } from '@amadeus/store/uiStore'
 import { ConfirmDialog } from '@amadeus/components/Dialogs'
+import { WikiHoverPreview } from '@amadeus/components/WikiHoverPreview'
+import { AskStringHost } from '@amadeus/components/askString'
 import { fdDirOf } from '@amadeus/lib/fd'
 import { useUiOverlay, type TemplateCtx } from './amadeusOverlayStore'
 import { pageKey } from '@amadeus-shared/links'
 import { fuzzyRank } from '@lcl/engine/fuzzy'
-import { openNote } from './amadeusNav'
+import { openDb, openNote } from './amadeusNav'
 import { insertTemplate, listTemplates } from './amadeusTemplates'
 
 const baseName = (p: string): string => (p.split(/[\\/]/).pop() ?? p).replace(/\.md$/i, '')
@@ -27,11 +29,22 @@ export function AmadeusOverlays() {
     window.addEventListener('amadeus:template-picker', onPick)
     return () => window.removeEventListener('amadeus:template-picker', onPick)
   }, [])
+  // [[xxx.db]] 点击应用内开 db tab(pageStore 发事件解耦,同模板选择器模式)。
+  useEffect(() => {
+    const onOpenDb = (e: Event): void => {
+      const p = (e as CustomEvent<{ path?: string }>).detail?.path
+      if (typeof p === 'string' && p) openDb(p)
+    }
+    window.addEventListener('amadeus:open-db', onOpenDb)
+    return () => window.removeEventListener('amadeus:open-db', onOpenDb)
+  }, [])
   return (
     <>
       {overlay === 'switcher' && <QuickSwitcher />}
       {overlay === 'template' && templateCtx && <TemplatePicker ctx={templateCtx} />}
       <WikiCreateConfirm />
+      <WikiHoverPreview />
+      <AskStringHost />
       {toast && <div className="amx-toast">{toast}</div>}
     </>
   )

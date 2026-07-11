@@ -5,16 +5,30 @@ import { usePageStore } from '@amadeus/store/pageStore'
 import { amadeus } from '@amadeus/api'
 import type { SearchHit, TagCount } from '@amadeus-shared/ipc'
 import { parseWikiLinks, resolvePageName } from '@amadeus-shared/links'
+import { resolveFileName } from '@amadeus/lib/vaultFiles'
 import { openNote } from './amadeusNav'
+import { create } from 'zustand'
+import { useAmadeusPrefs } from './amadeusPrefs'
+import { askString } from '@amadeus/components/askString'
 
 const ps = () => usePageStore.getState()
 const baseName = (p: string): string => (p.split(/[\\/]/).pop() ?? p).replace(/\.md$/i, '')
 
 // ─────────────────────────────── 全文搜索(左栏 tab;后端 = 主进程 vault 索引) ───────────────────────────────
 
+/** 「集合」点击注入搜索词:视图是 singleton,经种子 store 解耦(n 自增以重触发同词)。 */
+export const useSearchSeed = create<{ seed: { q: string; n: number } | null; request(q: string): void }>((set) => ({
+  seed: null,
+  request: (q) => set((s) => ({ seed: { q, n: (s.seed?.n ?? 0) + 1 } })),
+}))
+
 export function AmadeusSearchView() {
   const vaultRoot = usePageStore((s) => s.vaultRoot)
   const [query, setQuery] = useState('')
+  const seed = useSearchSeed((s) => s.seed)
+  useEffect(() => {
+    if (seed) setQuery(seed.q)
+  }, [seed])
   const [hits, setHits] = useState<SearchHit[]>([])
   const seq = useRef(0)
 
@@ -52,6 +66,20 @@ export function AmadeusSearchView() {
       <div className="t2s-search amx-search-box">
         <Search size={13} className="t2s-dim" />
         <input autoFocus value={query} placeholder="搜索全部笔记…" onChange={(e) => setQuery(e.target.value)} />
+        {query.trim() && (
+          <button
+            className="amx-search-save"
+            title="存为集合(左栏可一键回放这次搜索)"
+            onClick={() => {
+              void askString('存为集合', query.trim(), { label: '集合会出现在左栏,点击即重放这次搜索。' }).then((name) => {
+                const n = name?.trim()
+                if (n) useAmadeusPrefs.getState().saveCollection(n, query.trim())
+              })
+            }}
+          >
+            存为集合
+          </button>
+        )}
       </div>
       {!vaultRoot ? (
         <div className="amx-panel-empty">先打开一个 Vault。</div>
@@ -249,7 +277,8 @@ export function AmadeusLocalGraphView() {
           if (r !== activePage && !outs.includes(r)) outs.push(r)
         } else if (!seenGhost.has(n.toLowerCase())) {
           seenGhost.add(n.toLowerCase())
-          ghosts.push(n)
+          // [[xxx.db]]/[[photo.png]] 命中真实文件的不是「未创建页面」,不进幽灵(点击有自己的打开语义)。
+          if (!resolveFileName(n, st.files, activePage)) ghosts.push(n)
         }
       }
       const others = [...new Set([...outs, ...incoming.map((r) => r.path).filter((p) => p !== activePage)])]

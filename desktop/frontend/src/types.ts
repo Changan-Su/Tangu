@@ -588,7 +588,74 @@ declare global {
       setInboxBadge?(count: number): Promise<void>
       onInboxOpen?(cb: () => void): () => void
     }
+    /** Amadeus 页面级共享+发布(web=cloudCollab / 桌面=collab IPC;移动 undefined,共享 UI 据此解闸)。 */
+    amadeusCollab?: {
+      listVaults(): Promise<Array<{ id: string; name: string; role?: string; ownerName?: string | null }>>
+      activeVaultId(): Promise<string>
+      /** 切活动云库(web=localStorage+reload;桌面=切共享镜像)。 */
+      switchVault(id: string): void
+      // 同步共享(owner):共享单位 = 页 + 子页面树
+      pageShare(path: string): Promise<{ share: AmadeusPageShare | null; quota: AmadeusCollabQuota }>
+      createPageShare(path: string, opts: { role?: 'editor' | 'viewer'; expiresDays?: number | null; password?: string | null }): Promise<AmadeusPageShare>
+      updatePageShare(id: string, patch: { role?: 'editor' | 'viewer'; password?: string | null; expiresDays?: number | null; rotate?: boolean }): Promise<AmadeusPageShare>
+      revokePageShare(id: string): Promise<void>
+      setParticipantRole(id: string, userId: string, role: 'editor' | 'viewer'): Promise<void>
+      removeParticipant(id: string, userId: string): Promise<void>
+      // 参与者
+      sharedWithMe(): Promise<Array<{ vaultId: string; path: string; title: string; role: string; ownerName: string | null; localPath?: string }>>
+      leaveShare(id: string): Promise<void>
+      inviteUrl(token: string): string
+      // 发布(公开只读链接)
+      publishes(): Promise<{ shares: Array<{ token: string; mode: string; path: string; createdAt: string }>; quota: AmadeusCollabQuota }>
+      createPublish(mode: 'page' | 'subtree', path: string): Promise<{ token: string; mode: string; path: string; url: string }>
+      revokePublish(token: string): Promise<void>
+      publishUrl(token: string): string
+      // presence
+      heartbeat(page: string | null): void
+      stopHeartbeat(): void
+      onPresence(cb: (list: Array<{ userId: string; username: string; page: string | null; at: number }>) => void): () => void
+      myUserId(): string | null
+    }
+    /** Amadeus 云同步(桌面专属;web/mobile 下为 undefined,设置页/滑块据此隐藏)。 */
+    amadeusSync?: {
+      get(): Promise<AmadeusSyncStatus>
+      setEnabled(on: boolean): Promise<AmadeusSyncStatus>
+      syncNow(): Promise<AmadeusSyncStatus>
+      /** 胶囊滑块:Local↔Cloud 全局切活动 vault;返回与 restoreVault 同形载荷。 */
+      switchSide(side: 'local' | 'cloud'): Promise<{ root: string; pages: string[]; folders: string[]; lastPage?: string; side: 'local' | 'cloud' } | null>
+      onStatus(cb: (s: AmadeusSyncStatus) => void): () => void
+    }
   }
+}
+
+/** 页面级同步共享(分享卡片数据源)。 */
+export interface AmadeusPageShare {
+  id: string
+  path: string
+  title: string
+  inviteToken: string
+  inviteRole: 'editor' | 'viewer'
+  hasPassword: boolean
+  expiresAt: string | null
+  participants: Array<{ userId: string; username: string | null; role: 'editor' | 'viewer'; since: string }>
+}
+
+export interface AmadeusCollabQuota {
+  collab: number
+  publish: number
+}
+
+/** 云同步状态(镜像 electron/amadeus/sync/engine.ts 的 SyncStatus;side 由 IPC get 附带)。 */
+export interface AmadeusSyncStatus {
+  enabled: boolean
+  state: 'disabled' | 'starting' | 'idle' | 'syncing' | 'offline' | 'auth-required' | 'error'
+  lastSyncAt: number | null
+  pending: number
+  conflicts: number
+  skipped: Array<{ path: string; reason: string }>
+  error: string | null
+  /** 仅 get() 响应携带:当前活动 vault 在哪一侧。 */
+  side?: 'local' | 'cloud'
 }
 
 /** 市场卡片(浏览列表)。 */

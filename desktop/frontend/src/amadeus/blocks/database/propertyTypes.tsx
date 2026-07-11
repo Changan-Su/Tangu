@@ -4,7 +4,7 @@
  *  主进程只按 z.string() 放行 type、按 cellValueSchema 校验值,永不需要认识自定义类型。
  *
  *  内置 todo / calendarDate 经此注册(propertyTypes.builtins);第三方经插件 ctx.registerPropertyType。 */
-import { useSyncExternalStore, type ComponentType } from 'react'
+import { useSyncExternalStore, type ComponentType, type ReactNode } from 'react'
 import { COLUMN_TYPES, type CellValue, type ColumnType } from '@amadeus-shared/db/schema'
 
 /** 传给自定义属性 Cell 的最小上下文:value 已按 baseType 经 coerceForDisplay 折算。 */
@@ -18,8 +18,8 @@ export interface PropertyTypeDef {
   type: string
   /** 列菜单/表头显示名。 */
   label: string
-  /** 单字形图标(与 primitive TYPE_META 同风格)。 */
-  icon: string
+  /** 图标:字符/emoji(插件最常用)或 React 元素(内置用 AFFiNE 图标组件),渲染层一律当 ReactNode。 */
+  icon: ReactNode
   /** 落盘/校验/frontmatter 编解所借的 primitive(如 checkbox / text / date)。 */
   baseType: ColumnType
   /** 渲染 + 编辑组件。 */

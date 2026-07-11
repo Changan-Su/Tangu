@@ -675,8 +675,27 @@
   margin: 0.3em 0;
   padding-left: 1.4em;
 }
+/* 列表标记保险:新版 milkdown 的 li 带 data-label(期望主题自绘)且不能指望 UA 默认
+   在所有环境存活(实报「- 列表不显示」)——显式声明 list-style,圆点/序号必显。
+   任务项(li[data-item-type='task'])在后文单独 list-style:none 走自绘复选框,不受影响。 */
+.am-app .milkdown .ProseMirror ul {
+  list-style: disc outside;
+}
+.am-app .milkdown .ProseMirror ul ul {
+  list-style: circle outside;
+}
+.am-app .milkdown .ProseMirror ul ul ul {
+  list-style: square outside;
+}
+.am-app .milkdown .ProseMirror ol {
+  list-style: decimal outside;
+}
 .am-app .milkdown .ProseMirror li {
   margin: 0.1em 0;
+  display: list-item;
+}
+.am-app .milkdown .ProseMirror li::marker {
+  color: var(--text-sec);
 }
 .am-app .milkdown .ProseMirror blockquote {
   margin: 0.4em 0;
@@ -713,6 +732,343 @@
 .am-app .milkdown .ProseMirror pre code {
   background: none;
   padding: 0;
+}
+/* 代码块工具条(codeBlock.ts widget):悬停浮现于块右上;折行态 pre-wrap */
+.am-app .milkdown .ProseMirror pre.amx-code {
+  position: relative;
+}
+.am-app .amx-code-tools {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.am-app pre.amx-code:hover .amx-code-tools,
+.am-app .amx-code-tools:focus-within {
+  opacity: 1;
+}
+.am-app .amx-code-lang {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card, var(--bg));
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 4px;
+  max-width: 110px;
+}
+.am-app .amx-code-btn {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card, var(--bg));
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 7px;
+  cursor: pointer;
+}
+.am-app .amx-code-btn:hover {
+  color: var(--text);
+}
+.am-app .amx-code-btn.on {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+.am-app pre.amx-code-wrap code {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 块级左右边缘落点(拖拽中浮现):命中显示 accent 竖条 = 与该块并排成两栏 */
+.am-app .block-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  z-index: 5;
+}
+.am-app .block-edge[data-side='left'] {
+  left: -10px;
+}
+.am-app .block-edge[data-side='right'] {
+  right: -10px;
+}
+.am-app .block-edge::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 50%;
+  width: 3px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 0.1s ease;
+}
+.am-app .block-edge[data-over]::after {
+  background: var(--primary);
+}
+/* 块选中(Notion 式):accent 描边 + 淡底,非编辑态 */
+.am-app .block-host[data-selected] {
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--primary) 7%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 45%, transparent);
+}
+/* 页内查找:浮条 + 命中高亮 */
+.am-app .page-view {
+  position: relative;
+}
+.am-app .amx-findbar {
+  position: sticky;
+  top: 8px;
+  z-index: 30;
+  margin-left: auto;
+  width: fit-content;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-card, var(--bg));
+  border-radius: 8px;
+  box-shadow: 0 0 0 0.5px var(--border), 0 4px 16px rgba(0, 0, 0, 0.12);
+  padding: 5px 7px;
+}
+.am-app .amx-findbar input {
+  width: 180px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+.am-app .amx-findbar-count {
+  color: var(--text-faint, var(--text-muted));
+  font-size: 11px;
+  min-width: 32px;
+  text-align: right;
+}
+.am-app .amx-findbar button {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.am-app .amx-findbar button:hover {
+  background: var(--overlay-light, rgba(127, 127, 127, 0.1));
+  color: var(--text);
+}
+.am-app .amx-find-hit {
+  background: color-mix(in srgb, var(--accent-ink, #6c5ce7) 22%, transparent);
+  border-radius: 2px;
+}
+.am-app .amx-find-active {
+  background: color-mix(in srgb, #f5a623 55%, transparent);
+  outline: 1px solid color-mix(in srgb, #f5a623 80%, transparent);
+}
+/* 书签卡(裸 URL 块):og 卡 / YouTube 嵌入 / 就地编辑 */
+.am-app .amx-bm {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  text-decoration: none;
+  color: inherit;
+  overflow: hidden;
+  transition: background var(--dur-fast) var(--ease-apple);
+}
+.am-app a.amx-bm:hover {
+  background: var(--surface);
+  text-decoration: none;
+}
+.am-app .amx-bm-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.am-app .amx-bm-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.am-app .amx-bm-desc {
+  font-size: 12px;
+  color: var(--text-sec);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.am-app .amx-bm-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.am-app .amx-bm-favicon {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+}
+.am-app .amx-bm-thumb {
+  flex: 0 0 auto;
+  width: 130px;
+  margin: -10px -12px -10px 0;
+  overflow: hidden;
+}
+.am-app .amx-bm-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.am-app .amx-bm-tools {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.am-app .amx-bm:hover .amx-bm-tools {
+  opacity: 1;
+}
+.am-app .amx-bm-tool {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card, var(--bg));
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+.am-app .amx-bm-tool:hover {
+  color: var(--text);
+}
+.am-app .amx-bm-editing {
+  padding: 6px 8px;
+}
+.am-app .amx-bm-edit {
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.am-app .amx-bm-video {
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+}
+.am-app .amx-bm-iframe {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: none;
+  display: block;
+  background: #000;
+}
+.am-app .amx-bm-videofoot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.am-app .amx-bm-open {
+  color: var(--primary);
+  text-decoration: none;
+}
+.am-app .amx-bm-videofoot .amx-bm-tools {
+  position: static;
+  margin-left: auto;
+  opacity: 1;
+}
+/* callout 折叠([!x]-):收起只留首段;chevron 徽章旁,折叠时不旋转 */
+.am-app .callout-fold {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 4px;
+  margin-left: 2px;
+  cursor: pointer;
+  display: inline-block;
+  transform: rotate(90deg);
+  transition: transform 0.15s ease;
+  vertical-align: -1px;
+}
+.am-app .callout-fold.collapsed {
+  transform: rotate(0deg);
+}
+.am-app .callout.callout-collapsed > *:not(:first-child) {
+  display: none;
+}
+/* 标题小节折叠:chevron 悬停浮现于行左缘;折叠时常显 + 行数徽章 */
+.amx-hfold-wrap {
+  position: relative;
+}
+.amx-hfold {
+  position: absolute;
+  left: -46px;
+  top: 0.55em;
+  z-index: 3;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-faint, var(--text-muted));
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: rotate(90deg);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.amx-hfold-wrap:hover .amx-hfold {
+  opacity: 1;
+}
+.amx-hfold:hover {
+  background: var(--overlay-light, rgba(127, 127, 127, 0.1));
+  color: var(--text);
+}
+.amx-hfold.folded {
+  opacity: 1;
+  transform: rotate(0deg);
+}
+.amx-hfold-count {
+  position: absolute;
+  left: -74px;
+  top: 0.62em;
+  z-index: 3;
+  font-size: 10px;
+  color: var(--text-faint, var(--text-muted));
+  background: var(--overlay-light, rgba(127, 127, 127, 0.08));
+  border-radius: 999px;
+  padding: 1px 6px;
 }
 .am-app .milkdown .ProseMirror a {
   color: var(--primary);
@@ -780,12 +1136,12 @@
      (spread -8px 使 16px 盒下不可见);用 transition 而非 animation,
      只在状态翻转时插值飞出——初次渲染已勾选项直接呈现终态,不放炮。 */
   box-shadow:
-    4px 0 0 -8px var(--accent, #6c5ce7),
-    -4px 0 0 -8px var(--accent, #6c5ce7),
-    0 4px 0 -8px var(--accent, #6c5ce7),
-    0 -4px 0 -8px var(--accent, #6c5ce7),
-    3px 3px 0 -8px var(--accent, #6c5ce7),
-    -3px -3px 0 -8px var(--accent, #6c5ce7);
+    4px 0 0 -8px var(--accent-ink, #6c5ce7),
+    -4px 0 0 -8px var(--accent-ink, #6c5ce7),
+    0 4px 0 -8px var(--accent-ink, #6c5ce7),
+    0 -4px 0 -8px var(--accent-ink, #6c5ce7),
+    3px 3px 0 -8px var(--accent-ink, #6c5ce7),
+    -3px -3px 0 -8px var(--accent-ink, #6c5ce7);
 }
 .am-app .milkdown .ProseMirror li[data-item-type='task']:hover::before {
   border-color: var(--primary);
@@ -895,6 +1251,9 @@
   font-size: 11px;
   font-weight: 600;
   font-family: var(--font-mono);
+}
+.am-app .slash-icon svg {
+  font-size: 17px; /* AFFiNE 图标 1em 随字号:盒内 11px 太小,单独放大 */
 }
 .am-app .slash-item[data-active] .slash-icon {
   background: var(--drop);
@@ -1134,6 +1493,16 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* 文件候选(.db/附件)的小图标:与文字基线对齐,弱化不抢名字 */
+.am-app .wiki-item-ficon {
+  display: inline-flex;
+  vertical-align: -2px;
+  margin-right: 4px;
+  color: var(--text-muted);
+}
+.am-app .wiki-item-ficon svg {
+  font-size: 13px;
+}
 .am-app .wiki-item-path {
   font-size: 11px;
   color: var(--text-muted);
@@ -1276,7 +1645,7 @@
   background-clip: content-box;
 }
 
-/* Keyboard focus rings (mouse clicks stay clean) */
+/* Keyboard focus rings (mouse clicks stay clean;注意文本输入框按规范点击聚焦也算 :focus-visible,须逐个豁免) */
 .am-app :focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 1px;
@@ -1284,7 +1653,8 @@
 }
 .am-app .cmd-input:focus-visible,
 .am-app .page-rename:focus-visible,
-.am-app .page-title-edit:focus-visible {
+.am-app .page-title-edit:focus-visible,
+.am-app .amx-title-input:focus-visible {
   outline: none;
 }
 

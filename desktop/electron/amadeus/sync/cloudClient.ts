@@ -1,0 +1,178 @@
+/**
+ * Amadeus 云 vault REST 客户端(Electron 主进程,Node 20 全局 fetch/FormData)。
+ * 契约冻结镜像 server/microserver/amadeus/routes.ts;主进程能带 Authorization 头,
+ * 不需要 web 端的 query-token 变体。所有写请求带 X-Amadeus-Client(回声抑制)。
+ */
+
+export interface CloudVaultInfo {
+  id: string
+  name: string
+  lastChangeSeq: number
+}
+
+export interface CloudTreeEntry {
+  path: string
+  kind: 'page' | 'db' | 'binary'
+  seq: number
+  hash: string | null
+  size: number
+}
+
+export interface CloudTree {
+  folders: string[]
+  entries: CloudTreeEntry[]
+  seq: number
+}
+
+export interface CloudChange {
+  seq: number
+  type: 'page' | 'db' | 'binary' | 'structure'
+  op: 'write' | 'delete' | 'move' | 'mkdir' | 'rename-folder' | 'move-folder' | 'delete-folder'
+  path: string
+  newPath: string | null
+  fileSeq: number | null
+  origin: { client: string | null; actor: string }
+}
+
+export class CloudHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: any,
+    url: string,
+  ) {
+    super(`cloud http ${status} on ${url}`)
+  }
+}
+
+export interface CloudClientConfig {
+  baseUrl: string // 形如 https://forsion.net(不带 /api)
+  token: string
+  clientId: string
+}
+
+export type CloudClient = ReturnType<typeof createCloudClient>
+
+export function createCloudClient(cfg: CloudClientConfig) {
+  const api = `${cfg.baseUrl.replace(/\/+$/, '')}/api/amadeus`
+
+  const request = async (
+    method: string,
+    url: string,
+    init?: { json?: unknown; form?: FormData; timeoutMs?: number },
+  ): Promise<any> => {
+    const headers: Record<string, string> = { Authorization: `Bearer ${cfg.token}` }
+    if (method !== 'GET') headers['X-Amadeus-Client'] = cfg.clientId
+    let body: any
+    if (init?.json !== undefined) {
+      headers['Content-Type'] = 'application/json'
+      body = JSON.stringify(init.json)
+    } else if (init?.form) {
+      body = init.form // fetch 自带 multipart boundary
+    }
+    const res = await fetch(url, {
+      method,
+      headers,
+      body,
+      signal: AbortSignal.timeout(init?.timeoutMs ?? 30_000),
+    })
+    if (!res.ok) {
+      let parsed: any = null
+      try {
+        parsed = await res.json()
+      } catch {
+        /* 非 JSON 错误体 */
+      }
+      throw new CloudHttpError(res.status, parsed, url)
+    }
+    return res.json()
+  }
+
+  const q = (params: Record<string, string>): string => new URLSearchParams(params).toString()
+
+  return {
+    clientId: cfg.clientId,
+
+    async listVaults(): Promise<CloudVaultInfo[]> {
+      const j = await request('GET', `${api}/vaults`)
+      return (j.vaults ?? []).map((v: any) => ({
+        id: String(v.id),
+        name: String(v.name),
+        lastChangeSeq: Number(v.lastChangeSeq ?? 0),
+      }))
+    },
+
+    /** 全量树。依赖 P1 服务端在 tree 响应新增的 entries[](path/kind/seq/hash/size)。 */
+    async tree(vaultId: string): Promise<CloudTree> {
+      const j = await request('GET', `${api}/vaults/${vaultId}/tree`)
+      if (!Array.isArray(j.entries)) {
+        throw new Error('server too old: tree has no entries[] (deploy the amadeus microserver update)')
+      }
+      return {
+        folders: j.folders ?? [],
+        seq: Number(j.seq ?? 0),
+        entries: j.entries.map((e: any) => ({
+          path: String(e.path),
+          kind: e.kind,
+          seq: Number(e.seq ?? 0),
+          hash: e.hash ?? null,
+          size: Number(e.size ?? 0),
+        })),
+      }
+    },
+
+    async getFile(vaultId: string, path: string): Promise<{ content: string; seq: number; hash: string | null }> {
+      const j = await request('GET', `${api}/vaults/${vaultId}/file?${q({ path })}`)
+      return { content: String(j.content ?? ''), seq: Number(j.seq ?? 0), hash: j.hash ?? null }
+    },
+
+    /** CAS 写文本。409 → CloudHttpError,body = {code:'EXISTS'|'CONFLICT', seq, content}。 */
+    putFile(vaultId: string, path: string, content: string, baseSeq: number, force = false): Promise<{ seq: number; hash: string }> {
+      return request('PUT', `${api}/vaults/${vaultId}/file`, {
+        json: { path, content, baseSeq, ...(force ? { force: true } : {}) },
+      })
+    },
+
+    async deleteFile(vaultId: string, path: string): Promise<void> {
+      await request('DELETE', `${api}/vaults/${vaultId}/file?${q({ path })}`)
+    },
+
+    move(vaultId: string, from: string, to: string): Promise<{ seq: number }> {
+      return request('POST', `${api}/vaults/${vaultId}/move`, { json: { from, to } })
+    },
+
+    renameFolder(vaultId: string, path: string, newName: string): Promise<unknown> {
+      return request('POST', `${api}/vaults/${vaultId}/folders/rename`, { json: { path, newName } })
+    },
+
+    moveFolder(vaultId: string, path: string, dest: string): Promise<unknown> {
+      return request('POST', `${api}/vaults/${vaultId}/folders/move`, { json: { path, dest } })
+    },
+
+    async deleteFolder(vaultId: string, path: string): Promise<void> {
+      await request('DELETE', `${api}/vaults/${vaultId}/folders?${q({ path })}`)
+    },
+
+    putBinary(vaultId: string, path: string, bytes: Buffer, ifAbsent = false): Promise<{ path: string; size: number; seq: number }> {
+      const form = new FormData()
+      form.set('path', path)
+      if (ifAbsent) form.set('ifAbsent', 'true')
+      form.set('file', new Blob([new Uint8Array(bytes)]), path.split('/').pop() || 'file')
+      return request('POST', `${api}/vaults/${vaultId}/binary`, { form, timeoutMs: 120_000 })
+    },
+
+    /** 精确路径取资产字节(ref=vault 相对路径,不传 page → 命中 exact 候选)。 */
+    async getAsset(vaultId: string, path: string): Promise<Buffer> {
+      const res = await fetch(`${api}/vaults/${vaultId}/asset?${q({ ref: path })}`, {
+        headers: { Authorization: `Bearer ${cfg.token}` },
+        signal: AbortSignal.timeout(120_000),
+      })
+      if (!res.ok) throw new CloudHttpError(res.status, null, 'asset:' + path)
+      return Buffer.from(await res.arrayBuffer())
+    },
+
+    async changes(vaultId: string, since: number): Promise<{ changes: CloudChange[]; seq: number }> {
+      const j = await request('GET', `${api}/vaults/${vaultId}/changes?${q({ since: String(since) })}`)
+      return { changes: j.changes ?? [], seq: Number(j.seq ?? 0) }
+    },
+  }
+}

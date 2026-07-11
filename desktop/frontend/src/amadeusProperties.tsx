@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { Plus, X } from 'lucide-react'
 import { usePageStore } from '@amadeus/store/pageStore'
+import { askString } from '@amadeus/components/askString'
 
 const ps = () => usePageStore.getState()
 
@@ -43,8 +44,8 @@ export function AmadeusPropertiesPanel() {
     ps().setFmExtra(Object.keys(obj).length ? stringifyYaml(obj).trimEnd() : '')
   }
 
-  const addProp = (): void => {
-    const name = window.prompt('属性名')?.trim()
+  const addProp = async (): Promise<void> => {
+    const name = (await askString('添加属性', '', { label: '写入笔记 frontmatter 的键名' }))?.trim()
     if (!name) return
     if (/^amadeus_/.test(name)) { window.alert('amadeus_* 是保留键'); return }
     if (parsed.entries.some((e) => e.key === name)) return
@@ -60,7 +61,7 @@ export function AmadeusPropertiesPanel() {
         <button className="amx-props-chip" onClick={() => setOpen((o) => !o)}>
           {count === null ? '属性(原文)' : `属性 ${count}`}{open ? ' ▾' : ' ▸'}
         </button>
-        <button className="amx-props-add" title="添加属性" onClick={addProp}><Plus size={12} /></button>
+        <button className="amx-props-add" title="添加属性" onClick={() => void addProp()}><Plus size={12} /></button>
       </div>
       {open && (parsed.ok ? (
         <div className="amx-props-rows">

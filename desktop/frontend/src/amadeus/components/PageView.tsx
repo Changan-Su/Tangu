@@ -1,4 +1,5 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
+import { create } from 'zustand'
 import {
   DndContext,
   DragOverlay,
@@ -13,8 +14,63 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core'
 import { usePageStore, type Status } from '../store/pageStore'
+import { findTotal, useFindStore } from '../blocks/markdown/findInPage'
+import { BlockSelectionKeys } from '../store/blockSelection'
 import { Row } from './Row'
 import { BacklinksPanel } from './BacklinksPanel'
+
+/** 页内查找浮条(Cmd/Ctrl+F 在编辑器内呼出):输入 / x/y 计数 / 上下条 / 关闭。 */
+function FindBar() {
+  const query = useFindStore((s) => s.query)
+  const active = useFindStore((s) => s.active)
+  const counts = useFindStore((s) => s.counts)
+  void counts // 订阅计数变化以刷新 x/y
+  const total = findTotal()
+  // 激活命中变化 → 滚到可视区(等装饰画完一帧)。
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      document.querySelector('.amx-find-active')?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    })
+    return () => cancelAnimationFrame(id)
+  }, [active, query, total])
+  return (
+    <div className="amx-findbar">
+      <input
+        autoFocus
+        placeholder="在本页查找…"
+        value={query}
+        onChange={(e) => useFindStore.getState().setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') useFindStore.getState().step(e.shiftKey ? -1 : 1)
+          else if (e.key === 'Escape') useFindStore.getState().close()
+          e.stopPropagation()
+        }}
+      />
+      <span className="amx-findbar-count">{total ? `${Math.min(active + 1, total)}/${total}` : query ? '0' : ''}</span>
+      <button onClick={() => useFindStore.getState().step(-1)} title="上一个(Shift+Enter)" aria-label="previous match">‹</button>
+      <button onClick={() => useFindStore.getState().step(1)} title="下一个(Enter)" aria-label="next match">›</button>
+      <button onClick={() => useFindStore.getState().close()} title="关闭(Esc)" aria-label="close find">✕</button>
+    </div>
+  )
+}
+
+/** 标题小节折叠(Obsidian 式):key = 标题块 id(页内唯一),会话态不落盘;
+ *  跨页残留无害(别页的 id 撞不上)。折叠 = 隐藏其后连续的行,直到下一个同级或更高级标题行。 */
+const useHeadFolds = create<{ folds: Record<string, true>; toggle(id: string): void }>((set) => ({
+  folds: {},
+  toggle: (id) =>
+    set((s) => {
+      const folds = { ...s.folds }
+      if (folds[id]) delete folds[id]
+      else folds[id] = true
+      return { folds }
+    }),
+}))
+
+const headingLevel = (content: string | undefined): number => {
+  const m = content ? /^(#{1,6})\s/.exec(content) : null
+  return m ? m[1].length : 0
+}
 
 function statusLabel(s: Status): string {
   return s === 'saving' ? '保存中…' : s === 'loading' ? '加载中…' : s === 'ready' ? '已保存' : ''
@@ -47,9 +103,51 @@ export function PageView({ bare = false }: { bare?: boolean } = {}) {
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+  const folds = useHeadFolds((s) => s.folds)
+  const findOpen = useFindStore((s) => s.open)
+
+  // 兜底:焦点不在块编辑器里(块选中态/空白处)时的 Cmd+Z / Cmd+Shift+Z / Cmd+Y → 文档级撤销。
+  // 焦点在块内时块自身 handleKeyDown 已处理并 stopPropagation;输入框/整篇编辑器(contenteditable)留原生撤销。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!(e.metaKey || e.ctrlKey)) return
+      const k = e.key.toLowerCase()
+      if (k !== 'z' && k !== 'y') return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      e.preventDefault()
+      const st = usePageStore.getState()
+      if (k === 'y' || e.shiftKey) st.redo()
+      else st.undo()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   if (!manifest) return <div className="empty-state">打开一个 Vault，或新建页面开始。</div>
   const root = manifest.root
+
+  // 标题小节折叠:每行取首块的标题级别;被某个折叠标题覆盖的行整行隐藏(拖拽中临时全展开,防拖进黑洞)。
+  const rowMeta = root.children.map((row) => {
+    const firstId = row.columns[0]?.children[0]?.ref
+    return { firstId, level: headingLevel(firstId ? blocks[firstId]?.content : undefined) }
+  })
+  const sectionSpan = (i: number): number => {
+    let c = 0
+    for (let j = i + 1; j < rowMeta.length; j++) {
+      if (rowMeta[j].level && rowMeta[j].level <= rowMeta[i].level) break
+      c++
+    }
+    return c
+  }
+  const hiddenRows = new Set<number>()
+  if (!activeId) {
+    for (let i = 0; i < rowMeta.length; i++) {
+      const m = rowMeta[i]
+      if (!m.level || !m.firstId || !folds[m.firstId]) continue
+      for (let j = i + 1; j <= i + sectionSpan(i); j++) hiddenRows.add(j)
+    }
+  }
 
   const titleText = manifest.title || activePage?.split('/').pop() || ''
   const startTitleEdit = (): void => {
@@ -93,7 +191,11 @@ export function PageView({ bare = false }: { bare?: boolean } = {}) {
     if (!e.over) return
     const overId = String(e.over.id)
 
-    if (overId.startsWith('edge:')) {
+    if (overId.startsWith('bedge:')) {
+      // 块级并排:只与目标那一块成两栏(Notion 语义)
+      const [, targetBlock, side] = overId.split(':')
+      usePageStore.getState().pairBlocks(activeBlock, targetBlock, side === 'left' ? 'left' : 'right')
+    } else if (overId.startsWith('edge:')) {
       const [, rowId, side] = overId.split(':')
       addColumnWithBlock(rowId, activeBlock, side === 'left' ? 'left' : 'right')
     } else if (overId.startsWith('gap:')) {
@@ -107,7 +209,19 @@ export function PageView({ bare = false }: { bare?: boolean } = {}) {
   }
 
   return (
-    <div className="page-view" data-bare={bare || undefined}>
+    <div
+      className="page-view"
+      data-bare={bare || undefined}
+      onKeyDownCapture={(e) => {
+        // 编辑器内 Cmd/Ctrl+F → 页内查找(焦点在编辑器里才接管,别抢应用全局的查找)
+        if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F') && !e.shiftKey && !e.altKey) {
+          e.preventDefault()
+          useFindStore.getState().openBar()
+        }
+      }}
+    >
+      {findOpen && <FindBar />}
+      <BlockSelectionKeys />
       {!bare && (
       <header className="page-header">
         {editingTitle ? (
@@ -149,12 +263,32 @@ export function PageView({ bare = false }: { bare?: boolean } = {}) {
       >
         <div className="stack" data-dnd={activeId ? '' : undefined}>
           <RowGap index={-1} />
-          {root.children.map((row, i) => (
-            <Fragment key={row.id}>
-              <Row row={row} />
-              <RowGap index={i} />
-            </Fragment>
-          ))}
+          {root.children.map((row, i) => {
+            if (hiddenRows.has(i)) return null
+            const meta = rowMeta[i]
+            const span = meta.level > 0 ? sectionSpan(i) : 0
+            const folded = !!(meta.firstId && folds[meta.firstId])
+            return (
+              <Fragment key={row.id}>
+                {span > 0 && meta.firstId ? (
+                  <div className="amx-hfold-wrap">
+                    <button
+                      className={`amx-hfold${folded ? ' folded' : ''}`}
+                      title={folded ? `展开小节(${span} 行)` : '折叠小节'}
+                      onClick={() => useHeadFolds.getState().toggle(meta.firstId!)}
+                    >
+                      ›
+                    </button>
+                    {folded && <span className="amx-hfold-count">{span}</span>}
+                    <Row row={row} />
+                  </div>
+                ) : (
+                  <Row row={row} />
+                )}
+                <RowGap index={i} />
+              </Fragment>
+            )
+          })}
         </div>
         <DragOverlay dropAnimation={null}>
           {activeId ? <div className="drag-overlay">{previewText(blocks[activeId]?.content)}</div> : null}

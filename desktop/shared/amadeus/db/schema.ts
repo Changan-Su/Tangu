@@ -28,6 +28,36 @@ export interface DbRow {
   cells: Record<string, CellValue> // key = column.id
 }
 
+/** 核心视图类型;DbView.type 放行任意字符串(前向兼容),渲染端未知类型回退表格。 */
+export type DbViewType = 'table' | 'kanban' | 'calendar' | 'gallery'
+
+/** 视图筛选条件(扁平 AND;op 语义见 viewQuery.ts,未知 op 视为恒真不丢行)。 */
+export interface DbViewFilter {
+  colId: string
+  op: string
+  /** empty/notempty/checked/unchecked 等一元 op 不用 value。 */
+  value?: CellValue
+}
+
+/** 命名视图(AFFiNE/Notion 式):同一数据的多种呈现,嵌入块顶部 tab 切换。 */
+export interface DbView {
+  id: string
+  name: string
+  type: string
+  /** kanban:分组列 id(select);缺 = 渲染端自动挑第一个 select 列。 */
+  groupBy?: string
+  /** calendar:日期列 id(基类 date 或 calendarDate);缺 = 自动挑第一个日期列。 */
+  dateCol?: string
+  /** 每视图筛选(全部满足才显示);缺 = 不筛。 */
+  filters?: DbViewFilter[]
+  /** 每视图排序(落盘持久,不再是临时视图态);缺 = 文件行序。 */
+  sort?: { colId: string; dir: 'asc' | 'desc' }
+  /** 本视图隐藏的列 id(首列身份列不可隐藏,渲染端强制)。 */
+  hidden?: string[]
+  /** 表格视图页脚统计:colId → 统计方式(count/sum/avg/min/max/checked/unchecked)。 */
+  stats?: Record<string, string>
+}
+
 /** 「笔记视图」数据源(Bases 式):行 = folder 里的笔记(实时)。 */
 export interface DbSource {
   folder: string // vault 相对;'' = 整库
@@ -41,6 +71,8 @@ export interface DbFile {
   source?: DbSource
   columns: DbColumn[]
   rows: DbRow[] // 经典表:数组顺序 = 行的规范顺序;笔记视图:恒为 []
+  /** 命名视图列表;缺 = 单「表格」默认视图(旧文件零迁移,首次增改视图时才物化)。 */
+  views?: DbView[]
 }
 
 /** 用户可选的列类型(picker 列表)。'page' 不在内:它是笔记视图自动创建的唯一身份列(Page Name),系统专用。 */
@@ -63,12 +95,26 @@ const dbRowSchema = z.object({
   id: z.string().min(1),
   cells: z.record(z.string(), cellValueSchema),
 })
+const dbViewSchema = z.object({
+  id: z.string().min(1),
+  name: z.string(),
+  type: z.string().min(1), // 未知类型放行:渲染端回退表格,不丢配置
+  groupBy: z.string().optional(),
+  dateCol: z.string().optional(),
+  filters: z
+    .array(z.object({ colId: z.string().min(1), op: z.string().min(1), value: cellValueSchema.optional() }))
+    .optional(),
+  sort: z.object({ colId: z.string().min(1), dir: z.enum(['asc', 'desc']) }).optional(),
+  hidden: z.array(z.string()).optional(),
+  stats: z.record(z.string(), z.string()).optional(),
+})
 export const dbFileSchema = z.object({
   version: z.number().int().min(1),
   name: z.string(),
   source: z.object({ folder: z.string() }).optional(),
   columns: z.array(dbColumnSchema),
   rows: z.array(dbRowSchema),
+  views: z.array(dbViewSchema).optional(),
 })
 
 /** 短随机 id(列/行):8 位 base36,表格规模下碰撞可忽略。 */

@@ -1,8 +1,12 @@
-/** 内置属性类型:todo(勾选,但仅被 ToDo List View 识别)+ calendarDate(带时刻/起止的日期,被 Calendar View 识别)。
- *  经属性注册表注册(与三方插件同一入口),自我 dogfood 该 API。side-effect import 于 bootstrap,始终在场
- *  (视图依赖它们,故不做成可禁用插件)。 */
+/** 内置属性类型:todo(勾选,但仅被 ToDo List View 识别)+ calendarDate(带时刻/起止的日期,被 Calendar View 识别)
+ *  + relation(关联页面,存 [[链接]])。经属性注册表注册(与三方插件同一入口),自我 dogfood 该 API。
+ *  side-effect import 于 bootstrap,始终在场(视图依赖它们,故不做成可禁用插件)。 */
 import { useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { parseCalDate, fmtCalDate, splitSide } from '@amadeus-shared/db/calDate'
+import { pageKey } from '@amadeus-shared/links'
+import { fuzzyScore } from '../../lib/fuzzy'
+import { usePageStore } from '../../store/pageStore'
+import { CheckBoxCheckSolidIcon, LinkedPageIcon, TodayIcon } from '../../components/icons'
 import { registerPropertyType, type PropCellProps } from './propertyTypes'
 
 // ── todo:baseType=checkbox,渲染同勾选框 ──────────────────────────────────────
@@ -92,20 +96,121 @@ function CalendarDateCell({ value, onChange }: PropCellProps) {
   )
 }
 
+// ── relation:baseType=text,存 `[[链接]]`(裸名或 dir/Name|Name);chip 点开笔记,✎ 换关联 ────
+const REL_RE = /^\[\[([^\]\n]+)\]\]$/
+
+function RelationCell({ value, onChange }: PropCellProps) {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  const inner = REL_RE.exec(raw)?.[1] ?? ''
+  const label = (inner.split('|')[1] ?? inner.split('|')[0] ?? '').trim()
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
+  const open = (e: ReactMouseEvent): void => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setPos({ x: Math.min(r.left, window.innerWidth - 260), y: Math.min(r.bottom + 4, window.innerHeight - 300) })
+  }
+  return (
+    <>
+      {label ? (
+        <div className="amx-db-urlcell">
+          <button
+            className="amx-db-wikilink"
+            onClick={() => usePageStore.getState().openWikiLink(inner.split('|')[0].trim().replace(/\.md$/i, ''))}
+            title={inner}
+          >
+            {label}
+          </button>
+          <button className="amx-db-edit" onClick={open} title="更换关联页面" aria-label="pick relation">✎</button>
+        </div>
+      ) : (
+        <button className="amx-db-cellbtn" onClick={open}>
+          {raw ? <span className="amx-db-urltext">{raw}</span> : <span className="amx-db-blank">空</span>}
+        </button>
+      )}
+      {pos && (
+        <RelationPicker
+          x={pos.x}
+          y={pos.y}
+          onClose={() => setPos(null)}
+          onPick={(linkInner) => {
+            onChange(linkInner ? `[[${linkInner}]]` : undefined)
+            setPos(null)
+          }}
+        />
+      )}
+    </>
+  )
+}
+
+/** 页面选择器:模糊搜索全库笔记,「唯一即最短」插入(与 [[ 补全同语义)。 */
+function RelationPicker({ x, y, onPick, onClose }: {
+  x: number
+  y: number
+  onPick: (linkInner: string | null) => void
+  onClose: () => void
+}) {
+  const [q, setQ] = useState('')
+  const pages = usePageStore.getState().pages
+  const base = (p: string): string => (p.split(/[\\/]/).pop() ?? p).replace(/\.md$/i, '')
+  const dupes = new Map<string, number>()
+  for (const p of pages) dupes.set(pageKey(base(p)), (dupes.get(pageKey(base(p))) ?? 0) + 1)
+  const results = (q
+    ? pages
+        .map((p) => {
+          const sName = fuzzyScore(q, base(p))
+          const s = sName !== null ? sName + 1000 : fuzzyScore(q, p)
+          return s === null ? null : { p, s }
+        })
+        .filter((x): x is { p: string; s: number } => x !== null)
+        .sort((a, b) => b.s - a.s)
+        .map((x) => x.p)
+    : pages
+  ).slice(0, 12)
+  const linkInner = (p: string): string =>
+    (dupes.get(pageKey(base(p))) ?? 0) > 1 ? `${p.replace(/\\/g, '/').replace(/\.md$/i, '')}|${base(p)}` : base(p)
+  return (
+    <div className="amx-db-popwrap" onMouseDown={onClose}>
+      <div className="amx-db-pop" style={{ left: x, top: y }} onMouseDown={(e) => e.stopPropagation()}>
+        <input
+          className="amx-db-pop-input"
+          autoFocus
+          placeholder="搜索页面…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') onClose()
+            else if (e.key === 'Enter' && results[0]) onPick(linkInner(results[0]))
+          }}
+        />
+        <div className="amx-db-pop-list">
+          {results.map((p) => (
+            <button key={p} className="amx-db-opt" onClick={() => onPick(linkInner(p))}>
+              <span className="amx-db-relname">{base(p)}</span>
+              <span className="amx-db-relpath">{p.replace(/\\/g, '/').split('/').slice(0, -1).join('/') || '/'}</span>
+            </button>
+          ))}
+          {results.length === 0 && <div className="amx-db-blank">无匹配页面</div>}
+        </div>
+        <button className="amx-db-opt amx-db-opt-clear" onClick={() => onPick(null)}>清空关联</button>
+      </div>
+    </div>
+  )
+}
+
 /** 注册内置类型(bootstrap 期 side-effect import 触发一次)。 */
 let done = false
 export function registerBuiltinPropertyTypes(): void {
   if (done) return
   done = true
-  registerPropertyType({ type: 'todo', label: '待办', icon: '✓', baseType: 'checkbox', Cell: TodoCell })
+  registerPropertyType({ type: 'todo', label: '待办', icon: <CheckBoxCheckSolidIcon />, baseType: 'checkbox', Cell: TodoCell })
   registerPropertyType({
     type: 'calendarDate',
     label: '日历日期',
-    icon: '🗓',
+    icon: <TodayIcon />,
     baseType: 'text',
     Cell: CalendarDateCell,
     sortValue: (v) => (typeof v === 'string' ? v : ''),
   })
+  registerPropertyType({ type: 'relation', label: '关联', icon: <LinkedPageIcon />, baseType: 'text', Cell: RelationCell })
 }
 
 registerBuiltinPropertyTypes()

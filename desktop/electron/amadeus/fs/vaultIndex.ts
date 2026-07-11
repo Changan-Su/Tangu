@@ -21,6 +21,17 @@ interface Entry {
   embeds: string[] // distinct raw `![[note#id]]` targets this note embeds
   tags: string[]
   blocks: { id: string; content: string }[] // inline blocks this note owns
+  /** fm `icon:` 的页面 emoji(树/标题展示);缺 = 无。 */
+  icon?: string
+}
+
+/** 从原文抠 frontmatter 的 icon 键(带引号可容;不整套解析 YAML,一个键不值得)。 */
+function parseFmIcon(raw: string): string | undefined {
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(raw)?.[1]
+  if (!fm) return undefined
+  const m = /^icon:[ \t]*["']?([^"'\r\n]+?)["']?[ \t]*$/m.exec(fm)
+  const v = m?.[1]?.trim()
+  return v || undefined
 }
 
 const READ_CONCURRENCY = 16
@@ -101,7 +112,15 @@ export class VaultIndex {
       embeds: parseEmbeds(raw), // raw `note#id` targets (matched note-scoped on demand)
       tags: parseTags(text),
       blocks,
+      icon: parseFmIcon(raw),
     }
+  }
+
+  /** 全库页面 emoji 图标(path → icon;只含设置了的)。 */
+  pageIcons(): Record<string, string> {
+    const out: Record<string, string> = {}
+    for (const e of this.entries.values()) if (e.icon) out[e.path] = e.icon
+    return out
   }
 
   /** Resolve a `![[note#id]]` embed to its content + owning note (note-scoped by id). */

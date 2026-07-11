@@ -105,6 +105,8 @@ const amadeusSpace: SpaceDefinition = {
   name: () => app().tr('space.amadeus'),
   icon: NotebookText,
   sidebarDefaults: AMADEUS_SIDE_VIEWS,
+  // 左栏(笔记/搜索/标签)= 可自由拖宽 + 记住宽度(否则每次钉回黄金分割默认,折叠再开也丢用户调节的宽度)。
+  resizableSides: { left: true },
   // 不定义 newPage:＋ 与「关掉最后一个主区 view」统一落到 launcher 启动器(与 Tangu Space 一致),
   // 启动器按当前 Space 列出可用视图 + 最近使用;「新建笔记」成为启动器里的一项。
   /** 编辑器(主)→ 左栏(笔记 + 搜索/标签 同组 tab)→ 右栏(大纲 + 反链 同组 tab)。

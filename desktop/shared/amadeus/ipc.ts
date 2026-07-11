@@ -33,6 +33,14 @@ export const IPC = {
   renameFolder: 'folder:rename',
   deleteFolder: 'folder:delete',
   moveFolder: 'folder:move',
+  trashEntry: 'trash:put',
+  listTrash: 'trash:list',
+  restoreTrash: 'trash:restore',
+  deleteTrashEntry: 'trash:delete',
+  emptyTrash: 'trash:empty',
+  pageIcons: 'vault:page-icons',
+  fetchLinkMeta: 'web:link-meta',
+  searchImages: 'web:search-images',
   structureChange: 'vault:structure-change',
   listPlugins: 'plugins:list',
   openPluginsFolder: 'plugins:open-folder',
@@ -139,6 +147,23 @@ export interface PageProps {
 }
 
 /** A tag and how many notes use it. */
+/** 书签卡的链接元数据(og 优先;主进程抓取解析,渲染端只消费)。 */
+export interface LinkMeta {
+  title?: string
+  description?: string
+  image?: string
+  favicon?: string
+  siteName?: string
+}
+
+/** 回收站条目:name = .trash 内扁平文件名;original = 删除前的 vault 相对路径。 */
+export interface TrashEntry {
+  name: string
+  original: string
+  deletedAt: number
+  dir: boolean
+}
+
 export interface TagCount {
   tag: string
   count: number
@@ -228,6 +253,22 @@ export interface AmadeusApi {
   deleteFolder(folderPath: string): Promise<void>
   /** Move a folder (with its subtree) into another folder ('' = vault root); returns its new vault-relative path. */
   moveFolder(folderPath: string, destFolder: string): Promise<string>
+  /** 回收站(可选:桌面实现;缺位的端删除保持不可逆,UI 自适应)。移入 .trash 并记录原位。 */
+  trashEntry?(rel: string): Promise<void>
+  /** 回收站条目(新→旧)。 */
+  listTrash?(): Promise<TrashEntry[]>
+  /** 恢复到原位(父目录补建,占位加 " (N)");返回恢复后的相对路径。 */
+  restoreTrash?(name: string): Promise<string>
+  /** 彻底删除单条。 */
+  deleteTrashEntry?(name: string): Promise<void>
+  /** 清空回收站。 */
+  emptyTrash?(): Promise<void>
+  /** 页面 emoji 图标表(fm icon: 键;可选:桌面索引提供,其余端优雅缺位)。 */
+  pageIcons?(): Promise<Record<string, string>>
+  /** 抓取链接 og 元数据(书签卡;可选:桌面主进程实现,缺位端卡片降级纯链接)。 */
+  fetchLinkMeta?(url: string): Promise<LinkMeta | null>
+  /** 封面图搜索(Openverse 免 key;可选:桌面主进程实现,缺位端只留 URL/上传两来源)。 */
+  searchImages?(query: string): Promise<Array<{ thumb: string; full: string; author?: string }>>
   /** Subscribe to vault structure changes (pages/folders added/removed). Returns unsubscribe. */
   onStructureChange(cb: () => void): () => void
   /** Subscribe to external `.db` content changes (e.g. the agent editing calendars on disk). Returns unsubscribe. */
