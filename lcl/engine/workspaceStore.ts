@@ -225,6 +225,8 @@ interface WorkspaceState {
   rightVisible: boolean
   /** 收起侧栏时暂存其内容,展开时还原。 */
   stash: Record<'left' | 'right', Stashed[]>
+  /** 收起时记住的活动 tab 类型,展开后据此还原选中(否则按 openView 顺序落到最后一个)。 */
+  stashActive: Record<'left' | 'right', string | null>
   sidebarDefaults: Record<'left' | 'right', Stashed[]>
   /** 默认布局构建器(WorkspaceHost 从 buildDefault prop 注入,供 resetLayout 复用)。 */
   defaultBuilder: (() => void) | null
@@ -283,6 +285,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   leftVisible: true,
   rightVisible: true,
   stash: { left: [], right: [] },
+  stashActive: { left: null, right: null },
   sidebarDefaults: { left: [], right: [] },
   defaultBuilder: null,
   sideFree: { left: false, right: false },
@@ -575,7 +578,13 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         void __type
         return { type: panelType(p), params: userParams }
       })
-      set((s) => ({ stash: { ...s.stash, [side]: stashed }, [visKey]: false } as Partial<WorkspaceState>))
+      // 记住当前活动 tab(组内 activePanel),展开时据此还原选中 —— 否则 openView 顺序会落到最后一个视图。
+      const activeP = panels.find((p) => {
+        const grp = (p as { group?: { activePanel?: { id?: string } } }).group
+        return grp?.activePanel?.id === p.id
+      })
+      const activeType = activeP && panelType(activeP) !== 'sidebar-empty' ? panelType(activeP) : null
+      set((s) => ({ stash: { ...s.stash, [side]: stashed }, stashActive: { ...s.stashActive, [side]: activeType }, [visKey]: false } as Partial<WorkspaceState>))
       const group = (panels[0] as { group?: SizableGroup }).group
       if (group) {
         sidebarAnimating[side] = true
@@ -605,6 +614,12 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       set({ [visKey]: true } as Partial<WorkspaceState>)
       sidebarAnimating[side] = true
       stashed.forEach((v) => get().openView(v.type, v.params, side))
+      // 还原折叠前的活动 tab(openView 会把最后打开的设为活动,故此处显式拉回用户上次所在的视图)。
+      const wantActive = get().stashActive[side]
+      if (wantActive) {
+        const p = panelsAt(api, side).find((x) => panelType(x) === wantActive)
+        if (p) get().activateLeaf(p.id)
+      }
       const group = (panelsAt(api, side)[0] as { group?: SizableGroup } | undefined)?.group
       if (group) {
         try { group.api.setSize({ width: 1 }) } catch { /* ignore */ } // 起点贴 0,免首帧闪到默认宽
