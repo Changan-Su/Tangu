@@ -107,6 +107,12 @@ export interface PluginContext {
     registerSeries(def: AchievementSeriesContribution): void
     track(event: string, n?: number): void
   }
+  /** Activity log: report user actions inside the plugin's UI to the local activity journal
+   *  (feeds background agents like Muse). Events are auto-prefixed `plugin:<pluginId>:`;
+   *  `detail` values are sanitized/truncated by the host (`text` key = trailing snippet). */
+  activity?: {
+    log(event: string, detail?: Record<string, unknown>): void
+  }
 }
 
 export interface AmadeusPlugin {

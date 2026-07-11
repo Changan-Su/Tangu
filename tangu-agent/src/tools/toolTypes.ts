@@ -37,6 +37,8 @@ export interface ToolContext {
   planMode?: boolean;
   /** Muse run 标记:仅此时 add_muse_todo(Muse 唯一写权限)可见。 */
   muse?: boolean;
+  /** 用户活动日志读取授权(config.toml activity_access;Muse 之外的 agent 用 read_activity 需显式开)。 */
+  activityAccess?: boolean;
   /** 本次 run 的模型 id(delegate 子代理沿用父模型)。 */
   modelId?: string;
   /** 默认生图模型 id(generate_image 缺省据此选模型;来自 agentConfig.imageModelId)。 */

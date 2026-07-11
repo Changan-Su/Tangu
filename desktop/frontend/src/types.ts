@@ -102,6 +102,17 @@ export interface MuseStatusInfo {
   lastError: string | null
   sessionId: string | null
 }
+/** Muse 盯任务规则(muse_watch 工具写入 agents/muse/triggers.json;面板只读+删除)。 */
+export interface MuseTriggerInfo {
+  id: string
+  desc: string
+  cond: { type: 'file_chars_gte'; path: string; n: number } | { type: 'event_seen'; match: string } | { type: 'daily_at'; time: string }
+  prompt?: string
+  cooldownHours: number
+  lastFiredAt: string | null
+  enabled: boolean
+  createdAt: string
+}
 
 /** 默认 Agent slug(无 agentSlug 时后端落此;新会话选择器默认高亮)。 */
 export const DEFAULT_AGENT_SLUG = 'xyra'
@@ -468,6 +479,8 @@ export interface StoredDesktopConfig extends TanguDesktopConfig {
   notesDailyFolder?: string
   /** 收件箱新消息系统通知(undefined 视为 true=默认开;ribbon/dock 角标不受此控)。 */
   inboxNotifyEnabled?: boolean
+  /** 记录应用内活动日志(undefined 视为 true=默认开;喂后台 Muse + 可导出排查 bug)。 */
+  activityLogEnabled?: boolean
   /** 朗读(TTS)模型 id(<providerId>/<model> 或某 provider ttsModelIds 命中);空/缺省=未启用,不显示朗读按钮。 */
   ttsModelId?: string
   /** 朗读音色 id(provider 特定);空=provider 默认。 */
@@ -529,6 +542,10 @@ declare global {
       pickDirectory?(): Promise<string | null>
       /** 另存为文本文件(导出日志等);取消返回 { ok:false }。 */
       saveTextFile?(defaultName: string, content: string): Promise<{ ok: boolean; path: string | null }>
+      /** 用户活动日志埋点(fire-and-forget;拼行/消毒在 main 侧 activityLog.ts)。 */
+      act?(event: string, detail?: Record<string, unknown>): void
+      /** 导出近 days 天活动日志拼接文本。 */
+      exportActivity?(days?: number): Promise<string>
       /** 拖入文件 → 绝对路径(本机模式粘贴路径用)。 */
       getPathForFile?(file: File): string
       /** 本机工作区文件浏览(host cwd)。 */

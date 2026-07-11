@@ -50,6 +50,7 @@ export async function applyAgentActivation(
       if ((!agentConfig.enabledToolIds || !agentConfig.enabledToolIds.length) && def.tools.length) {
         agentConfig.enabledToolIds = def.tools;
       }
+      if (agentConfig.activityAccess == null && def.activityAccess) agentConfig.activityAccess = true;
     }
   } catch {
     /* 加载失败不阻断 run */

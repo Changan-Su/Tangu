@@ -3,9 +3,9 @@
  * 嵌在「后台智能体」视图(AgentsDetailView)内使用,外层容器负责 padding/滚动。
  */
 import React, { useEffect, useState } from 'react'
-import { Sparkles, RefreshCw, Play, Check, XCircle } from 'lucide-react'
-import { getMuseStatus, getMuseTodos, patchMuseTodo, injectMuseTodos, listMessages } from '../services/backendService'
-import type { MuseStatusInfo, MuseTodo, SessionRecord, TanguDesktopConfig } from '../types'
+import { Sparkles, RefreshCw, Play, Check, XCircle, Crosshair, Trash2 } from 'lucide-react'
+import { getMuseStatus, getMuseTodos, patchMuseTodo, injectMuseTodos, listMessages, getMuseTriggers, deleteMuseTrigger } from '../services/backendService'
+import type { MuseStatusInfo, MuseTodo, MuseTriggerInfo, SessionRecord, TanguDesktopConfig } from '../types'
 import { useI18n } from '../i18n'
 
 export const MuseView: React.FC<{
@@ -16,6 +16,7 @@ export const MuseView: React.FC<{
   const { t } = useI18n()
   const [status, setStatus] = useState<MuseStatusInfo | null>(null)
   const [todos, setTodos] = useState<MuseTodo[]>([])
+  const [triggers, setTriggers] = useState<MuseTriggerInfo[]>([])
   const [thinking, setThinking] = useState<string>('')
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [target, setTarget] = useState<string>('')
@@ -25,6 +26,7 @@ export const MuseView: React.FC<{
     const st = await getMuseStatus(cfg).catch(() => null)
     setStatus(st)
     setTodos(await getMuseTodos(cfg, 'pending').catch(() => []))
+    setTriggers(await getMuseTriggers(cfg).catch(() => []))
     if (st?.sessionId) {
       const ms = await listMessages(cfg, st.sessionId, 6).catch(() => [])
       const lastAssistant = [...ms].reverse().find((m) => m.role === 'assistant' || m.role === 'model')
@@ -54,6 +56,16 @@ export const MuseView: React.FC<{
     await patchMuseTodo(cfg, id, status).catch(() => {})
     setTodos((p) => p.filter((x) => x.id !== id))
   }
+  const removeTrigger = async (id: string): Promise<void> => {
+    await deleteMuseTrigger(cfg, id).catch(() => {})
+    setTriggers((p) => p.filter((x) => x.id !== id))
+  }
+  const condText = (tg: MuseTriggerInfo): string =>
+    tg.cond.type === 'file_chars_gte'
+      ? t('special.muse.trigFile', { path: tg.cond.path.split('/').pop() || tg.cond.path, n: tg.cond.n })
+      : tg.cond.type === 'event_seen'
+        ? t('special.muse.trigEvent', { match: tg.cond.match })
+        : t('special.muse.trigDaily', { time: tg.cond.time })
 
   const running = !!status?.running
   return (
@@ -77,6 +89,25 @@ export const MuseView: React.FC<{
         }}>
           {thinking || <span className="hint">{status?.enabled ? '…' : t('special.muse.disabled')}</span>}
         </div>
+      </div>
+
+      {/* 盯任务(muse_watch 规则):聊天里说「帮我盯着…」即可设定,这里只读+删除 */}
+      <div className="field">
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Crosshair size={13} /> {t('special.muse.watches')}
+        </label>
+        {triggers.length === 0 && <div className="hint">{t('special.muse.watchesHint')}</div>}
+        {triggers.map((tg) => (
+          <div key={tg.id} className="file-row" style={{ cursor: 'default', alignItems: 'flex-start' }}>
+            <span className="file-name" style={{ flex: 1, whiteSpace: 'normal' }}>
+              <b>{tg.desc}</b>
+              <div style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 2 }}>
+                {condText(tg)}{tg.lastFiredAt ? ` · ${t('special.muse.trigFired', { t: new Date(tg.lastFiredAt).toLocaleString() })}` : ''}
+              </div>
+            </span>
+            <button className="icon-btn" title={t('special.muse.watchDelete')} onClick={() => void removeTrigger(tg.id)}><Trash2 size={13} /></button>
+          </div>
+        ))}
       </div>
 
       {/* TODO 清单 */}

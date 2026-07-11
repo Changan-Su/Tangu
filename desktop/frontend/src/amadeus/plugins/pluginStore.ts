@@ -14,6 +14,7 @@ import { amadeus } from '../api'
 import { BUILTIN_PLUGINS } from './builtins'
 import { registerPropertyType as registerPropType, unregisterPropertyType as unregisterPropType } from '../blocks/database/propertyTypes'
 import { registerPluginSeries, track, unregisterPluginAchievements } from '../../achievements/store'
+import { act } from '../../activity/log'
 import type {
   AmadeusPlugin,
   CommandContribution,
@@ -148,6 +149,10 @@ export const usePluginStore = create<PluginState>((set, get) => {
     achievements: {
       registerSeries: (def) => registerPluginSeries(pluginId, def),
       track: (event, n) => track(`plugin:${pluginId}:${event}`, n),
+    },
+    // 活动日志:同款前缀纪律(插件伪造不了官方事件);拼行/消毒在 main 侧 activityLog.ts。
+    activity: {
+      log: (event, detail) => act(`plugin:${pluginId}:${event}`, detail),
     },
   })
 

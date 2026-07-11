@@ -67,6 +67,10 @@ const api = {
   /** 另存为文本文件(导出日志等);取消返回 { ok:false }。 */
   saveTextFile: (defaultName: string, content: string): Promise<{ ok: boolean; path: string | null }> =>
     ipcRenderer.invoke('dialog:saveTextFile', defaultName, content),
+  /** 用户活动日志埋点(fire-and-forget;结构化 {event,detail},拼行/消毒在 main 侧 activityLog.ts)。 */
+  act: (event: string, detail?: Record<string, unknown>): void => ipcRenderer.send('activity:append', { event, detail }),
+  /** 导出近 days 天活动日志拼接文本(开发者调试/报 bug 用)。 */
+  exportActivity: (days?: number): Promise<string> => ipcRenderer.invoke('activity:export', days),
   /** 拖入文件 → 绝对路径(Electron≥32 File.path 已移除,必须 webUtils 在渲染层取)。 */
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   /** 本机工作区文件浏览:列目录 / 读文件(主进程 fs)。 */
@@ -160,6 +164,7 @@ const AGENT_KEYS = [
   'openAgentDir', 'openSkillsDir',
   'envCheck', 'envRun', 'onEnvOutput',
   'pluginsUserInstalled', 'pluginsUninstall',
+  'act', 'exportActivity', // 活动日志喂后台 Muse;无 agent 后端的产品形态记了也没读者
 ] as const
 if (!PRODUCT.agentBackend) for (const k of AGENT_KEYS) delete (api as Record<string, unknown>)[k]
 if (!PRODUCT.market) for (const k of ['marketList', 'marketDetail', 'marketInstall', 'marketInstalled'] as const) delete (api as Record<string, unknown>)[k]

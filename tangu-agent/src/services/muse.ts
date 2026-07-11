@@ -24,6 +24,8 @@ import { loadSpecialAgentsConfig, legacyMusePrompt, isWithinActiveHours, buildTo
 import { MUSE_AGENT_SLUG, ensureMuseAgent, listAgents, resolveMemorySlug } from '../agents/agentRegistry.js';
 import { runWithAgentSlug } from '../seams/runContext.js';
 import { DEFAULT_AGENT_SLUG } from '../core/tanguHome.js';
+import { readActivityLines } from './userActivity.js';
+import { loadTriggers, evaluateTriggers, markTriggersFired, buildTriggerKickoff, type MuseTrigger } from './museTriggers.js';
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let kickTimer: ReturnType<typeof setTimeout> | null = null;
@@ -216,7 +218,23 @@ async function recentActivityHint(userId: string): Promise<string> {
   }
 }
 
-async function startCycle(cfg: MuseConfig): Promise<void> {
+/** 用户应用内活动尾部(数据源见 userActivity.ts;桌面埋点+agent.edit 双写)。失败 → 空串。 */
+async function activityTailHint(): Promise<string> {
+  try {
+    const lines = await readActivityLines({ hours: 12, limit: 60 });
+    if (!lines.length) return '';
+    const text = lines.join('\n').slice(-1500);
+    return (
+      '\n\n[Recent in-app user activity (last 12h; one event per line, oldest first)]\n' +
+      text +
+      '\n(Query more or older activity with the read_activity tool.)'
+    );
+  } catch {
+    return '';
+  }
+}
+
+async function startCycle(cfg: MuseConfig, extraKickoff = ''): Promise<void> {
   const userId = museUserId();
   const sessionId = await ensureMuseSession(userId, cfg.modelId);
   // 动态上下文全部进 kickoff 消息(每周期新鲜数据);静态身份(developer_instructions + SOUL + Muse 自己
@@ -224,6 +242,7 @@ async function startCycle(cfg: MuseConfig): Promise<void> {
   const hint =
     (await userMemoryHint(userId)) +
     (await recentActivityHint(userId)) +
+    (await activityTailHint()) +
     (await recentSessionTitles(userId)) +
     (await folderHint(cfg.allowedFolders)) +
     (await existingTodoHint(userId));
@@ -232,6 +251,7 @@ async function startCycle(cfg: MuseConfig): Promise<void> {
     'Then combine your long-term memory with the context below to find the 1-3 most worthwhile things to do for the user right now. ' +
     `Avoid the "TODOs you have already proposed" below; use add_muse_todo only for genuinely new, high-value todos (at most ${cfg.maxTodosPerWindow} this period — spend the quota sparingly). ` +
     'You may use remember to record durable insights about the user (what they value, accept, or dismiss). When done, briefly explain your reasoning.' +
+    extraKickoff +
     hint;
   const runId = uuidv4();
   await createRun({
@@ -285,8 +305,21 @@ async function tick(): Promise<void> {
     const userId = museUserId();
     // 后台让位：用户有进行中的 run → 不与之抢模型账号/速率，本轮跳过（下次巡检再来）。
     if (await anyUserRunActive()) { lastRunning = false; log('用户有进行中的 run，本轮让位'); return; }
+    // 盯任务规则(muse_watch):零 token 代码评估;命中 → 本轮必起周期(豁免下面的"无新活动"跳过,
+    // 但不豁免 isRunning/token/restarts 预算闸——防规则失控烧穿额度)。
+    let fired: MuseTrigger[] = [];
+    try {
+      const triggers = await loadTriggers();
+      if (triggers.length) {
+        const activityLines = await readActivityLines({ hours: 24, limit: 500 });
+        fired = await evaluateTriggers(triggers, { activityLines });
+      }
+    } catch (e: any) {
+      log(`盯任务评估失败:${e?.message || e}`);
+    }
     // 节奏按变化：自上一周期以来无新用户消息 → 空跑无意义，跳过（不占自重启预算）。
-    if (!(await userActivitySince(userId, lastCycleAt))) { lastRunning = false; log('自上一周期以来无新活动，跳过'); return; }
+    if (!fired.length && !(await userActivitySince(userId, lastCycleAt))) { lastRunning = false; log('自上一周期以来无新活动，跳过'); return; }
+    if (fired.length) log(`盯任务命中 ${fired.length} 条:${fired.map((t) => t.id).join(', ')}`);
 
     rollWindow(cfg);
     const sid = currentSessionId || (await getMuseSessionId(userId));
@@ -306,7 +339,9 @@ async function tick(): Promise<void> {
     if (restartsThisWindow >= cfg.maxRestartsPerWindow) { log(`本窗口预算用尽(${restartsThisWindow}/${cfg.maxRestartsPerWindow})`); return; }
     restartsThisWindow += 1;
     log(`启动第 ${restartsThisWindow}/${cfg.maxRestartsPerWindow} 个思考周期(模型 ${cfg.modelId})`);
-    await startCycle(cfg);
+    await startCycle(cfg, buildTriggerKickoff(fired));
+    // lastFiredAt 只在周期真正启动后写回:被上面任何闸挡住 → 下轮重试,不白烧 cooldown。
+    if (fired.length) await markTriggersFired(fired.map((t) => t.id));
   } catch (e: any) {
     lastError = e?.message || String(e);
     log(`tick 失败:${lastError}`);

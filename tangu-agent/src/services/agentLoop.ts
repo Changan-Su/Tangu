@@ -772,6 +772,7 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
       enabledSkillIds, execMode, cwd, approvalMode, profile, modelId, planMode,
       imageModelId: typeof agentConfig.imageModelId === 'string' ? agentConfig.imageModelId : undefined,
       muse: !!agentConfig.muse,
+      activityAccess: !!agentConfig.activityAccess,
       // 激活的 agent 定义 slug → start_discussion 的「分身」据此取主 agent 人设(memScopeSlug 可能是共用默认,不可混用)。
       agentSlug: activeAgentSlug,
       collectImage: (img) => {

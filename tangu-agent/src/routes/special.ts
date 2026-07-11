@@ -6,6 +6,8 @@
  *   PATCH    /agent/special/muse/todos/:id { status }  改 TODO 状态
  *   POST     /agent/special/muse/todos/inject { todoIds, sessionId }  注入选中 TODO 到会话并起 run
  *   GET      /agent/special/muse/status                Muse 运行态 + 本窗口预算余量
+ *   GET      /agent/special/muse/triggers              盯任务规则列表(muse_watch 工具写入)
+ *   DELETE   /agent/special/muse/triggers/:id          删除一条盯任务规则
  *
  * 本地特性：profile.capabilities.hostExec=false（云端）一律 404。
  */
@@ -18,6 +20,7 @@ import { createRun } from '../services/runStore.js';
 import { enqueueRun } from '../services/agentLoop.js';
 import { loadSpecialAgentsConfig, saveSpecialAgentsConfig, DEFAULT_HISTORIAN_PROMPT, legacyMusePrompt } from '../services/specialAgentsConfig.js';
 import { museStatus, kickMuse } from '../services/muse.js';
+import { loadTriggers, removeTrigger } from '../services/museTriggers.js';
 import { MUSE_AGENT_SLUG, ensureMuseAgent } from '../agents/agentRegistry.js';
 import { runWithAgentSlug } from '../seams/runContext.js';
 
@@ -192,6 +195,27 @@ router.get('/agent/special/muse/status', authMiddleware, async (_req: AuthReques
     res.json({ status: await museStatus() });
   } catch (e: any) {
     res.status(500).json({ detail: e?.message || 'status failed' });
+  }
+});
+
+// 盯任务规则(muse_watch 工具写入;面板只读列表+删除)。
+router.get('/agent/special/muse/triggers', authMiddleware, async (_req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    res.json({ triggers: await loadTriggers() });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'triggers failed' });
+  }
+});
+
+router.delete('/agent/special/muse/triggers/:id', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    const ok = await removeTrigger(String(req.params.id || ''));
+    if (!ok) return res.status(404).json({ detail: 'trigger not found' });
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'delete trigger failed' });
   }
 });
 

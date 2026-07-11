@@ -53,6 +53,8 @@ export interface NormalAgentDef {
   shareDefaultMemory?: boolean;
   /** 开启云同步:该 agent 的全部文件(定义/记忆/日志/Library)跨设备完全镜像(newest-wins);默认/false=纯本地。 */
   cloudSync?: boolean;
+  /** 允许读用户活动日志(read_activity 工具);默认/false=仅 Muse 可读。 */
+  activityAccess?: boolean;
   /** 该 agent 支持/出现于哪些 app(小写,如 ["echo"]);空=不限制(由调用方默认)。来自 config.toml apps。 */
   apps?: string[];
 }
@@ -178,6 +180,7 @@ export function parseAgentConfig(slug: string, tomlRaw: string, soul: string): N
     avatar: str(meta.avatar) || undefined,
     shareDefaultMemory: !!meta.share_default_memory,
     cloudSync: !!meta.cloud_sync,
+    activityAccess: !!meta.activity_access,
     apps,
   };
 }
@@ -204,6 +207,7 @@ export function serializeAgentConfig(def: NormalAgentDef): string {
   if (def.avatar) obj.avatar = def.avatar;
   if (def.shareDefaultMemory) obj.share_default_memory = true;
   if (def.cloudSync) obj.cloud_sync = true;
+  if (def.activityAccess) obj.activity_access = true;
   obj.created_by = def.createdBy;
   obj.created_at = def.createdAt || new Date().toISOString();
   const di = def.systemPrompt || '';
@@ -628,6 +632,8 @@ export interface SaveAgentInput {
   shareDefaultMemory?: boolean;
   /** 开启云同步(跨设备镜像);缺省保留已有。 */
   cloudSync?: boolean;
+  /** 允许读用户活动日志;缺省保留已有。 */
+  activityAccess?: boolean;
 }
 
 /** 新建/更新一个 agent(落盘 <slug>/config.toml + SOUL.md)。保留已有 createdAt/createdBy/libraryOrder,绝不动 MEMORY/LOG/Library。 */
@@ -660,6 +666,7 @@ export async function saveAgent(input: SaveAgentInput): Promise<NormalAgentDef> 
     avatar: input.avatar !== undefined ? (input.avatar ? String(input.avatar) : undefined) : existing?.avatar,
     shareDefaultMemory: input.shareDefaultMemory !== undefined ? input.shareDefaultMemory : existing?.shareDefaultMemory,
     cloudSync: input.cloudSync !== undefined ? input.cloudSync : existing?.cloudSync,
+    activityAccess: input.activityAccess !== undefined ? input.activityAccess : existing?.activityAccess,
   };
   const adir = path.join(agentsDir(), slug);
   mkdirSync(adir, { recursive: true });

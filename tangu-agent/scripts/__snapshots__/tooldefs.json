@@ -2807,6 +2807,71 @@
           ]
         }
       }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "muse_watch",
+        "description": "Manage watch rules for Muse, the background agent: when a rule fires, Muse wakes up and turns it into a todo/reminder for the user. Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; Muse only runs when one fires.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "set",
+                "list",
+                "remove"
+              ],
+              "description": "set=add a rule, list=show rules, remove=delete by id"
+            },
+            "desc": {
+              "type": "string",
+              "description": "set: human-readable description of the task (shown to the user)"
+            },
+            "cond_type": {
+              "type": "string",
+              "enum": [
+                "file_chars_gte",
+                "event_seen",
+                "daily_at"
+              ],
+              "description": "set: condition type"
+            },
+            "path": {
+              "type": "string",
+              "description": "set(file_chars_gte): file path (absolute, or relative to the current workspace)"
+            },
+            "n": {
+              "type": "number",
+              "description": "set(file_chars_gte): non-whitespace character threshold"
+            },
+            "match": {
+              "type": "string",
+              "description": "set(event_seen): substring to look for in new activity lines"
+            },
+            "time": {
+              "type": "string",
+              "description": "set(daily_at): local time \"HH:MM\""
+            },
+            "prompt": {
+              "type": "string",
+              "description": "set: optional extra instruction for Muse when the rule fires (English preferred)"
+            },
+            "cooldown_hours": {
+              "type": "number",
+              "description": "set: hours to wait before the rule may fire again (default 24)"
+            },
+            "id": {
+              "type": "string",
+              "description": "remove: rule id (from list)"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        }
+      }
     }
   ],
   "tangu-docker:sandbox+skills": [
@@ -3585,6 +3650,71 @@
           "required": [
             "calendar",
             "eventId"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "muse_watch",
+        "description": "Manage watch rules for Muse, the background agent: when a rule fires, Muse wakes up and turns it into a todo/reminder for the user. Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; Muse only runs when one fires.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "set",
+                "list",
+                "remove"
+              ],
+              "description": "set=add a rule, list=show rules, remove=delete by id"
+            },
+            "desc": {
+              "type": "string",
+              "description": "set: human-readable description of the task (shown to the user)"
+            },
+            "cond_type": {
+              "type": "string",
+              "enum": [
+                "file_chars_gte",
+                "event_seen",
+                "daily_at"
+              ],
+              "description": "set: condition type"
+            },
+            "path": {
+              "type": "string",
+              "description": "set(file_chars_gte): file path (absolute, or relative to the current workspace)"
+            },
+            "n": {
+              "type": "number",
+              "description": "set(file_chars_gte): non-whitespace character threshold"
+            },
+            "match": {
+              "type": "string",
+              "description": "set(event_seen): substring to look for in new activity lines"
+            },
+            "time": {
+              "type": "string",
+              "description": "set(daily_at): local time \"HH:MM\""
+            },
+            "prompt": {
+              "type": "string",
+              "description": "set: optional extra instruction for Muse when the rule fires (English preferred)"
+            },
+            "cooldown_hours": {
+              "type": "number",
+              "description": "set: hours to wait before the rule may fire again (default 24)"
+            },
+            "id": {
+              "type": "string",
+              "description": "remove: rule id (from list)"
+            }
+          },
+          "required": [
+            "action"
           ]
         }
       }
@@ -4899,6 +5029,71 @@
           "required": [
             "calendar",
             "eventId"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "muse_watch",
+        "description": "Manage watch rules for Muse, the background agent: when a rule fires, Muse wakes up and turns it into a todo/reminder for the user. Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; Muse only runs when one fires.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "set",
+                "list",
+                "remove"
+              ],
+              "description": "set=add a rule, list=show rules, remove=delete by id"
+            },
+            "desc": {
+              "type": "string",
+              "description": "set: human-readable description of the task (shown to the user)"
+            },
+            "cond_type": {
+              "type": "string",
+              "enum": [
+                "file_chars_gte",
+                "event_seen",
+                "daily_at"
+              ],
+              "description": "set: condition type"
+            },
+            "path": {
+              "type": "string",
+              "description": "set(file_chars_gte): file path (absolute, or relative to the current workspace)"
+            },
+            "n": {
+              "type": "number",
+              "description": "set(file_chars_gte): non-whitespace character threshold"
+            },
+            "match": {
+              "type": "string",
+              "description": "set(event_seen): substring to look for in new activity lines"
+            },
+            "time": {
+              "type": "string",
+              "description": "set(daily_at): local time \"HH:MM\""
+            },
+            "prompt": {
+              "type": "string",
+              "description": "set: optional extra instruction for Muse when the rule fires (English preferred)"
+            },
+            "cooldown_hours": {
+              "type": "number",
+              "description": "set: hours to wait before the rule may fire again (default 24)"
+            },
+            "id": {
+              "type": "string",
+              "description": "remove: rule id (from list)"
+            }
+          },
+          "required": [
+            "action"
           ]
         }
       }
@@ -6235,6 +6430,71 @@
           ]
         }
       }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "muse_watch",
+        "description": "Manage watch rules for Muse, the background agent: when a rule fires, Muse wakes up and turns it into a todo/reminder for the user. Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; Muse only runs when one fires.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "set",
+                "list",
+                "remove"
+              ],
+              "description": "set=add a rule, list=show rules, remove=delete by id"
+            },
+            "desc": {
+              "type": "string",
+              "description": "set: human-readable description of the task (shown to the user)"
+            },
+            "cond_type": {
+              "type": "string",
+              "enum": [
+                "file_chars_gte",
+                "event_seen",
+                "daily_at"
+              ],
+              "description": "set: condition type"
+            },
+            "path": {
+              "type": "string",
+              "description": "set(file_chars_gte): file path (absolute, or relative to the current workspace)"
+            },
+            "n": {
+              "type": "number",
+              "description": "set(file_chars_gte): non-whitespace character threshold"
+            },
+            "match": {
+              "type": "string",
+              "description": "set(event_seen): substring to look for in new activity lines"
+            },
+            "time": {
+              "type": "string",
+              "description": "set(daily_at): local time \"HH:MM\""
+            },
+            "prompt": {
+              "type": "string",
+              "description": "set: optional extra instruction for Muse when the rule fires (English preferred)"
+            },
+            "cooldown_hours": {
+              "type": "number",
+              "description": "set: hours to wait before the rule may fire again (default 24)"
+            },
+            "id": {
+              "type": "string",
+              "description": "remove: rule id (from list)"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        }
+      }
     }
   ],
   "tangu-none:sandbox": [
@@ -6953,6 +7213,71 @@
           "required": [
             "calendar",
             "eventId"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "muse_watch",
+        "description": "Manage watch rules for Muse, the background agent: when a rule fires, Muse wakes up and turns it into a todo/reminder for the user. Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; Muse only runs when one fires.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "set",
+                "list",
+                "remove"
+              ],
+              "description": "set=add a rule, list=show rules, remove=delete by id"
+            },
+            "desc": {
+              "type": "string",
+              "description": "set: human-readable description of the task (shown to the user)"
+            },
+            "cond_type": {
+              "type": "string",
+              "enum": [
+                "file_chars_gte",
+                "event_seen",
+                "daily_at"
+              ],
+              "description": "set: condition type"
+            },
+            "path": {
+              "type": "string",
+              "description": "set(file_chars_gte): file path (absolute, or relative to the current workspace)"
+            },
+            "n": {
+              "type": "number",
+              "description": "set(file_chars_gte): non-whitespace character threshold"
+            },
+            "match": {
+              "type": "string",
+              "description": "set(event_seen): substring to look for in new activity lines"
+            },
+            "time": {
+              "type": "string",
+              "description": "set(daily_at): local time \"HH:MM\""
+            },
+            "prompt": {
+              "type": "string",
+              "description": "set: optional extra instruction for Muse when the rule fires (English preferred)"
+            },
+            "cooldown_hours": {
+              "type": "number",
+              "description": "set: hours to wait before the rule may fire again (default 24)"
+            },
+            "id": {
+              "type": "string",
+              "description": "remove: rule id (from list)"
+            }
+          },
+          "required": [
+            "action"
           ]
         }
       }
@@ -7693,6 +8018,71 @@
           "required": [
             "calendar",
             "eventId"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "muse_watch",
+        "description": "Manage watch rules for Muse, the background agent: when a rule fires, Muse wakes up and turns it into a todo/reminder for the user. Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; Muse only runs when one fires.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "set",
+                "list",
+                "remove"
+              ],
+              "description": "set=add a rule, list=show rules, remove=delete by id"
+            },
+            "desc": {
+              "type": "string",
+              "description": "set: human-readable description of the task (shown to the user)"
+            },
+            "cond_type": {
+              "type": "string",
+              "enum": [
+                "file_chars_gte",
+                "event_seen",
+                "daily_at"
+              ],
+              "description": "set: condition type"
+            },
+            "path": {
+              "type": "string",
+              "description": "set(file_chars_gte): file path (absolute, or relative to the current workspace)"
+            },
+            "n": {
+              "type": "number",
+              "description": "set(file_chars_gte): non-whitespace character threshold"
+            },
+            "match": {
+              "type": "string",
+              "description": "set(event_seen): substring to look for in new activity lines"
+            },
+            "time": {
+              "type": "string",
+              "description": "set(daily_at): local time \"HH:MM\""
+            },
+            "prompt": {
+              "type": "string",
+              "description": "set: optional extra instruction for Muse when the rule fires (English preferred)"
+            },
+            "cooldown_hours": {
+              "type": "number",
+              "description": "set: hours to wait before the rule may fire again (default 24)"
+            },
+            "id": {
+              "type": "string",
+              "description": "remove: rule id (from list)"
+            }
+          },
+          "required": [
+            "action"
           ]
         }
       }
@@ -9007,6 +9397,71 @@
           "required": [
             "calendar",
             "eventId"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "muse_watch",
+        "description": "Manage watch rules for Muse, the background agent: when a rule fires, Muse wakes up and turns it into a todo/reminder for the user. Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; Muse only runs when one fires.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "set",
+                "list",
+                "remove"
+              ],
+              "description": "set=add a rule, list=show rules, remove=delete by id"
+            },
+            "desc": {
+              "type": "string",
+              "description": "set: human-readable description of the task (shown to the user)"
+            },
+            "cond_type": {
+              "type": "string",
+              "enum": [
+                "file_chars_gte",
+                "event_seen",
+                "daily_at"
+              ],
+              "description": "set: condition type"
+            },
+            "path": {
+              "type": "string",
+              "description": "set(file_chars_gte): file path (absolute, or relative to the current workspace)"
+            },
+            "n": {
+              "type": "number",
+              "description": "set(file_chars_gte): non-whitespace character threshold"
+            },
+            "match": {
+              "type": "string",
+              "description": "set(event_seen): substring to look for in new activity lines"
+            },
+            "time": {
+              "type": "string",
+              "description": "set(daily_at): local time \"HH:MM\""
+            },
+            "prompt": {
+              "type": "string",
+              "description": "set: optional extra instruction for Muse when the rule fires (English preferred)"
+            },
+            "cooldown_hours": {
+              "type": "number",
+              "description": "set: hours to wait before the rule may fire again (default 24)"
+            },
+            "id": {
+              "type": "string",
+              "description": "remove: rule id (from list)"
+            }
+          },
+          "required": [
+            "action"
           ]
         }
       }
@@ -10340,6 +10795,71 @@
           "required": [
             "calendar",
             "eventId"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "muse_watch",
+        "description": "Manage watch rules for Muse, the background agent: when a rule fires, Muse wakes up and turns it into a todo/reminder for the user. Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; Muse only runs when one fires.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "set",
+                "list",
+                "remove"
+              ],
+              "description": "set=add a rule, list=show rules, remove=delete by id"
+            },
+            "desc": {
+              "type": "string",
+              "description": "set: human-readable description of the task (shown to the user)"
+            },
+            "cond_type": {
+              "type": "string",
+              "enum": [
+                "file_chars_gte",
+                "event_seen",
+                "daily_at"
+              ],
+              "description": "set: condition type"
+            },
+            "path": {
+              "type": "string",
+              "description": "set(file_chars_gte): file path (absolute, or relative to the current workspace)"
+            },
+            "n": {
+              "type": "number",
+              "description": "set(file_chars_gte): non-whitespace character threshold"
+            },
+            "match": {
+              "type": "string",
+              "description": "set(event_seen): substring to look for in new activity lines"
+            },
+            "time": {
+              "type": "string",
+              "description": "set(daily_at): local time \"HH:MM\""
+            },
+            "prompt": {
+              "type": "string",
+              "description": "set: optional extra instruction for Muse when the rule fires (English preferred)"
+            },
+            "cooldown_hours": {
+              "type": "number",
+              "description": "set: hours to wait before the rule may fire again (default 24)"
+            },
+            "id": {
+              "type": "string",
+              "description": "remove: rule id (from list)"
+            }
+          },
+          "required": [
+            "action"
           ]
         }
       }

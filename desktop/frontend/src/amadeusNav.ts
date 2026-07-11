@@ -3,10 +3,12 @@
 // 一个编辑器都没有(全被关掉)→ 带 notePath 新开;否则在当前(最近活动)编辑器里加载。
 import { usePageStore } from '@amadeus/store/pageStore'
 import { useWorkspace } from '@lcl/engine'
+import { actThrottled } from './activity/log'
 
 interface PanelLike { id: string; params?: Record<string, unknown> }
 
 export async function openNote(path: string, opts?: { newTab?: boolean }): Promise<void> {
+  actThrottled('view.open', { f: path }, `view.open|${path}`)
   const ws = useWorkspace.getState()
   const api = (ws as unknown as { api?: { panels: PanelLike[] } }).api
   const editors = api?.panels.filter((p) => p.params?.__type === 'amadeus-editor') ?? []
@@ -27,6 +29,7 @@ export async function openNote(path: string, opts?: { newTab?: boolean }): Promi
 
 /** 打开独立 .db 数据库视图:已有认领该文件的 tab → 激活;否则主区打开(语义同 openNote 的简版)。 */
 export function openDb(dbPath: string): void {
+  actThrottled('view.open', { f: dbPath }, `view.open|${dbPath}`)
   const ws = useWorkspace.getState()
   const api = (ws as unknown as { api?: { panels: PanelLike[] } }).api
   const hit = api?.panels.find((p) => p.params?.__type === 'amadeus-db' && p.params?.dbPath === dbPath)

@@ -3,7 +3,7 @@
  * 统一 Bearer + JSON 错误,错误信息抛 Error(detail)。
  */
 import type {
-  AgentConfig, AgentsMeta, HistorianActivityItem, MessageRecord, ModelsResponse, MuseStatusInfo, MuseTodo,
+  AgentConfig, AgentsMeta, HistorianActivityItem, MessageRecord, ModelsResponse, MuseStatusInfo, MuseTodo, MuseTriggerInfo,
   NormalAgentDef, SessionRecord, SkillInfo, SpecialAgentsConfig,
   TanguDesktopConfig, ToolsResponse, WorkspaceFileMeta,
 } from '../types'
@@ -429,6 +429,12 @@ export const injectMuseTodos = (cfg: TanguDesktopConfig, todoIds: string[], sess
 
 export const getMuseStatus = (cfg: TanguDesktopConfig) =>
   request<{ status: MuseStatusInfo }>(cfg, '/agent/special/muse/status').then((r) => r.status)
+
+export const getMuseTriggers = (cfg: TanguDesktopConfig) =>
+  request<{ triggers: MuseTriggerInfo[] }>(cfg, '/agent/special/muse/triggers').then((r) => r.triggers)
+
+export const deleteMuseTrigger = (cfg: TanguDesktopConfig, id: string) =>
+  request<{ ok: boolean }>(cfg, `/agent/special/muse/triggers/${encodeURIComponent(id)}`, { method: 'DELETE' })
 
 // ── Lifecycle Hooks（本地后端；host-only shell 回调）──
 export type HookDiscovered = {

@@ -25,6 +25,7 @@ import { extractZipToDir, MARKET_SUBDIR, MARKET_MANIFEST, isSafeSlug, readInstal
 import { serveDir as codePreviewServe, stopCodePreview } from './codePreview'
 // Amadeus Space:vendored 笔记后端(vault IPC + 资产协议)。renderImport 别名后保持 verbatim。
 import { registerIpc as registerAmadeusIpc } from './amadeus/ipc'
+import { logActivity, setActivityLogEnabled, pruneActivity, exportActivity, flushAllNoteEdits } from './activityLog'
 import { registerAssetSchemes as registerAmadeusAssetSchemes, registerAssetProtocol as registerAmadeusAssetProtocol } from './amadeus/assetProtocol'
 
 /** ~/.tangu(与包内 core/tanguHome.ts 同约定;TANGU_HOME 可整体重定向)。 */
@@ -289,6 +290,8 @@ interface TanguStoredConfig {
   ttsSpeed: number
   /** 新回复完成后自动朗读(仅当前活跃会话)。 */
   ttsAutoSpeak: boolean
+  /** 记录应用内活动日志(~/.forsion/activity;Muse 数据源+bug 排查导出);关=停止新记录。 */
+  activityLogEnabled: boolean
 }
 
 /**
@@ -329,6 +332,7 @@ const DEFAULT_CONFIG: TanguStoredConfig = {
   ttsVoice: '',
   ttsSpeed: 1,
   ttsAutoSpeak: false,
+  activityLogEnabled: true,
 }
 
 /** 默认工作区目录(配置未填时兜底):新用户 ~/Forsion(dev→~/Forsion-Dev);
@@ -349,6 +353,7 @@ async function ensureDefaultWorkspaceDir(stored: TanguStoredConfig): Promise<str
 const SHELL_KEYS: Array<keyof TanguStoredConfig> = [
   'mode', 'backendUrl', 'token', 'wechatAllowedPeers', 'forsionSyncEnabled', 'forsionLastSyncedAt',
   'pythonMode', 'mirror', // 桌面专属(内置 python 是桌面才有的能力;镜像经后端 env 注入,不落 config.json 段)
+  'activityLogEnabled', // 桌面专属(活动日志由 main 落盘)
 ]
 const configPath = (): string => join(app.getPath('userData'), 'tangu-desktop-config.json')
 
@@ -633,10 +638,25 @@ app.whenReady().then(async () => {
     log: (m) => console.log(m),
   }).catch(() => {})
 
+  // 用户活动日志:开关初值 + 30 天轮转 + app.start 事件(埋点面见 frontend/src/activity/log.ts)。
+  try {
+    setActivityLogEnabled((await loadConfig()).activityLogEnabled !== false)
+    void pruneActivity()
+    logActivity('app.start', { v: app.getVersion() })
+  } catch { /* 装饰性,不阻塞启动 */ }
+  // renderer 埋点入口:结构化 {event, detail},拼行/消毒只在 activityLog.ts(用户内容进不了行结构)。
+  ipcMain.on('activity:append', (_e, payload: { event?: unknown; detail?: unknown }) => {
+    if (!payload || typeof payload.event !== 'string') return
+    const detail = payload.detail && typeof payload.detail === 'object' ? (payload.detail as Record<string, unknown>) : undefined
+    logActivity(payload.event, detail)
+  })
+  ipcMain.handle('activity:export', (_e, days?: number) => exportActivity(Number(days) || 7))
+
   ipcMain.handle('config:get', () => effectiveConfig())
   ipcMain.handle('config:set', async (_e, patch: Partial<TanguStoredConfig>) => {
     const before = await loadConfig()
     await saveConfig(patch)
+    if (patch.activityLogEnabled !== undefined) setActivityLogEnabled(patch.activityLogEnabled !== false)
     // 模式/托管参数变化 → 重启托管后端(切到 external 则停掉)。
     const managedKeys: Array<keyof TanguStoredConfig> = [
       'mode', 'cloudUrl', 'cloudToken', 'sandbox', 'pythonMode', 'mirror',
@@ -1327,6 +1347,7 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', (e) => {
   isQuitting = true // 放行 window close 拦截(否则 hide 会吞掉退出)
+  flushAllNoteEdits() // 活动日志:5 分钟合并窗口内未落盘的 note.edit 冲出去
   // 优雅停后端(SIGTERM→3s→SIGKILL);停完再真正退出。
   const st = backend.getStatus().state
   if (st === 'ready' || st === 'starting') {

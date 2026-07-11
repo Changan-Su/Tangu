@@ -19,6 +19,7 @@ import { openWsFile } from '../views/wsFileNav'
 import type { Tab as SettingsTab } from '../components/SettingsModal'
 import { ONBOARDING_DISMISS_KEY, ONBOARDING_VERSION_KEY } from '../components/OnboardingWizard'
 import { track } from '../achievements/store'
+import { act } from '../activity/log'
 
 export type { SettingsTab }
 
@@ -388,7 +389,7 @@ export const useApp = create<AppState>((set, get) => ({
         })
         break
       case 'tool_call':
-        if (pl.name === 'generate_image') track('image.generate')
+        if (pl.name === 'generate_image') { track('image.generate'); act('image.generate') }
         patchMessage(sessionId, assistantId, (m) => {
           const evs = (m.toolEvents || []).slice()
           const i = evs.findIndex((tt) => tt.id === pl.id)
@@ -934,6 +935,7 @@ export const useApp = create<AppState>((set, get) => ({
     try {
       const path = ws.kind === 'local' ? (ws.path || get().defaultWsDir || get().homeDir || null) : null
       const s = await api.createSession(get().cfg, path ? { project_path: path, project_name: ws.name } : undefined)
+      act('chat.new', { s: s.id.slice(0, 6) })
       set((st) => ({ sessions: [s, ...st.sessions] }))
       loadedHistory.add(s.id) // 先标记再 setActiveId(其内部 loadSessionHistory 会拉空配置冲掉 init,同 send)
       get().setActiveId(s.id)
@@ -1046,6 +1048,7 @@ export const useApp = create<AppState>((set, get) => ({
       }
     }
     const sessionId = sid
+    act(wasNewChat ? 'chat.new' : 'chat.send', { s: sessionId.slice(0, 6), text })
     const agentConfig = { ...(implicitInit || get().configBySession[sessionId] || {}) }
     if (!agentConfig.agentSlug && get().defaultAgentSlug) {
       // 会话没有显式选 agent → 用全局默认兜底,并**固化进会话配置**(本地 + 后端)。

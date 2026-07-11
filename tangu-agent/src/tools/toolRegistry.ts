@@ -38,6 +38,7 @@ const PLAN_MODE_TOOLS = new Set([
   'list_processes', 'read_process_output',
   'delegate', 'ask_user', 'exit_plan_mode',
   'add_muse_todo', // Muse 唯一写权限,只读 planMode 下仍可用(可见性另由 ctx.muse 收口)
+  'read_activity', // 只读用户活动日志;Muse 周期跑 planMode 故必须白名单(可见性另由 ctx.muse/activityAccess 收口)
 ]);
 
 /** 注册一个 provider。同 id 幂等覆盖(保持原位置,热加载安全)。 */
