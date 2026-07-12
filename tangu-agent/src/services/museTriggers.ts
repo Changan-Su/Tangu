@@ -11,7 +11,9 @@
  * 该文件不进云同步(agentFileSync 白名单不含它)、不影响 agent 名册缓存(dirStamp 只看 config/SOUL)。
  */
 import { promises as fs } from 'node:fs';
-import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import path, { join } from 'node:path';
+import os from 'node:os';
 import { agentsDir } from '../core/tanguHome.js';
 import { MUSE_AGENT_SLUG } from '../agents/agentRegistry.js';
 
@@ -33,6 +35,8 @@ export interface MuseTrigger {
   lastFiredAt: string | null;
   enabled: boolean;
   createdAt: string;
+  /** 命中后由哪个 agent 执行(services/automation.ts 无人值守 run);缺省/'muse'=老路唤醒 Muse 周期。 */
+  agentSlug?: string;
 }
 
 export const triggersFile = (): string => join(agentsDir(), MUSE_AGENT_SLUG, 'triggers.json');
@@ -67,6 +71,119 @@ export async function markTriggersFired(ids: string[], at = new Date()): Promise
   const iso = at.toISOString();
   for (const t of list) if (ids.includes(t.id)) t.lastFiredAt = iso;
   await saveTriggers(list);
+}
+
+export const MAX_TRIGGERS = 50;
+
+function resolveTriggerPath(raw: string, cwd?: string): string {
+  let p = raw.trim();
+  if (p.startsWith('~/') || p === '~') p = path.join(os.homedir(), p.slice(1));
+  return path.isAbsolute(p) ? path.normalize(p) : path.resolve(cwd || process.cwd(), p);
+}
+
+/** 校验入参(muse_watch 工具与 HTTP 路由共用;snake_case 键对齐工具参数)。 */
+export interface TriggerInput {
+  id?: unknown;
+  desc?: unknown;
+  cond_type?: unknown;
+  path?: unknown;
+  n?: unknown;
+  match?: unknown;
+  time?: unknown;
+  prompt?: unknown;
+  cooldown_hours?: unknown;
+  agent_slug?: unknown;
+  enabled?: unknown;
+}
+
+export interface ValidatedTrigger {
+  desc: string;
+  cond: MuseTriggerCond;
+  prompt?: string;
+  cooldownHours: number;
+  agentSlug?: string;
+  enabled: boolean;
+}
+
+/**
+ * 纯校验(不查 agent 名册——slug 存在性由调用方各自验,避免此模块依赖注册表加载)。
+ * agentSlug 规则 cooldown 下限 1h:agent 自动运行会写 agent.edit 活动行,event_seen 匹配到
+ * 自己改的文件会形成自激回路,冷却是唯一护栏。
+ */
+export function validateTriggerInput(input: TriggerInput, opts: { cwd?: string } = {}):
+  | { ok: true; value: ValidatedTrigger }
+  | { ok: false; error: string } {
+  const desc = String(input.desc || '').trim().slice(0, 200);
+  if (!desc) return { ok: false, error: 'desc 必填(一句人话描述盯什么)' };
+  const condType = String(input.cond_type || '');
+  let cond: MuseTriggerCond;
+  if (condType === 'file_chars_gte') {
+    const p = String(input.path || '').trim();
+    const n = Math.floor(Number(input.n));
+    if (!p || !Number.isFinite(n) || n <= 0) return { ok: false, error: 'file_chars_gte 需要 path 和正整数 n' };
+    cond = { type: 'file_chars_gte', path: resolveTriggerPath(p, opts.cwd), n };
+  } else if (condType === 'event_seen') {
+    const match = String(input.match || '').trim().slice(0, 120);
+    if (!match) return { ok: false, error: 'event_seen 需要 match 子串' };
+    cond = { type: 'event_seen', match };
+  } else if (condType === 'daily_at') {
+    const time = String(input.time || '').trim();
+    if (!/^\d{1,2}:\d{2}$/.test(time)) return { ok: false, error: 'daily_at 需要 time "HH:MM"' };
+    cond = { type: 'daily_at', time };
+  } else {
+    return { ok: false, error: 'cond_type 须为 file_chars_gte/event_seen/daily_at' };
+  }
+  let agentSlug = String(input.agent_slug || '').trim() || undefined;
+  if (agentSlug === MUSE_AGENT_SLUG) agentSlug = undefined; // 'muse' 归一为缺省=老路
+  const rawCd = Number(input.cooldown_hours);
+  let cooldownHours = Number.isFinite(rawCd) && rawCd > 0 ? Math.min(24 * 30, rawCd) : 24;
+  if (agentSlug) cooldownHours = Math.max(1, cooldownHours);
+  return {
+    ok: true,
+    value: {
+      desc,
+      cond,
+      prompt: String(input.prompt || '').trim().slice(0, 500) || undefined,
+      cooldownHours,
+      agentSlug,
+      enabled: input.enabled === undefined ? true : !!input.enabled,
+    },
+  };
+}
+
+/**
+ * upsert:带 id=更新(**保留 lastFiredAt/createdAt**,否则改个描述就重置 cooldown);无 id=新建(50 条帽)。
+ */
+export async function upsertTrigger(v: ValidatedTrigger, id?: string):
+  Promise<{ ok: true; trigger: MuseTrigger; created: boolean } | { ok: false; error: string }> {
+  const list = await loadTriggers();
+  if (id) {
+    const cur = list.find((t) => t.id === id);
+    if (!cur) return { ok: false, error: `未找到规则 ${id}` };
+    cur.desc = v.desc;
+    cur.cond = v.cond;
+    cur.prompt = v.prompt;
+    cur.cooldownHours = v.cooldownHours;
+    cur.agentSlug = v.agentSlug;
+    cur.enabled = v.enabled;
+    await saveTriggers(list);
+    return { ok: true, trigger: cur, created: false };
+  }
+  if (list.length >= MAX_TRIGGERS) return { ok: false, error: `规则已达上限(${MAX_TRIGGERS}),请先删除一些` };
+  const rule: MuseTrigger = {
+    id: `w-${randomUUID().slice(0, 6)}`,
+    desc: v.desc,
+    cond: v.cond,
+    prompt: v.prompt,
+    cooldownHours: v.cooldownHours,
+    lastFiredAt: null,
+    enabled: v.enabled,
+    createdAt: new Date().toISOString(),
+    agentSlug: v.agentSlug,
+  };
+  list.push(rule);
+  await saveTriggers(list);
+  return { ok: true, trigger: rule, created: true };
 }
 
 export interface EvaluateEnv {

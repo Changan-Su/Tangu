@@ -26,6 +26,7 @@ import { runWithAgentSlug } from '../seams/runContext.js';
 import { DEFAULT_AGENT_SLUG } from '../core/tanguHome.js';
 import { readActivityLines } from './userActivity.js';
 import { loadTriggers, evaluateTriggers, markTriggersFired, buildTriggerKickoff, type MuseTrigger } from './museTriggers.js';
+import { launchAutomationTriggers } from './automation.js';
 
 let timer: ReturnType<typeof setInterval> | null = null;
 let kickTimer: ReturnType<typeof setTimeout> | null = null;
@@ -49,7 +50,7 @@ function nowHour(): number {
   return new Date().getHours();
 }
 
-async function getMuseSessionId(userId: string): Promise<string | null> {
+export async function getMuseSessionId(userId: string): Promise<string | null> {
   const rows = await query<any[]>(
     `SELECT id FROM chat_sessions WHERE user_id = ? AND kind = 'muse' ORDER BY created_at ASC LIMIT 1`,
     [userId],
@@ -293,6 +294,27 @@ function rollWindow(cfg: MuseConfig): void {
 async function tick(): Promise<void> {
   try {
     if (!isLocal()) return;
+    // ── 盯任务规则评估(零 token 代码判定)。刻意放在 muse.enabled/activeHours 闸**之前**:
+    // 带 agentSlug 的规则属于任意 agent 的自动化,关掉 Muse 不应连它们一起灭。
+    let museFired: MuseTrigger[] = [];
+    try {
+      const triggers = await loadTriggers();
+      if (triggers.length) {
+        const activityLines = await readActivityLines({ hours: 24, limit: 500 });
+        const fired = await evaluateTriggers(triggers, { activityLines });
+        const agentFired = fired.filter((t) => t.agentSlug && t.agentSlug !== MUSE_AGENT_SLUG);
+        museFired = fired.filter((t) => !agentFired.includes(t));
+        if (agentFired.length) {
+          log(`agent 自动化命中 ${agentFired.length} 条:${agentFired.map((t) => t.id).join(', ')}`);
+          // launcher 自带让位/防重入/模型守卫;只对**实际起跑**的规则烧 cooldown(与 Muse 老路同语义)。
+          const launched = await launchAutomationTriggers(agentFired);
+          if (launched.length) await markTriggersFired(launched);
+        }
+      }
+    } catch (e: any) {
+      log(`盯任务评估失败:${e?.message || e}`);
+    }
+
     const cfg = loadSpecialAgentsConfig().muse;
     if (!cfg.enabled) { lastRunning = false; return; }
     // 模型解析:用户显式配置 > admin 后台默认槽 > 对话默认(未选模型=跟随云端,admin 改动下轮生效)。
@@ -305,21 +327,11 @@ async function tick(): Promise<void> {
     const userId = museUserId();
     // 后台让位：用户有进行中的 run → 不与之抢模型账号/速率，本轮跳过（下次巡检再来）。
     if (await anyUserRunActive()) { lastRunning = false; log('用户有进行中的 run，本轮让位'); return; }
-    // 盯任务规则(muse_watch):零 token 代码评估;命中 → 本轮必起周期(豁免下面的"无新活动"跳过,
+    // museFired 命中 → 本轮必起周期(豁免下面的"无新活动"跳过,
     // 但不豁免 isRunning/token/restarts 预算闸——防规则失控烧穿额度)。
-    let fired: MuseTrigger[] = [];
-    try {
-      const triggers = await loadTriggers();
-      if (triggers.length) {
-        const activityLines = await readActivityLines({ hours: 24, limit: 500 });
-        fired = await evaluateTriggers(triggers, { activityLines });
-      }
-    } catch (e: any) {
-      log(`盯任务评估失败:${e?.message || e}`);
-    }
     // 节奏按变化：自上一周期以来无新用户消息 → 空跑无意义，跳过（不占自重启预算）。
-    if (!fired.length && !(await userActivitySince(userId, lastCycleAt))) { lastRunning = false; log('自上一周期以来无新活动，跳过'); return; }
-    if (fired.length) log(`盯任务命中 ${fired.length} 条:${fired.map((t) => t.id).join(', ')}`);
+    if (!museFired.length && !(await userActivitySince(userId, lastCycleAt))) { lastRunning = false; log('自上一周期以来无新活动，跳过'); return; }
+    if (museFired.length) log(`盯任务命中 ${museFired.length} 条:${museFired.map((t) => t.id).join(', ')}`);
 
     rollWindow(cfg);
     const sid = currentSessionId || (await getMuseSessionId(userId));
@@ -339,9 +351,9 @@ async function tick(): Promise<void> {
     if (restartsThisWindow >= cfg.maxRestartsPerWindow) { log(`本窗口预算用尽(${restartsThisWindow}/${cfg.maxRestartsPerWindow})`); return; }
     restartsThisWindow += 1;
     log(`启动第 ${restartsThisWindow}/${cfg.maxRestartsPerWindow} 个思考周期(模型 ${cfg.modelId})`);
-    await startCycle(cfg, buildTriggerKickoff(fired));
+    await startCycle(cfg, buildTriggerKickoff(museFired));
     // lastFiredAt 只在周期真正启动后写回:被上面任何闸挡住 → 下轮重试,不白烧 cooldown。
-    if (fired.length) await markTriggersFired(fired.map((t) => t.id));
+    if (museFired.length) await markTriggersFired(museFired.map((t) => t.id));
   } catch (e: any) {
     lastError = e?.message || String(e);
     log(`tick 失败:${lastError}`);

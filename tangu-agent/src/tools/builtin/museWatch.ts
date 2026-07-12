@@ -5,25 +5,15 @@
  * 命中才唤醒 Muse 周期(见 services/museTriggers.ts)。可见性:本地限定(hostExec,照 inbox_send);
  * 不进 PLAN_MODE_TOOLS(写操作;Muse 自己的 planMode 周期设不了 watch=防自激)。
  */
-import { randomUUID } from 'node:crypto';
-import path from 'node:path';
-import os from 'node:os';
 import type { ToolProvider } from '../toolRegistry.js';
 import {
   loadTriggers,
-  saveTriggers,
   removeTrigger,
+  validateTriggerInput,
+  upsertTrigger,
   type MuseTrigger,
-  type MuseTriggerCond,
 } from '../../services/museTriggers.js';
-
-const MAX_TRIGGERS = 50;
-
-function resolvePath(raw: string, cwd?: string): string {
-  let p = raw.trim();
-  if (p.startsWith('~/') || p === '~') p = path.join(os.homedir(), p.slice(1));
-  return path.isAbsolute(p) ? path.normalize(p) : path.resolve(cwd || process.cwd(), p);
-}
+import { getAgent } from '../../agents/agentRegistry.js';
 
 function fmt(t: MuseTrigger): string {
   const c = t.cond as any;
@@ -31,7 +21,8 @@ function fmt(t: MuseTrigger): string {
     c.type === 'file_chars_gte' ? `${c.path} ≥ ${c.n} chars`
     : c.type === 'event_seen' ? `activity contains "${c.match}"`
     : `daily at ${c.time}`;
-  return `${t.id}${t.enabled ? '' : ' (disabled)'} — ${t.desc} [${cond}] cooldown ${t.cooldownHours}h, last fired ${t.lastFiredAt || 'never'}`;
+  const runner = t.agentSlug ? `, runs agent "${t.agentSlug}"` : '';
+  return `${t.id}${t.enabled ? '' : ' (disabled)'} — ${t.desc} [${cond}]${runner} cooldown ${t.cooldownHours}h, last fired ${t.lastFiredAt || 'never'}`;
 }
 
 export const museWatchProvider: ToolProvider = {
@@ -46,10 +37,11 @@ export const museWatchProvider: ToolProvider = {
         function: {
           name: 'muse_watch',
           description:
-            'Manage watch rules for Muse, the background agent: when a rule fires, Muse wakes up and turns it into a todo/reminder for the user. ' +
+            'Manage automation watch rules: when a rule fires, by default Muse (the background agent) wakes up and turns it into a todo/reminder for the user; ' +
+            'set `agent` to instead have that agent run the rule\'s prompt unattended (full-auto, its own automation session). ' +
             'Use when the user asks to "keep an eye on" something, e.g. "remind me when xxx.md reaches 100 characters" → set a file_chars_gte rule. ' +
             'Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like "note.edit"), daily_at (fires once a day after HH:MM). ' +
-            'Rules are evaluated by code every few minutes at zero cost; Muse only runs when one fires.',
+            'Rules are evaluated by code every few minutes at zero cost; an agent only runs when one fires.',
           parameters: {
             type: 'object',
             properties: {
@@ -60,8 +52,9 @@ export const museWatchProvider: ToolProvider = {
               n: { type: 'number', description: 'set(file_chars_gte): non-whitespace character threshold' },
               match: { type: 'string', description: 'set(event_seen): substring to look for in new activity lines' },
               time: { type: 'string', description: 'set(daily_at): local time "HH:MM"' },
-              prompt: { type: 'string', description: 'set: optional extra instruction for Muse when the rule fires (English preferred)' },
-              cooldown_hours: { type: 'number', description: 'set: hours to wait before the rule may fire again (default 24)' },
+              prompt: { type: 'string', description: 'set: optional extra instruction for the runner when the rule fires (English preferred)' },
+              cooldown_hours: { type: 'number', description: 'set: hours to wait before the rule may fire again (default 24; min 1 when `agent` is set)' },
+              agent: { type: 'string', description: 'set: optional agent slug to run the prompt unattended when the rule fires (omit = wake Muse)' },
               id: { type: 'string', description: 'remove: rule id (from list)' },
             },
             required: ['action'],
@@ -81,46 +74,19 @@ export const museWatchProvider: ToolProvider = {
         }
         if (action !== 'set') return 'Error: action 须为 set/list/remove';
 
-        const desc = String(args.desc || '').trim().slice(0, 200);
-        if (!desc) return 'Error: desc 必填(一句人话描述盯什么)';
-        const condType = String(args.cond_type || '');
-        let cond: MuseTriggerCond;
-        if (condType === 'file_chars_gte') {
-          const p = String(args.path || '').trim();
-          const n = Math.floor(Number(args.n));
-          if (!p || !Number.isFinite(n) || n <= 0) return 'Error: file_chars_gte 需要 path 和正整数 n';
-          cond = { type: 'file_chars_gte', path: resolvePath(p, ctx.cwd), n };
-        } else if (condType === 'event_seen') {
-          const match = String(args.match || '').trim().slice(0, 120);
-          if (!match) return 'Error: event_seen 需要 match 子串';
-          cond = { type: 'event_seen', match };
-        } else if (condType === 'daily_at') {
-          const time = String(args.time || '').trim();
-          if (!/^\d{1,2}:\d{2}$/.test(time)) return 'Error: daily_at 需要 time "HH:MM"';
-          cond = { type: 'daily_at', time };
-        } else {
-          return 'Error: cond_type 须为 file_chars_gte/event_seen/daily_at';
+        const v = validateTriggerInput(args as any, { cwd: ctx.cwd });
+        if (!v.ok) return `Error: ${v.error}`;
+        if (v.value.agentSlug && !(await getAgent(v.value.agentSlug))) {
+          return `Error: agent "${v.value.agentSlug}" 不存在(先用 manage_agent 查看可用 agent)`;
         }
-        const list = await loadTriggers();
-        if (list.length >= MAX_TRIGGERS) return `Error: 规则已达上限(${MAX_TRIGGERS}),请先 remove 一些`;
-        const rule: MuseTrigger = {
-          id: `w-${randomUUID().slice(0, 6)}`,
-          desc,
-          cond,
-          prompt: String(args.prompt || '').trim().slice(0, 500) || undefined,
-          cooldownHours: Number.isFinite(Number(args.cooldown_hours)) && Number(args.cooldown_hours) > 0
-            ? Math.min(24 * 30, Number(args.cooldown_hours))
-            : 24,
-          lastFiredAt: null,
-          enabled: true,
-          createdAt: new Date().toISOString(),
-        };
-        list.push(rule);
-        await saveTriggers(list);
-        const note = cond.type === 'daily_at'
-          ? '(每天过点后的首次巡检触发;若设了 Muse 运行时段,时段外会顺延补发)'
-          : '(Muse 巡检周期约每 5 分钟评估一次;需 Muse 已在设置中启用)';
-        return `已设定盯任务 ${rule.id}:「${desc}」${note}`;
+        const r = await upsertTrigger(v.value);
+        if (!r.ok) return `Error: ${r.error}`;
+        const note = v.value.agentSlug
+          ? `(命中后由 agent "${v.value.agentSlug}" 全自动执行;巡检约每 5 分钟评估一次)`
+          : v.value.cond.type === 'daily_at'
+            ? '(每天过点后的首次巡检触发;若设了 Muse 运行时段,时段外会顺延补发)'
+            : '(Muse 巡检周期约每 5 分钟评估一次;需 Muse 已在设置中启用)';
+        return `已设定盯任务 ${r.trigger.id}:「${v.value.desc}」${note}`;
       },
     },
   ],

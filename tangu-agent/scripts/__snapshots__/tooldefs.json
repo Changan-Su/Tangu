@@ -2812,7 +2812,7 @@
       "type": "function",
       "function": {
         "name": "muse_watch",
-        "description": "Manage watch rules for Muse, the background agent: when a rule fires, Muse wakes up and turns it into a todo/reminder for the user. Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; Muse only runs when one fires.",
+        "description": "Manage automation watch rules: when a rule fires, by default Muse (the background agent) wakes up and turns it into a todo/reminder for the user; set `agent` to instead have that agent run the rule's prompt unattended (full-auto, its own automation session). Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; an agent only runs when one fires.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -2856,11 +2856,15 @@
             },
             "prompt": {
               "type": "string",
-              "description": "set: optional extra instruction for Muse when the rule fires (English preferred)"
+              "description": "set: optional extra instruction for the runner when the rule fires (English preferred)"
             },
             "cooldown_hours": {
               "type": "number",
-              "description": "set: hours to wait before the rule may fire again (default 24)"
+              "description": "set: hours to wait before the rule may fire again (default 24; min 1 when `agent` is set)"
+            },
+            "agent": {
+              "type": "string",
+              "description": "set: optional agent slug to run the prompt unattended when the rule fires (omit = wake Muse)"
             },
             "id": {
               "type": "string",
@@ -3658,7 +3662,7 @@
       "type": "function",
       "function": {
         "name": "muse_watch",
-        "description": "Manage watch rules for Muse, the background agent: when a rule fires, Muse wakes up and turns it into a todo/reminder for the user. Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; Muse only runs when one fires.",
+        "description": "Manage automation watch rules: when a rule fires, by default Muse (the background agent) wakes up and turns it into a todo/reminder for the user; set `agent` to instead have that agent run the rule's prompt unattended (full-auto, its own automation session). Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; an agent only runs when one fires.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -3702,11 +3706,15 @@
             },
             "prompt": {
               "type": "string",
-              "description": "set: optional extra instruction for Muse when the rule fires (English preferred)"
+              "description": "set: optional extra instruction for the runner when the rule fires (English preferred)"
             },
             "cooldown_hours": {
               "type": "number",
-              "description": "set: hours to wait before the rule may fire again (default 24)"
+              "description": "set: hours to wait before the rule may fire again (default 24; min 1 when `agent` is set)"
+            },
+            "agent": {
+              "type": "string",
+              "description": "set: optional agent slug to run the prompt unattended when the rule fires (omit = wake Muse)"
             },
             "id": {
               "type": "string",
@@ -5037,7 +5045,7 @@
       "type": "function",
       "function": {
         "name": "muse_watch",
-        "description": "Manage watch rules for Muse, the background agent: when a rule fires, Muse wakes up and turns it into a todo/reminder for the user. Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; Muse only runs when one fires.",
+        "description": "Manage automation watch rules: when a rule fires, by default Muse (the background agent) wakes up and turns it into a todo/reminder for the user; set `agent` to instead have that agent run the rule's prompt unattended (full-auto, its own automation session). Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; an agent only runs when one fires.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -5081,11 +5089,15 @@
             },
             "prompt": {
               "type": "string",
-              "description": "set: optional extra instruction for Muse when the rule fires (English preferred)"
+              "description": "set: optional extra instruction for the runner when the rule fires (English preferred)"
             },
             "cooldown_hours": {
               "type": "number",
-              "description": "set: hours to wait before the rule may fire again (default 24)"
+              "description": "set: hours to wait before the rule may fire again (default 24; min 1 when `agent` is set)"
+            },
+            "agent": {
+              "type": "string",
+              "description": "set: optional agent slug to run the prompt unattended when the rule fires (omit = wake Muse)"
             },
             "id": {
               "type": "string",
@@ -6435,7 +6447,7 @@
       "type": "function",
       "function": {
         "name": "muse_watch",
-        "description": "Manage watch rules for Muse, the background agent: when a rule fires, Muse wakes up and turns it into a todo/reminder for the user. Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; Muse only runs when one fires.",
+        "description": "Manage automation watch rules: when a rule fires, by default Muse (the background agent) wakes up and turns it into a todo/reminder for the user; set `agent` to instead have that agent run the rule's prompt unattended (full-auto, its own automation session). Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; an agent only runs when one fires.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -6479,11 +6491,15 @@
             },
             "prompt": {
               "type": "string",
-              "description": "set: optional extra instruction for Muse when the rule fires (English preferred)"
+              "description": "set: optional extra instruction for the runner when the rule fires (English preferred)"
             },
             "cooldown_hours": {
               "type": "number",
-              "description": "set: hours to wait before the rule may fire again (default 24)"
+              "description": "set: hours to wait before the rule may fire again (default 24; min 1 when `agent` is set)"
+            },
+            "agent": {
+              "type": "string",
+              "description": "set: optional agent slug to run the prompt unattended when the rule fires (omit = wake Muse)"
             },
             "id": {
               "type": "string",
@@ -7221,7 +7237,7 @@
       "type": "function",
       "function": {
         "name": "muse_watch",
-        "description": "Manage watch rules for Muse, the background agent: when a rule fires, Muse wakes up and turns it into a todo/reminder for the user. Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; Muse only runs when one fires.",
+        "description": "Manage automation watch rules: when a rule fires, by default Muse (the background agent) wakes up and turns it into a todo/reminder for the user; set `agent` to instead have that agent run the rule's prompt unattended (full-auto, its own automation session). Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; an agent only runs when one fires.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -7265,11 +7281,15 @@
             },
             "prompt": {
               "type": "string",
-              "description": "set: optional extra instruction for Muse when the rule fires (English preferred)"
+              "description": "set: optional extra instruction for the runner when the rule fires (English preferred)"
             },
             "cooldown_hours": {
               "type": "number",
-              "description": "set: hours to wait before the rule may fire again (default 24)"
+              "description": "set: hours to wait before the rule may fire again (default 24; min 1 when `agent` is set)"
+            },
+            "agent": {
+              "type": "string",
+              "description": "set: optional agent slug to run the prompt unattended when the rule fires (omit = wake Muse)"
             },
             "id": {
               "type": "string",
@@ -8026,7 +8046,7 @@
       "type": "function",
       "function": {
         "name": "muse_watch",
-        "description": "Manage watch rules for Muse, the background agent: when a rule fires, Muse wakes up and turns it into a todo/reminder for the user. Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; Muse only runs when one fires.",
+        "description": "Manage automation watch rules: when a rule fires, by default Muse (the background agent) wakes up and turns it into a todo/reminder for the user; set `agent` to instead have that agent run the rule's prompt unattended (full-auto, its own automation session). Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; an agent only runs when one fires.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -8070,11 +8090,15 @@
             },
             "prompt": {
               "type": "string",
-              "description": "set: optional extra instruction for Muse when the rule fires (English preferred)"
+              "description": "set: optional extra instruction for the runner when the rule fires (English preferred)"
             },
             "cooldown_hours": {
               "type": "number",
-              "description": "set: hours to wait before the rule may fire again (default 24)"
+              "description": "set: hours to wait before the rule may fire again (default 24; min 1 when `agent` is set)"
+            },
+            "agent": {
+              "type": "string",
+              "description": "set: optional agent slug to run the prompt unattended when the rule fires (omit = wake Muse)"
             },
             "id": {
               "type": "string",
@@ -9405,7 +9429,7 @@
       "type": "function",
       "function": {
         "name": "muse_watch",
-        "description": "Manage watch rules for Muse, the background agent: when a rule fires, Muse wakes up and turns it into a todo/reminder for the user. Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; Muse only runs when one fires.",
+        "description": "Manage automation watch rules: when a rule fires, by default Muse (the background agent) wakes up and turns it into a todo/reminder for the user; set `agent` to instead have that agent run the rule's prompt unattended (full-auto, its own automation session). Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; an agent only runs when one fires.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -9449,11 +9473,15 @@
             },
             "prompt": {
               "type": "string",
-              "description": "set: optional extra instruction for Muse when the rule fires (English preferred)"
+              "description": "set: optional extra instruction for the runner when the rule fires (English preferred)"
             },
             "cooldown_hours": {
               "type": "number",
-              "description": "set: hours to wait before the rule may fire again (default 24)"
+              "description": "set: hours to wait before the rule may fire again (default 24; min 1 when `agent` is set)"
+            },
+            "agent": {
+              "type": "string",
+              "description": "set: optional agent slug to run the prompt unattended when the rule fires (omit = wake Muse)"
             },
             "id": {
               "type": "string",
@@ -10803,7 +10831,7 @@
       "type": "function",
       "function": {
         "name": "muse_watch",
-        "description": "Manage watch rules for Muse, the background agent: when a rule fires, Muse wakes up and turns it into a todo/reminder for the user. Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; Muse only runs when one fires.",
+        "description": "Manage automation watch rules: when a rule fires, by default Muse (the background agent) wakes up and turns it into a todo/reminder for the user; set `agent` to instead have that agent run the rule's prompt unattended (full-auto, its own automation session). Use when the user asks to \"keep an eye on\" something, e.g. \"remind me when xxx.md reaches 100 characters\" → set a file_chars_gte rule. Condition types: file_chars_gte (file reaches n non-whitespace chars), event_seen (a new in-app activity line contains `match`, e.g. a file name or event like \"note.edit\"), daily_at (fires once a day after HH:MM). Rules are evaluated by code every few minutes at zero cost; an agent only runs when one fires.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -10847,11 +10875,15 @@
             },
             "prompt": {
               "type": "string",
-              "description": "set: optional extra instruction for Muse when the rule fires (English preferred)"
+              "description": "set: optional extra instruction for the runner when the rule fires (English preferred)"
             },
             "cooldown_hours": {
               "type": "number",
-              "description": "set: hours to wait before the rule may fire again (default 24)"
+              "description": "set: hours to wait before the rule may fire again (default 24; min 1 when `agent` is set)"
+            },
+            "agent": {
+              "type": "string",
+              "description": "set: optional agent slug to run the prompt unattended when the rule fires (omit = wake Muse)"
             },
             "id": {
               "type": "string",

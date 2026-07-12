@@ -9,11 +9,12 @@ export interface SessionRow {
   updatedAt: string | number | null;
 }
 
-/** 列出该用户在 tangu app 下最近的会话（供 /sessions 选择恢复）。 */
+/** 列出该用户在 tangu app 下最近的会话（供 /sessions 选择恢复）。
+ *  kind='user' 过滤:muse/discussion/automation 等系统会话不该被 /resume 恢复成对话。 */
 export async function listSessions(userId: string, limit = 20): Promise<SessionRow[]> {
   const rows = await query<any[]>(
     `SELECT id, title, model_id, updated_at FROM chat_sessions
-     WHERE user_id = ? AND app_id = 'tangu'
+     WHERE user_id = ? AND app_id = 'tangu' AND kind = 'user'
      ORDER BY updated_at DESC LIMIT ?`,
     [userId, limit],
   );

@@ -6,8 +6,11 @@
  *   PATCH    /agent/special/muse/todos/:id { status }  改 TODO 状态
  *   POST     /agent/special/muse/todos/inject { todoIds, sessionId }  注入选中 TODO 到会话并起 run
  *   GET      /agent/special/muse/status                Muse 运行态 + 本窗口预算余量
- *   GET      /agent/special/muse/triggers              盯任务规则列表(muse_watch 工具写入)
+ *   GET      /agent/special/muse/triggers              盯任务规则列表(muse_watch 工具/构建器写入)
+ *   POST     /agent/special/muse/triggers              upsert 规则(带 id 改/无 id 建;桌面「自动化」构建器)
  *   DELETE   /agent/special/muse/triggers/:id          删除一条盯任务规则
+ *   GET      /agent/special/automation/sessions        agent 自动化的常驻会话列表(?triggerId= 过滤)
+ *   GET      /agent/special/automation/runs?sessionId= 某会话的历次运行(muse 会话与自动化会话通用)
  *
  * 本地特性：profile.capabilities.hostExec=false（云端）一律 404。
  */
@@ -20,8 +23,9 @@ import { createRun } from '../services/runStore.js';
 import { enqueueRun } from '../services/agentLoop.js';
 import { loadSpecialAgentsConfig, saveSpecialAgentsConfig, DEFAULT_HISTORIAN_PROMPT, legacyMusePrompt } from '../services/specialAgentsConfig.js';
 import { museStatus, kickMuse } from '../services/muse.js';
-import { loadTriggers, removeTrigger } from '../services/museTriggers.js';
-import { MUSE_AGENT_SLUG, ensureMuseAgent } from '../agents/agentRegistry.js';
+import { loadTriggers, removeTrigger, validateTriggerInput, upsertTrigger } from '../services/museTriggers.js';
+import { listAutomationSessions } from '../services/automation.js';
+import { MUSE_AGENT_SLUG, ensureMuseAgent, getAgent } from '../agents/agentRegistry.js';
 import { runWithAgentSlug } from '../seams/runContext.js';
 
 const router = Router();
@@ -216,6 +220,60 @@ router.delete('/agent/special/muse/triggers/:id', authMiddleware, async (req: Au
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ detail: e?.message || 'delete trigger failed' });
+  }
+});
+
+// upsert 规则(桌面「自动化」构建器;校验与 muse_watch 工具共用)。HTTP 无 cwd → path 需绝对路径(~ 展开可用)。
+router.post('/agent/special/muse/triggers', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    const body = req.body || {};
+    const v = validateTriggerInput(body);
+    if (!v.ok) return res.status(400).json({ detail: v.error });
+    if (v.value.agentSlug && !(await getAgent(v.value.agentSlug))) {
+      return res.status(400).json({ detail: `agent "${v.value.agentSlug}" 不存在` });
+    }
+    const id = typeof body.id === 'string' && body.id.trim() ? body.id.trim() : undefined;
+    const r = await upsertTrigger(v.value, id);
+    if (!r.ok) return res.status(id ? 404 : 400).json({ detail: r.error });
+    kickMuse(); // 新/改规则尽快被下一次巡检评估
+    res.json({ trigger: r.trigger, created: r.created });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'save trigger failed' });
+  }
+});
+
+// agent 自动化常驻会话列表(右栏「触发记录」定位 sessionId;triggerId 可选过滤)。
+router.get('/agent/special/automation/sessions', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    const triggerId = typeof req.query.triggerId === 'string' && req.query.triggerId ? req.query.triggerId : undefined;
+    res.json({ sessions: await listAutomationSessions(triggerId) });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'automation sessions failed' });
+  }
+});
+
+// 某会话的历次运行(muse 会话与自动化会话通用;只回自动化相关 kind,防任意会话被枚举 run 元数据)。
+router.get('/agent/special/automation/runs', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    const sessionId = String(req.query.sessionId || '');
+    if (!sessionId) return res.status(400).json({ detail: 'sessionId required' });
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+    const own = await query<any[]>(
+      `SELECT 1 FROM chat_sessions WHERE id = ? AND kind IN ('muse', 'automation') LIMIT 1`,
+      [sessionId],
+    );
+    if (!own.length) return res.status(404).json({ detail: 'session not found' });
+    const rows = await query<any[]>(
+      `SELECT id, status, tokens_total, error, created_at, updated_at FROM agent_runs
+       WHERE session_id = ? ORDER BY created_at DESC LIMIT ${limit}`,
+      [sessionId],
+    );
+    res.json({ runs: rows || [] });
+  } catch (e: any) {
+    res.status(500).json({ detail: e?.message || 'automation runs failed' });
   }
 });
 

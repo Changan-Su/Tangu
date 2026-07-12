@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { evaluateTriggers, buildTriggerKickoff, type MuseTrigger } from './museTriggers.js';
+import { evaluateTriggers, buildTriggerKickoff, validateTriggerInput, type MuseTrigger } from './museTriggers.js';
 
 function rule(over: Partial<MuseTrigger>): MuseTrigger {
   return {
@@ -68,5 +68,31 @@ describe('buildTriggerKickoff', () => {
     expect(out).toContain('盯 xxx.md 满 100 字');
     expect(out).toContain('Remind the user.');
     expect(out).toContain('100+ non-whitespace chars');
+  });
+});
+
+describe('validateTriggerInput', () => {
+  it('三种 cond 校验;缺参报错', () => {
+    expect(validateTriggerInput({ desc: 'a', cond_type: 'daily_at', time: '9:30' }).ok).toBe(true);
+    expect(validateTriggerInput({ desc: 'a', cond_type: 'daily_at', time: '930' }).ok).toBe(false);
+    expect(validateTriggerInput({ desc: '', cond_type: 'event_seen', match: 'x' }).ok).toBe(false);
+    expect(validateTriggerInput({ desc: 'a', cond_type: 'file_chars_gte', path: '/x.md' }).ok).toBe(false);
+    expect(validateTriggerInput({ desc: 'a', cond_type: 'nope' }).ok).toBe(false);
+  });
+
+  it("agent_slug:'muse' 归一为 undefined;agent 规则 cooldown 下限 1h", () => {
+    const muse = validateTriggerInput({ desc: 'a', cond_type: 'event_seen', match: 'x', agent_slug: 'muse', cooldown_hours: 0.1 });
+    expect(muse.ok && muse.value.agentSlug).toBeUndefined();
+    expect(muse.ok && muse.value.cooldownHours).toBeCloseTo(0.1); // 非 agent 规则不抬下限
+    const ag = validateTriggerInput({ desc: 'a', cond_type: 'event_seen', match: 'x', agent_slug: 'coder', cooldown_hours: 0.1 });
+    expect(ag.ok && ag.value.agentSlug).toBe('coder');
+    expect(ag.ok && ag.value.cooldownHours).toBe(1); // 自激回路护栏
+  });
+
+  it('enabled 缺省 true,显式 false 生效', () => {
+    const a = validateTriggerInput({ desc: 'a', cond_type: 'event_seen', match: 'x' });
+    expect(a.ok && a.value.enabled).toBe(true);
+    const b = validateTriggerInput({ desc: 'a', cond_type: 'event_seen', match: 'x', enabled: false });
+    expect(b.ok && b.value.enabled).toBe(false);
   });
 });
