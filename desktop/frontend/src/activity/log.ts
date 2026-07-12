@@ -40,6 +40,10 @@ export function actThrottled(event: string, detail?: Record<string, unknown>, ke
   } catch { /* 同上 */ }
 }
 
+/** DB 格值 → 日志短值:undefined/null=省略(读者视作清空),数组逗号连接,截 40(main 侧再消毒截 80)。 */
+export const shortVal = (v: unknown): string | undefined =>
+  v === undefined || v === null ? undefined : String(Array.isArray(v) ? v.join(',') : v).slice(0, 40)
+
 const DEBOUNCE_MS = 10_000
 const pending = new Map<string, ReturnType<typeof setTimeout>>()
 

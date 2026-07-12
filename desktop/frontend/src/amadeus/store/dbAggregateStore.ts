@@ -13,7 +13,7 @@ import { useNoteViewStore } from './noteViewStore'
 import { usePageStore } from './pageStore'
 import { ensureAmadeusReady } from '../../amadeusPlugins'
 import { amadeus } from '../api'
-import { act } from '../../activity/log'
+import { actDebounced, shortVal } from '../../activity/log'
 
 const DB_RE = /\.db$/i
 
@@ -95,9 +95,11 @@ export function useAggregatedDatabases(type: string): AggDb[] {
 export function setAggCell(db: AggDb, rowId: string, colId: string, value: CellValue | undefined): void {
   const col = db.columns.find((c) => c.id === colId)
   const base = resolveBaseType(col?.type ?? 'text')
-  // 活动日志:待办勾/取消勾=「任务完成」核心信号(Muse 检测用);Calendar/Todo List/事件卡全走此收口。其余格子不记。
-  if (col?.type === 'todo') {
-    act(value === true ? 'task.done' : 'task.undone', { db: db.name, text: db.rows.find((r) => r.rowId === rowId)?.name })
+  // 活动日志:行属性变更(通用,任何列类型)——row.edit db+p=列名+v=新值+行标题;同格 10s 防抖取末态
+  // (日期拖拽实时更新高频调用)。Calendar/Todo List/事件卡全走此收口。待办勾选即 p=待办 v=true。
+  if (col) {
+    const name = colId === db.columns[0]?.id ? shortVal(value) : db.rows.find((r) => r.rowId === rowId)?.name
+    actDebounced('row.edit', { db: db.name, p: col.name, v: shortVal(value), text: name }, `${db.path}|${rowId}|${colId}`)
   }
   if (db.isNoteView && db.folder !== undefined) {
     useNoteViewStore.getState().setProp(db.folder, rowId, colId, value, base)
