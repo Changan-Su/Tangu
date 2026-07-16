@@ -1294,6 +1294,9 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   refreshVoiceMode: async (slug) => {
+    // 语音消息插件是本地引擎能力:云 web 无本地后端,早期还会拿初始默认 cfg(localhost:8787)打一发
+    // 连接拒绝的请求(控制台红噪音)且把失败缓存成关 —— 云端直接视为关,不发请求。
+    if ((window as any).tangu?.cloudWeb) return
     if (!slug || get().voiceOnByAgent[slug] !== undefined) return // 已缓存不重复拉
     const cfg = get().cfg
     try {
