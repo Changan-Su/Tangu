@@ -1,0 +1,29 @@
+# =====================================================
+# Forsion Web(内部代号 Tangu Web)— 独立前端部署(同 AI Studio:只跑前端 nginx,连已部署的 Forsion server)。
+# 注意 context 是上一层(Forsion-Genesis/),因为 web 复用 desktop/frontend 源码。
+#
+#   cd Forsion-Genesis && BACKEND_URL=http://host.docker.internal:3001 docker compose -f web/docker-compose.yml up -d --build
+# =====================================================
+services:
+  tangu-web:
+    build:
+      context: ..            # = Forsion-Genesis/(含 web/ 与 desktop/frontend/)
+      dockerfile: web/Dockerfile
+    container_name: tangu_web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8090}:80"
+    # host.docker.internal 在 Linux 默认不解析;映射到宿主网关,使 BACKEND_URL=host.docker.internal 也能连到
+    # 宿主机上的 server(Docker Desktop/mac/win 本就支持,此行对它们无害)。BACKEND_URL 指向真实域名时同样无害。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # Forsion server 地址(nginx 把 /api、/auth 等代理到这里)。
+      # 例:http://host.docker.internal:3001 / http://192.168.1.100:3001 / https://api.yourdomain.com
+      BACKEND_URL: ${BACKEND_URL:-http://host.docker.internal:3001}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      start_period: 10s
+      retries: 3

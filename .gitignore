@@ -41,4 +41,3 @@ Thumbs.db
 /tangu-agent/plugins/
 
 Dockerfile
-docker-compose.yml
