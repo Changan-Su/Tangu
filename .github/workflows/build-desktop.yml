@@ -78,6 +78,18 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: npx electron-builder --config electron-builder.config.cjs ${{ matrix.ebargs }} --publish never
 
+      # 防回归:v2.3.3~v2.6.0 曾因 beforeBuild 钩子返回 undefined(electron-builder 语义=「node_modules
+      # 外部处理」)打出零依赖的空 asar——安装版启动即 ERR_MODULE_NOT_FOUND,且三平台静默过 CI。
+      # 这里硬校验 asar 里真的有依赖(取 electron-updater 作哨兵,它缺=主进程必崩)。
+      - name: Verify asar contains node_modules
+        working-directory: desktop
+        shell: bash
+        run: |
+          asar=$(find dist -type f -name app.asar | head -1)
+          test -n "$asar" || { echo "::error::dist 下未找到 app.asar"; exit 1; }
+          npx --yes @electron/asar list "$asar" | grep -q "^/node_modules/electron-updater/" \
+            || { echo "::error::asar 缺 node_modules(beforeBuild 返回值语义回归?)— 该包启动即崩,拒绝发布"; exit 1; }
+
       # electron-builder 在有 publish 配置时随包产出更新 feed 清单(Win=latest.yml / Linux=latest-linux.yml);
       # 缺失则应用内更新形同虚设 → 这里硬失败,避免发出一个装不了更新的版本。
       # macOS 走 GitHub API 检测(未签名不自装),不依赖该 feed,故跳过校验。

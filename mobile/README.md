@@ -15,19 +15,19 @@ Capacitor 打 Android APK,走 Forsion 网关云连(手机控云会话)。iOS 暂
 
 ```bash
 npm i
-# 指向可用的 Forsion 网关;dev 也可用 vite proxy 到 localhost:3001
-VITE_API_URL=https://<forsion>/api npm run dev   # http://localhost:5274
+npm run dev   # http://localhost:5274,同源经 vite proxy 到 BACKEND_URL(缺省 localhost:3001)
 ```
 
 ## 出 Android APK
 
-**出包前必须**设绝对后端地址(native 下 `location.origin=https://localhost`,不能同源):
+后端地址:**native 缺省烤入生产网关 `https://api.forsion.net`**(`src/capacitorAuth.ts` 的 `PROD_ORIGIN`),
+直接 build 即产生产包;连 dev/自托管网关才需覆盖 `VITE_API_ORIGIN`(纯源不含 /api,约定见
+`docs/Function/前端环境变量约定.md`):
 
 ```bash
 npm ci
-VITE_API_URL=https://<forsion 网关>/api \
-VITE_AUTH_ORIGIN=https://<forsion 站点> \   # 提供 /auth 登录页的 origin;缺省=去掉 /api
-  npm run build
+npm run build                                # 生产包;自托管:VITE_API_ORIGIN=https://<网关> npm run build
+                                             # 登录页不同源再加 VITE_AUTH_ORIGIN=https://<站点>
 npx cap sync android
 cd android && ./gradlew assembleDebug
 # 产物:android/app/build/outputs/apk/debug/app-debug.apk

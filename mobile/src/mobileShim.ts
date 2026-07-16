@@ -3,8 +3,8 @@
  *
  * 两条路(installMobileShim 异步):
  * - **native(Capacitor/Android)**:token 走 @capacitor/preferences 安全存储;无 token → 系统浏览器开
- *   Forsion 登录页,深链 tangu://auth-callback?token=… 回跳(见 capacitorAuth.ts)。API 基址须绝对
- *   (VITE_API_URL,因 location.origin=https://localhost)。
+ *   Forsion 登录页,深链 tangu://auth-callback?token=… 回跳(见 capacitorAuth.ts)。API 基址缺省烤入
+ *   生产网关(location.origin=https://localhost 不能同源),VITE_API_ORIGIN 覆盖。
  * - **web(dev/preview)**:localStorage token + 同源/代理 /auth 跳转(等价 webShim),便于不出包快速联调。
  *
  * 其余 host 能力(文件系统/providers/mcp/market/更新…)缺省 → 共享组件 `window.tangu?.X` 可选链自然隐藏。
@@ -88,7 +88,6 @@ export async function installMobileShim(): Promise<boolean> {
   } catch { /* private mode */ }
   const token = readWebToken()
   if (!token) { gotoWebLogin(); return false }
-  const backendUrl = String(import.meta.env.VITE_API_URL || (location.origin + '/api')).replace(/\/$/, '')
-  setWindowTangu(backendUrl, token, false)
+  setWindowTangu(apiBase(), token, false)
   return true
 }

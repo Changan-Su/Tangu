@@ -5,13 +5,15 @@ import type { CapacitorConfig } from '@capacitor/cli'
  * (避免调 https 后端时的 mixed-content)。深链回跳 `tangu://auth-callback` 的 intent-filter 在
  * android/app/src/main/AndroidManifest.xml(cap add android 后手动加,见该文件的 tangu scheme 块)。
  *
- * 出包前须设绝对后端地址(native 下 location.origin=https://localhost,不能同源):
- *   VITE_API_URL=https://<forsion 网关>/api  npm run build && npx cap sync android
- *   (登录页取 VITE_AUTH_ORIGIN,缺省=去掉 /api 的同源;见 src/capacitorAuth.ts)
+ * 后端地址:native 缺省烤入生产网关 https://api.forsion.net(见 src/capacitorAuth.ts),
+ * dev/自托管出包用 VITE_API_ORIGIN 覆盖:
+ *   VITE_API_ORIGIN=https://<forsion 网关>  npm run build && npx cap sync android
+ *
+ * ⚠️ appId/scheme 是签名与深链的绑定身份,永不改;显示名只改 appName + res/values/strings.xml。
  */
 const config: CapacitorConfig = {
   appId: 'com.forsion.tangu',
-  appName: 'Tangu',
+  appName: 'Forsion',
   webDir: 'dist',
   server: {
     androidScheme: 'https',

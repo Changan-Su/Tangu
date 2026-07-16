@@ -24,16 +24,26 @@ export async function clearStoredToken(): Promise<void> {
   try { await Preferences.remove({ key: TOKEN_KEY }) } catch { /* ignore */ }
 }
 
-/** Forsion 网关 /api 基址(native 必须绝对:location.origin=https://localhost)。 */
-export function apiBase(): string {
-  return String(import.meta.env.VITE_API_URL || (location.origin + '/api')).replace(/\/$/, '')
+/** 生产网关。native 下 location.origin=https://localhost 永远不可能同源,缺省必须烤死生产地址。 */
+const PROD_ORIGIN = 'https://api.forsion.net'
+
+/** Forsion 网关源:VITE_API_ORIGIN 覆盖(dev/自托管);native 缺省=生产,web(dev/preview)缺省=同源走代理。 */
+export function apiOrigin(): string {
+  const explicit = import.meta.env.VITE_API_ORIGIN
+  if (explicit) return String(explicit).replace(/\/$/, '')
+  return isNative() ? PROD_ORIGIN : location.origin
 }
 
-/** 提供 /auth 登录页的 Forsion web origin(缺省=去掉 /api 的 API 基址)。 */
+/** /api 基址。 */
+export function apiBase(): string {
+  return apiOrigin() + '/api'
+}
+
+/** 提供 /auth 登录页的 Forsion web origin(缺省=网关源)。 */
 export function forsionWebOrigin(): string {
   const explicit = import.meta.env.VITE_AUTH_ORIGIN
   if (explicit) return String(explicit).replace(/\/$/, '')
-  return apiBase().replace(/\/api$/, '')
+  return apiOrigin()
 }
 
 let bound = false
