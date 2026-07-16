@@ -3,7 +3,7 @@
  * filter chips(全部/未读/已归档/定时中)+ 本地搜索 + 右键菜单。容器复用 t2s-side(drag region 纪律自动生效,
  * 交互元素一律 button/input)。选中 → store.select(乐观标已读)+ 打开阅读面板。
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Archive, ArchiveRestore, CheckCheck, Clock, Cloud, Inbox, Info, Mail, MailOpen, RefreshCw, Search, Trash2 } from 'lucide-react'
 import { useI18n } from '../../i18n'
 import { useApp } from '../../stores/appStore'
@@ -46,16 +46,18 @@ export function InboxListView() {
   const [query, setQuery] = useState('')
   const [pulling, setPulling] = useState(false)
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     void refreshList()
     void refreshUnread()
   }, [])
 
-  // 右键菜单:点击任意处关闭(捕获相 pointerdown,防浮层内部 stopPropagation 挡住)。
+  // 右键菜单:点外部关闭(捕获相 pointerdown,防浮层内部 stopPropagation 挡住)。
+  // 但点在菜单内必须跳过,否则菜单在按钮 click 派发前就被卸载 → 标未读/归档/删除全失效。
   useEffect(() => {
     if (!menu) return
-    const close = () => setMenu(null)
+    const close = (e: PointerEvent) => { if (menuRef.current?.contains(e.target as Node)) return; setMenu(null) }
     window.addEventListener('pointerdown', close, true)
     return () => window.removeEventListener('pointerdown', close, true)
   }, [menu])
@@ -145,7 +147,7 @@ export function InboxListView() {
       </div>
 
       {menu && menuMsg && (
-        <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
+        <div ref={menuRef} className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
           <button onClick={() => { markRead(menu.id, !menuMsg.read_at); setMenu(null) }}>
             {menuMsg.read_at ? <Mail size={13} /> : <MailOpen size={13} />}
             {menuMsg.read_at ? t('inbox.action.markUnread') : t('inbox.action.markRead')}

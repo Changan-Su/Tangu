@@ -101,6 +101,19 @@ export function migrateEngineData(log: (m: string) => void = console.log, homeOv
       log(`[forsion-home] 迁移 ${name} 失败(不阻塞启动): ${e instanceof Error ? e.message : String(e)}`)
     }
   }
+  // Forsion(UI)插件目录归位:amadeus/plugins → plugins(顶层位置刚被上面的引擎 plugins 迁移腾出;
+  // 若引擎条目并存保守跳过导致顶层 plugins 仍在,这里同样并存保守,不误吞)。
+  try {
+    const oldPlugins = join(home, 'amadeus', 'plugins')
+    const newPlugins = join(home, 'plugins')
+    const st = lstatOrNull(oldPlugins)
+    if (st && !st.isSymbolicLink()) {
+      if (existsSync(newPlugins)) log('[forsion-home] ⚠️ amadeus/plugins 与 plugins 并存:以 plugins/ 为准,旧目录未动(请人工合并)')
+      else { renameSync(oldPlugins, newPlugins); log('[forsion-home] Forsion 插件已迁 amadeus/plugins → plugins') }
+    }
+  } catch (e) {
+    log(`[forsion-home] 迁移 amadeus/plugins 失败(不阻塞启动): ${e instanceof Error ? e.message : String(e)}`)
+  }
   if (devMode || homeOverride) return // dev 家/测试不碰生产 ~/.tangu 链
   const legacy = join(homedir(), '.tangu')
   try {

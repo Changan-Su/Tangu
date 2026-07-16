@@ -704,6 +704,10 @@ a:hover { color: var(--accent-hover); }
 .conn-pill.err .dot { background: var(--danger); }
 .conn-pill.ok svg { color: var(--green); }
 .conn-pill.err svg { color: var(--danger); }
+/* needs-signin:可操作(非错误)的提醒态。无 warning token,用一枚双主题都够对比的琥珀色。 */
+.conn-pill.warn { color: var(--text); }
+.conn-pill.warn .dot { background: #d99a2b; }
+.conn-pill.warn svg { color: #d99a2b; }
 
 .icon-btn {
   display: inline-flex;
@@ -1290,8 +1294,7 @@ a:hover { color: var(--accent-hover); }
   max-height: 320px;
   overflow-y: auto;
   padding: 5px;
-  background: var(--bg-glass);
-  backdrop-filter: var(--panel-blur);
+  background: var(--bg-card, var(--bg));
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: 0 10px 32px var(--shadow);
@@ -1345,10 +1348,23 @@ a:hover { color: var(--accent-hover); }
 }
 
 /* ── 新会话「运行引擎」选择条(EnginePicker,参考 AionUI 的 agent pill bar) ── */
-.engine-picker { display: flex; flex-direction: column; align-items: center; gap: 7px; margin: 0 auto 6px; animation: engine-picker-in 0.35s cubic-bezier(0.2, 0.8, 0.3, 1); }
+/* ⚠️ margin 横向不能 auto:flex 列容器里横向 auto margin 会盖掉 stretch、把自己打回 fit-content,
+   于是 max-width:100% 参照的是「被内容撑开后的宽度」= 夹不住任何东西 → 选择条撑破聊天区、⋯ 永不出现。
+   居中已由父级 .newchat-pickers 的 align-items:center 负责。(scripts/pillbar-overflow.check.cjs 钉住) */
+.engine-picker { display: flex; flex-direction: column; align-items: center; gap: 7px; margin: 0 0 6px; animation: engine-picker-in 0.35s cubic-bezier(0.2, 0.8, 0.3, 1); max-width: 100%; }
 @keyframes engine-picker-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-.engine-picker-bar { display: inline-flex; align-items: center; gap: 4px; padding: 6px; border-radius: 30px; background: var(--bg-card); border: var(--border-width) solid var(--border); }
-.engine-pill { display: inline-flex; align-items: center; cursor: pointer; white-space: nowrap; overflow: hidden; opacity: 0.6; padding: 7px; border-radius: 20px; color: var(--text-muted); transition: opacity 0.2s ease, background-color 0.25s ease-out, color 0.2s ease; }
+/* bar = 外框(圆角/底色/边框);内层 .engine-picker-scroll 才是滚动容器,「⋯」钉在外框上不随内容滚。
+   ⚠️ max-width:100% 是「放不下」的前提:bar 原本 inline-flex 按内容自适应 → scrollWidth 恒等于 clientWidth,溢出永远测不出来。 */
+.engine-picker-bar { position: relative; display: inline-flex; align-items: center; padding: 6px; border-radius: 30px; background: var(--bg-card); border: var(--border-width) solid var(--border); max-width: 100%; min-width: 0; }
+.engine-picker-scroll { display: flex; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+.engine-picker-scroll::-webkit-scrollbar { display: none; }
+/* 溢出时:右端渐隐 + 「⋯」。渐隐让 pill 从「⋯」下面滚过去而不是被硬切一刀。 */
+.engine-picker-bar[data-more]::after { content: ''; position: absolute; right: 6px; top: 6px; bottom: 6px; width: 64px; pointer-events: none; border-radius: 0 24px 24px 0; background: linear-gradient(to right, transparent, var(--bg-card) 60%); }
+.engine-picker-more { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); z-index: 1; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 20px; color: var(--text-muted); background: var(--overlay-light); transition: color 0.2s ease; }
+.engine-picker-more:hover { color: var(--text); }
+/* flex-shrink:0 —— 默认可压缩会让 pill 在放不下时被挤扁(内容宽 = 容器宽 → 永远不溢出、⋯ 永不出现),
+   要的是保持原尺寸然后横向溢出去翻页。 */
+.engine-pill { display: inline-flex; align-items: center; flex-shrink: 0; cursor: pointer; white-space: nowrap; overflow: hidden; opacity: 0.6; padding: 7px; border-radius: 20px; color: var(--text-muted); transition: opacity 0.2s ease, background-color 0.25s ease-out, color 0.2s ease; }
 .engine-pill:hover { opacity: 1; }
 .engine-pill:disabled { cursor: default; }
 .engine-pill .engine-pill-icon { display: inline-flex; flex-shrink: 0; }
@@ -1366,7 +1382,8 @@ a:hover { color: var(--accent-hover); }
 .agent-badge-system { display: none; font-size: 10px; padding: 1px 5px; border-radius: 999px; background: var(--overlay-light); color: var(--text-muted); margin-left: 5px; line-height: 1.4; flex-shrink: 0; }
 .engine-pill.selected .agent-badge-system { display: inline-block; }
 /* 引擎(上)+ Agent(下)选择器成一组,出现在欢迎区下方、输入框上方 */
-.newchat-pickers { display: flex; flex-direction: column; align-items: center; gap: 2px; margin: 0 auto 8px; }
+/* 同上:横向 auto margin 会让本行退回 fit-content,底下的 max-width 链就全失效了。 */
+.newchat-pickers { display: flex; flex-direction: column; align-items: center; gap: 2px; margin: 0 0 8px; }
 .newchat-pickers .engine-picker { margin-bottom: 0; }
 
 .composer-hint { font-size: 11px; color: var(--text-ghost); }
@@ -1660,6 +1677,19 @@ a:hover { color: var(--accent-hover); }
   text-transform: uppercase;
   letter-spacing: 0.07em;
 }
+/* 两级分类:大类(Forsion/Tangu)标题醒目,小类沿用 grouphead;项带图标 */
+.settings-nav-section { display: flex; flex-direction: column; }
+.settings-nav-section + .settings-nav-section { margin-top: 22px; }
+.settings-nav-sectionhead {
+  padding: 2px 10px 4px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+.settings-nav-section .settings-nav-group + .settings-nav-group { margin-top: 10px; }
+.settings-nav-list button { gap: 7px; }
+.settings-nav-list button svg { color: var(--text-faint); flex-shrink: 0; }
+.settings-nav-list button.active svg { color: var(--accent-ink); }
 .settings-main {
   min-width: 0;
   min-height: 0;
@@ -1736,6 +1766,37 @@ a:hover { color: var(--accent-hover); }
   .settings-main-head { padding-inline: 16px; }
   .settings-body { padding-inline: 16px; }
 }
+
+/* 移动预览手机框内:桌面「左栏导航 + 右内容」双栏 → 「顶部横向滚动标签栏 + 内容」。
+   设置 / 应用市场 / 成就三个二级界面共用 .settings-page 骨架,一处通吃。媒体查询按视口宽,预览时桌面窗口很宽
+   不会触发,故改按 .sc-device 容器作用域。ponytail: 只覆盖预览态;真机 MobileRoot 暂不渲染这些浮层,
+   将来若渲染,改用 <html data-ui-mode="mobile"> 标记复用同一套规则。 */
+.sc-device .settings-page {
+  grid-template-columns: 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.sc-device .settings-nav {
+  border-right: none;
+  border-bottom: var(--border-width) solid var(--border);
+}
+/* 手机框预览跑在 macOS 桌面上,[data-platform="mac"] 会给 .settings-nav-top 塞 36px 交通灯留白 →
+   框内是「手机」不该有,复位成常规留白(否则顶部一段空白,看着像错位)。 */
+.sc-device .settings-nav-top { padding-top: 14px; }
+/* 左栏分类:竖排列表 → 横向滚动标签条;分组扁平成一条(隐藏组标题、去掉组间竖直间距)。 */
+.sc-device .settings-nav-list {
+  flex-direction: row;
+  gap: 4px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.sc-device .settings-nav-list::-webkit-scrollbar { display: none; }
+.sc-device .settings-nav-group,
+.sc-device .settings-nav-group + .settings-nav-group { flex-direction: row; gap: 4px; margin-top: 0; }
+.sc-device .settings-nav-grouphead { display: none; }
+.sc-device .settings-nav-list button { width: auto; flex: 0 0 auto; white-space: nowrap; }
+.sc-device .mk-grid { grid-template-columns: 1fr; }
 
 .field { margin-bottom: 14px; }
 .field label {

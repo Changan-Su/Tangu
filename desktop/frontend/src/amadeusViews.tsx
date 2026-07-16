@@ -7,7 +7,7 @@ import { create } from 'zustand'
 import {
   SquarePen, FolderOpen, Folder, FolderPlus, Plus, MoreHorizontal, Pencil, Trash2,
   ChevronRight, Search, Code2, Eye, Star, Paperclip, FileDown,
-  Database, ExternalLink, FileText, Share2,
+  Database, ExternalLink, FileText, Share2, Cloud, CloudOff, Pin, PenTool,
 } from 'lucide-react'
 import { useApp } from './stores/appStore'
 import { useTheme } from './stores/themeStore'
@@ -20,7 +20,9 @@ import { ensureAmadeusReady } from './amadeusPlugins'
 import { AmadeusPropertiesPanel } from './amadeusProperties'
 import { useAmadeusPrefs } from './amadeusPrefs'
 import type { TrashEntry } from '@amadeus-shared/ipc'
-import { openNote, openDb, openSearch } from './amadeusNav'
+import type { AmadeusSyncStatus } from './types'
+import { openNote, openDb, openPdf, openDrawing, createDrawing, openSearch } from './amadeusNav'
+import { isDrawingPath } from '@amadeus-shared/excalidraw/format'
 import { useSearchSeed } from './amadeusPanels'
 import { askString } from '@amadeus/components/askString'
 import { parseFmObject } from '@amadeus-shared/db/pageFrontmatter'
@@ -30,14 +32,20 @@ import { emptyDb, serializeDb } from '@amadeus-shared/db/schema'
 import { useRecentViews } from './recentViews'
 import { buildTree, mergeFdNotes, type TreeNode } from '@amadeus/lib/pageTree'
 import { fdDirOf, isNoteMd } from '@amadeus/lib/fd'
+import { useSectionOpen } from '@amadeus/lib/sectionOpen'
+import { folderPadLeft, rowPadLeft } from '@amadeus/lib/treeIndent'
 import { compile, parsePageSource } from '@amadeus-shared/compiler'
 import { recordNav, useWorkspace, activeMainPanel } from '@lcl/engine'
 import type { ViewProps } from '@lcl/engine'
-import { PageView } from '@amadeus/components/PageView'
+import { PageView, focusBody } from '@amadeus/components/PageView'
 import { CloudVaultPanel } from './components/CloudVaultPanel'
 import { PresenceDots } from './components/PresenceDots'
 import { ShareCard } from './components/ShareCard'
+import { tipProps, tipT, fsTipLines, type TipLines } from './hoverTip'
+import { useEntrySync, ensureEntrySyncSubscribed, isSyncedEntry } from './stores/entrySyncStore'
+import { openCloudSyncDialog } from './components/CloudSyncDialog'
 import { track } from './achievements/store'
+import { act } from './activity/log'
 import '@amadeus/blocks' // 注册内置块类型(markdown→Milkdown);缺此 side-effect 导入则块显示「未知块类型」
 import './views/chat2/sidebar2.css' // t2s- 侧栏样式(通常已随 SessionsView 全局加载;显式引入以防独立挂载)
 
@@ -154,6 +162,7 @@ interface Ctx { kind: 'page' | 'folder' | 'asset' | 'root'; path: string; x: num
 
 const isNotePath = (p: string): boolean => /\.md$/i.test(p)
 const isDbPath = (p: string): boolean => /\.db$/i.test(p)
+const isPdfPath = (p: string): boolean => /\.pdf$/i.test(p)
 const dbBaseName = (p: string): string => (p.split(/[\\/]/).pop() || p).replace(/\.db$/i, '')
 
 /** 回收站(桌面端 .trash):树底入口 + 浮层(恢复/彻底删/清空)。缺 API 的端(web/mobile)不渲染。 */
@@ -180,7 +189,7 @@ function TrashSection() {
   return (
     <>
       <button className="t2s-special amx-trash-entry" onClick={() => { refresh(); setOpen(true) }} title="查看回收站(删除的笔记/文件可恢复)">
-        <span className="t2s-special-ic"><Trash2 size={15} /></span>
+        <span className="t2s-special-ic"><Trash2 /></span>
         <span className="t2s-special-title">回收站{n > 0 ? ` (${n})` : ''}</span>
       </button>
       {open && (
@@ -202,7 +211,7 @@ function TrashSection() {
             <div className="amx-trash-list">
               {(items ?? []).map((it) => (
                 <div key={it.name} className="amx-trash-row">
-                  <span className="amx-trash-ic">{it.dir ? <Folder size={13} /> : <FileText size={13} />}</span>
+                  <span className="amx-trash-ic">{it.dir ? <Folder /> : <FileText />}</span>
                   <span className="amx-trash-name" title={`原位置:${it.original}`}>
                     {it.name}
                     <span className="amx-trash-orig">{dirOfOrig(it.original)}</span>
@@ -242,17 +251,21 @@ function TrashSection() {
 function PrefsSections({ row, pages }: { row: (path: string) => ReactNode; pages: string[] }) {
   const starredAll = useAmadeusPrefs((s) => s.starred)
   const collections = useAmadeusPrefs((s) => s.collections)
-  const [openStar, setOpenStar] = useState(true)
-  const [openColl, setOpenColl] = useState(true)
+  // 默认折叠 + 记住手动开合(用户拍板);只有 Vault(树所在的分区)默认展开。
+  const [openStar, toggleStar] = useSectionOpen('starred')
+  const [openColl, toggleColl] = useSectionOpen('collections')
   const exists = new Set(pages)
   const starred = starredAll.filter((p) => exists.has(p))
   if (!starred.length && !collections.length) return null
-  const section = (icon: ReactNode, label: string, items: string[], open: boolean, toggle: () => void): ReactNode => (
+  const section = (label: string, items: string[], open: boolean, toggle: () => void): ReactNode => (
     items.length > 0 && (
       <div className="amx-prefs-group">
         <button className="t2s-group-toggle" onClick={toggle}>
-          <span className={`t2s-chev${open ? ' open' : ''}`}><ChevronRight size={12} /></span>
-          <span className="t2s-group-name">{icon}<span className="t2s-group-label">{label}</span><span className="t2s-count">{items.length}</span></span>
+          <span className="t2s-group-name amx-sec-head">
+            <span className="t2s-group-label">{label}</span>
+            <span className={`t2s-chev${open ? ' open' : ''}`}><ChevronRight size={12} /></span>
+            <span className="t2s-count">{items.length}</span>
+          </span>
         </button>
         {open && <div className="t2s-group-sessions">{items.map((p) => row(p))}</div>}
       </div>
@@ -260,13 +273,16 @@ function PrefsSections({ row, pages }: { row: (path: string) => ReactNode; pages
   )
   return (
     <>
-      {section(<Star size={12} />, '收藏', starred, openStar, () => setOpenStar((o) => !o))}
+      {section('收藏', starred, openStar, toggleStar)}
       {/* 「最近」分区已按用户要求移除(收藏/集合保留)。 */}
       {collections.length > 0 && (
         <div className="amx-prefs-group">
-          <button className="t2s-group-toggle" onClick={() => setOpenColl((o) => !o)}>
-            <span className={`t2s-chev${openColl ? ' open' : ''}`}><ChevronRight size={12} /></span>
-            <span className="t2s-group-name"><Search size={12} /><span className="t2s-group-label">集合</span><span className="t2s-count">{collections.length}</span></span>
+          <button className="t2s-group-toggle" onClick={toggleColl}>
+            <span className="t2s-group-name amx-sec-head">
+              <span className="t2s-group-label">集合</span>
+              <span className={`t2s-chev${openColl ? ' open' : ''}`}><ChevronRight size={12} /></span>
+              <span className="t2s-count">{collections.length}</span>
+            </span>
           </button>
           {openColl && (
             <div className="t2s-group-sessions">
@@ -279,7 +295,7 @@ function PrefsSections({ row, pages }: { row: (path: string) => ReactNode; pages
                   title={`搜索:${c.query}`}
                   onClick={() => { openSearch(); useSearchSeed.getState().request(c.query) }}
                 >
-                  <span className="amx-coll-ic"><Search size={13} /></span>
+                  <span className="amx-coll-ic"><Search /></span>
                   <span className="amx-coll-name">{c.name}</span>
                   <button
                     className="amx-coll-del"
@@ -325,11 +341,185 @@ function SharedWithMeSection() {
             else collab.switchVault(s.vaultId)
           }}
         >
-          <span className="t2s-special-ic"><Share2 size={14} /></span>
+          <span className="t2s-special-ic"><Share2 /></span>
           <span className="t2s-special-title">{s.title}</span>
         </button>
       ))}
     </div>
+  )
+}
+
+/** 可折叠分区头(置顶/云同步/Vault名/Cloud工作区共用;PrefsSections 的 section 同款视觉)。
+ *  纯文字标题(无图标),折叠箭头紧跟文字之后(amx-sec-head 布局),计数/状态点靠行尾。
+ *  dropProps 挂在分区根上(头+体都是落点),dropActive 时整区描边(amx-drop-into 同款)。 */
+function SideSection({ id, defaultOpen, label, count, extra, dropProps, dropActive, children }: {
+  /** 折叠态的记忆键(要稳定;vault 分区用库名 → 每库各记各的)。 */
+  id: string
+  /** 缺省 false = 默认折叠(用户拍板);只有「树所在的那个分区」才给 true。 */
+  defaultOpen?: boolean
+  label: string
+  count?: number
+  extra?: ReactNode
+  dropProps?: { onDragOver: (e: RDragEvent<HTMLDivElement>) => void; onDragLeave: () => void; onDrop: (e: RDragEvent<HTMLDivElement>) => void }
+  dropActive?: boolean
+  children: ReactNode
+}) {
+  const [open, toggle] = useSectionOpen(id, defaultOpen)
+  return (
+    <div className={`amx-prefs-group${dropActive ? ' amx-drop-into' : ''}`} {...dropProps}>
+      <button className="t2s-group-toggle" onClick={toggle}>
+        <span className="t2s-group-name amx-sec-head">
+          <span className="t2s-group-label">{label}</span>
+          <span className={`t2s-chev${open ? ' open' : ''}`}><ChevronRight size={12} /></span>
+          {count !== undefined && <span className="t2s-count">{count}</span>}
+          {extra}
+        </span>
+      </button>
+      {open && <div className="t2s-group-sessions">{children}</div>}
+    </div>
+  )
+}
+
+/** 「置顶」分区(amadeusPrefs,每 vault 一份 localStorage;编辑器图钉按钮写入):
+ *  故意不进 frontmatter——fm 随云同步跟文件走,会让本地/云端两侧共享置顶。
+ *  恒显(空时引导文案);笔记可拖入=置顶(标记不挪位置)。 */
+function PinnedSection({ row, dragPath }: { row: (path: string) => ReactNode; dragPath: string | null }) {
+  const pins = useAmadeusPrefs((s) => s.pins)
+  const pages = usePageStore((s) => s.pages)
+  const vaultRoot = usePageStore((s) => s.vaultRoot)
+  const [over, setOver] = useState(false)
+  const items = useMemo(() => pages.filter((p) => pins.includes(p)), [pages, pins])
+  if (!vaultRoot) return null
+  const accepts = !!dragPath && isNotePath(dragPath) && !pins.includes(dragPath)
+  return (
+    <SideSection
+      id="pinned"
+      label="置顶"
+      count={items.length}
+      dropActive={over}
+      dropProps={{
+        onDragOver: (e) => {
+          if (!accepts) return
+          e.preventDefault()
+          e.stopPropagation()
+          e.dataTransfer.dropEffect = 'move'
+          if (!over) setOver(true)
+        },
+        onDragLeave: () => setOver(false),
+        onDrop: (e) => {
+          if (!accepts) return
+          e.preventDefault()
+          e.stopPropagation()
+          setOver(false)
+          useAmadeusPrefs.getState().togglePin(dragPath!)
+        },
+      }}
+    >
+      {items.length ? items.map((p) => row(p)) : <div className="t2s-hint amx-sec-hint">拖入笔记置顶,或点编辑器右上角的图钉</div>}
+    </SideSection>
+  )
+}
+
+/** 引擎跳过原因 → 人话(engine.ts 的 skipped reason;上限与服务端 MAX_TEXT/BINARY_BYTES=5MB 一致)。 */
+const skipLabel = (r: string): string => (r === 'TOO_LARGE' ? '超过 5MB,云端不收' : r === 'ASSET_404' ? '云端缺失' : r)
+
+const skipWarnRow = (skipped: Array<{ path: string; reason: string }>): ReactNode => (
+  <div
+    className="t2s-hint amx-sec-hint amx-cs-warn"
+    title={skipped.map((s) => `${s.path} — ${skipLabel(s.reason)}`).join('\n')}
+  >
+    ⚠ {skipped.length} 项未同步
+    {skipped.some((s) => s.reason === 'TOO_LARGE') ? '(有文件超过 5MB,云端单文件上限)' : ''},悬停看明细
+  </div>
+)
+
+/** 云端侧镜像引擎的跳过警示(如 >5MB 拒收):amadeusSync.onStatus 推送。此前这些跳过只藏在
+ *  设置页与状态点 tooltip 里,用户放个大文件进云端文件夹毫无反馈 —— 在云端树顶明示。 */
+function CloudSkipWarn() {
+  const [st, setSt] = useState<AmadeusSyncStatus | null>(null)
+  useEffect(() => {
+    const sync = window.amadeusSync
+    if (!sync) return
+    void sync.get().then(setSt).catch(() => {})
+    // status 通道两家共用:带 binding 的是按条目绑定引擎(CloudSyncSection 的地盘),这里只收镜像引擎。
+    return sync.onStatus((s) => { if (!s.binding) setSt(s) })
+  }, [])
+  if (!st?.enabled || !st.skipped.length) return null
+  return skipWarnRow(st.skipped)
+}
+
+/** 「云同步」分区(仅本地侧):当前 vault 已开启同步的条目汇总(原树位置不动),
+ *  分区头带该 vault 条目绑定引擎的状态点;行尾 ✕ 关闭同步;路径已不存在显 ghost。
+ *  恒显(空时引导文案);笔记/文件可拖入=走「开启云同步」关联勾选弹窗(与右键同流程)。 */
+function CloudSyncSection({ dragPath }: { dragPath: string | null }) {
+  const vaultRoot = usePageStore((s) => s.vaultRoot)
+  const pages = usePageStore((s) => s.pages)
+  const files = usePageStore((s) => s.files)
+  const folders = usePageStore((s) => s.folders)
+  const vaults = useEntrySync((s) => s.vaults)
+  const status = useEntrySync((s) => (vaultRoot ? s.status[vaultRoot] : undefined))
+  const [over, setOver] = useState(false)
+  const rec = vaults.find((v) => v.vaultRoot === vaultRoot)
+  if (!window.amadeusSync?.entrySyncEnable || !vaultRoot) return null
+  const entries = rec?.entries ?? []
+  const norm = (p: string): string => p.replace(/\\/g, '/').normalize('NFC')
+  const pageSet = new Set(pages.map(norm))
+  const fileSet = new Set(files.map(norm))
+  const folderSet = new Set(folders.map(norm))
+  const exists = (e: { path: string; kind: string }): boolean =>
+    e.kind === 'folder' ? folderSet.has(e.path) : e.kind === 'page' ? pageSet.has(e.path) : fileSet.has(e.path)
+  const dot = status?.state === 'error' || status?.state === 'auth-required' ? 'err' : status?.state === 'offline' ? 'off' : 'ok'
+  const dotTitle = rec ? `云端「${rec.cloudName}」${status ? ` · ${status.state}${status.skipped.length ? ` · ${status.skipped.length} 项跳过` : ''}` : ''}` : '尚未开启云同步'
+  const accepts = !!dragPath && !isSyncedEntry(vaultRoot, dragPath)
+  return (
+    <SideSection
+      id="cloudsync"
+      label="云同步"
+      count={entries.length}
+      extra={rec ? <span className={`amx-sync-dot ${dot}`} title={dotTitle} /> : undefined}
+      dropActive={over}
+      dropProps={{
+        onDragOver: (e) => {
+          if (!accepts) return
+          e.preventDefault()
+          e.stopPropagation()
+          e.dataTransfer.dropEffect = 'move'
+          if (!over) setOver(true)
+        },
+        onDragLeave: () => setOver(false),
+        onDrop: (e) => {
+          if (!accepts) return
+          e.preventDefault()
+          e.stopPropagation()
+          setOver(false)
+          openCloudSyncDialog(dragPath!, isNotePath(dragPath!) ? 'page' : 'asset')
+        },
+      }}
+    >
+      {!entries.length && <div className="t2s-hint amx-sec-hint">拖入笔记/文件,或右键条目「开启云同步」</div>}
+      {!!status?.skipped.length && skipWarnRow(status.skipped)}
+      {entries.map((e) => {
+        const ok = exists(e)
+        return (
+          <div
+            key={e.path}
+            className={`t2s-srow amx-cs-row${ok ? '' : ' amx-cs-ghost'}`}
+            role="button"
+            tabIndex={0}
+            title={ok ? e.path : `${e.path}(已不存在)`}
+            onClick={() => {
+              if (!ok) return
+              if (e.kind === 'page') void openNote(e.path)
+              else if (e.kind === 'asset' && isDbPath(e.path)) openDb(e.path)
+            }}
+          >
+            <span className="amx-cs-ic">{e.kind === 'folder' ? <Folder /> : e.kind === 'page' ? <FileText /> : <Paperclip />}</span>
+            <span className="t2s-srow-title">{e.kind === 'page' ? baseName(e.path) : e.path.split(/[\\/]/).pop()}</span>
+            <button className="amx-coll-del" title="关闭云同步(云端副本保留)" onClick={(ev) => { ev.stopPropagation(); void window.amadeusSync?.entrySyncDisable?.(e.path) }}>✕</button>
+          </div>
+        )
+      })}
+    </SideSection>
   )
 }
 
@@ -350,6 +540,8 @@ export function AmadeusPagesView() {
   const [dragPath, setDragPath] = useState<string | null>(null) // 正在拖动的笔记
   const [dragOver, setDragOver] = useState<string | null>(null) // 悬停的目标文件夹('' = 根)
   const [menu, setMenu] = useState<Ctx | null>(null)
+  // 本地侧 <Vault名> 分区:树就在里面 → **唯一默认展开**的分区(用户点名);手动折叠仍会被记住。
+  const [vaultOpen, toggleVault] = useSectionOpen('vault', true)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const renameRef = useRef<HTMLInputElement>(null)
@@ -364,6 +556,12 @@ export function AmadeusPagesView() {
     const offStruct = amadeus.onStructureChange?.(() => void ps().refreshStructure())
     return () => { offExt?.(); offStruct?.() }
   }, [])
+  // 按条目云同步注册表:订阅一次 + 切库时重取(activeRoot 跟随主进程活动 vault)。
+  useEffect(() => {
+    ensureEntrySyncSubscribed()
+    void useEntrySync.getState().refresh()
+  }, [vaultRoot])
+  const entryVaults = useEntrySync((s) => s.vaults)
   useEffect(() => { if (renaming) renameRef.current?.select() }, [renaming])
   useEffect(() => {
     if (!menu) return
@@ -391,6 +589,40 @@ export function AmadeusPagesView() {
     () => (q ? [...pages, ...files].filter((p) => baseName(p).toLowerCase().includes(q)) : []),
     [q, pages, files],
   )
+  // web(无 amadeusSync,库本身就在云端):同步 Vault 分区按 .forsion-vault 标记文件推导
+  // (桌面 entryEnable 时写入云端 vault 根;详见 cloudBridge 的 amadeusCloudVaults)。
+  const [webVaultNames, setWebVaultNames] = useState<string[]>([])
+  useEffect(() => {
+    const fn = (window as { amadeusCloudVaults?: () => Promise<string[]> }).amadeusCloudVaults
+    if (!fn || window.amadeusSync) return
+    let alive = true
+    void fn().then((names) => { if (alive) setWebVaultNames(names) }).catch(() => {})
+    return () => { alive = false }
+  }, [pages, folders]) // 树刷新时重推导(标记文件出现/消失)
+  // 云端侧:根节点按「同步 Vault 文件夹」切分——桌面=注册表云名(恒显,镜像未拉到时 node=null
+  // 显示等待文案);web=标记推导。其余节点归「Cloud工作区」。
+  const cloudSections = useMemo(() => {
+    const isDesktopCloud = !!window.amadeusSync && vaultSide === 'cloud'
+    // web(库本身在云端)恒走云端样式——落进下面的本地分支会把 vault UUID 当 <Vault名> 显示。
+    const isWebCloud = !window.amadeusSync && !!(window as { amadeusCloudVaults?: unknown }).amadeusCloudVaults
+    if (!isDesktopCloud && !isWebCloud) return null
+    const names = isDesktopCloud ? [...new Set(entryVaults.map((v) => v.cloudName))].sort() : webVaultNames
+    const nodeOf = new Map(tree.children.filter((n) => n.kind === 'folder').map((n) => [n.path, n]))
+    const vaultSecs = names.map((name) => ({ name, node: nodeOf.get(name) ?? null }))
+    const nameSet = new Set(names)
+    const rest = tree.children.filter((n) => !(n.kind === 'folder' && nameSet.has(n.path)))
+    return { vaultSecs, rest }
+  }, [tree, entryVaults, vaultSide, webVaultNames])
+
+  // 白板/PDF/.db 开在各自的独立视图、不写 activePage → 树行永远不亮。聚焦主 tab 是这类视图时
+  // 按其文件参数点亮对应行(编辑器/其他视图聚焦时回落 activePage,原行为)。mainTabs 随激活变化刷新。
+  const mainTabs = useWorkspace((s) => s.mainTabs)
+  const activeViewFile = useMemo(() => {
+    const t = mainTabs.find((x) => x.active)
+    const key = t && ({ 'amadeus-drawing': 'drawingPath', 'amadeus-pdf': 'pdfPath', 'amadeus-db': 'dbPath' } as Record<string, string>)[t.type]
+    const v = key ? (useWorkspace.getState().api?.getPanel(t!.id)?.params as Record<string, unknown> | undefined)?.[key] : null
+    return typeof v === 'string' ? v : null
+  }, [mainTabs])
 
   const toggle = (f: string): void => setExpanded((prev) => {
     const n = new Set(prev); n.has(f) ? n.delete(f) : n.add(f); return n
@@ -438,11 +670,18 @@ export function AmadeusPagesView() {
     void (async () => {
       const bytes = new TextEncoder().encode(serializeDb(emptyDb(name)))
       await amadeus.saveAttachment('', `${name}.db`, bytes, { mode: 'vault', folder: parent })
-      track('base.create')
+      track('base.create'); act('base.create', { f: rel })
       await ps().refreshStructure()
       if (parent) setExpanded((prev) => new Set([...prev, ...prefixesOf(parent)]))
       openDb(rel)
     })().catch((e: unknown) => window.alert(`新建 Base 失败:${e instanceof Error ? e.message : String(e)}`))
+  }
+  /** 新建白板(.excalidraw.md):创建流程在 amadeusNav.createDrawing(命令面板共用),这里只补树的展开。 */
+  const newDrawing = (parent: string): void => {
+    setMenu(null)
+    void createDrawing(parent).then((rel) => {
+      if (rel && parent) setExpanded((prev) => new Set([...prev, ...prefixesOf(parent)]))
+    })
   }
 
   /** 拖拽悬停在「合并笔记节点」上 = 拖进它的 .fd(Notion 语义);守卫拖自己/拖回原处/拖进自己子树。 */
@@ -459,16 +698,32 @@ export function AmadeusPagesView() {
     if (dragOver !== fd) setDragOver(fd)
   }
 
+  /** 行的悬停提示:笔记/附件 → 文件名 + 修改/创建时间(走主进程 stat)。vault 未就绪则不弹。 */
+  const rowTip = (path: string) => (): Promise<TipLines | null> | null =>
+    vaultRoot ? fsTipLines(`${vaultRoot}/${path}`, isNotePath(path) ? baseName(path) : path.split(/[\\/]/).pop() ?? path) : null
+
+  /** 在笔记的 .fd 里建子笔记并打开 —— 行内「+」与右键菜单「新建子笔记」的同一落点。 */
+  const newChild = (p: string): void => {
+    void ps().createChildNote(p, '未命名').then((np) => {
+      setExpanded((prev) => new Set([...prev, ...prefixesOf(fdDirOf(p))]))
+      void ps().loadPage(np)
+    })
+  }
+
   const row = (path: string, depth = 0, merged?: { fd: string; open: boolean; count: number }): ReactNode => {
-    const isNote = isNotePath(path)
+    // 白板(.excalidraw.md)磁盘上也是 .md,必须先于「笔记」判定:进了 openNote 会被 compiler 当页面改写=毁档。
+    const isDraw = isDrawingPath(path)
+    const isNote = !isDraw && isNotePath(path)
     const ctxKind = isNote ? 'page' : 'asset'
+    // 无 emoji 时的类型兜底图标(md 笔记也有 —— 用户要求)。尺寸由 CSS .t2s-lead-icon 定,勿传 size。
+    const LeadIcon = isDbPath(path) ? Database : isDraw ? PenTool : isNote ? FileText : Paperclip
     return (
     <button
       key={path}
       ref={(el) => { if (path === flash) flashRef.current = el }}
-      className={`t2s-srow${path === activePage ? ' active' : ''}${path === flash ? ' amx-flash' : ''}${path === dragPath ? ' dragging' : ''}${merged && dragPath && dragOver === merged.fd ? ' amx-drop-into' : ''}`}
-      style={depth > 0 ? { paddingLeft: 18 + depth * 14 } : undefined}
-      onClick={(e) => { isNote ? void openNote(path, { newTab: e.metaKey || e.ctrlKey }) : isDbPath(path) ? openDb(path) : void amadeus.openVaultFile(path).catch(() => {}) }}
+      className={`t2s-srow${path === (activeViewFile ?? activePage) ? ' active' : ''}${path === flash ? ' amx-flash' : ''}${path === dragPath ? ' dragging' : ''}${merged && dragPath && dragOver === merged.fd ? ' amx-drop-into' : ''}`}
+      style={{ paddingLeft: rowPadLeft(depth) }}
+      onClick={(e) => { isNote ? void openNote(path, { newTab: e.metaKey || e.ctrlKey }) : isDraw ? openDrawing(path) : isDbPath(path) ? openDb(path) : isPdfPath(path) ? openPdf(path) : void amadeus.openVaultFile(path).catch(() => {}) }}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ kind: ctxKind, path, x: e.clientX, y: e.clientY }) }}
       draggable={renaming !== path}
       onDragStart={(e) => {
@@ -482,16 +737,23 @@ export function AmadeusPagesView() {
       onDragOver={merged ? (e) => mergedDragOver(e, path, merged.fd) : undefined}
       onDragLeave={merged ? () => { if (dragOver === merged.fd) setDragOver(null) } : undefined}
       onDrop={merged ? (e) => { e.preventDefault(); e.stopPropagation(); dropTo(merged.fd) } : undefined}
-      title={path}
+      {...tipProps(rowTip(path))}
     >
-      {merged && (
-        <span
-          className={`t2s-chev amx-note-chev${merged.open ? ' open' : ''}`}
-          onClick={(e) => { e.stopPropagation(); toggle(merged.fd) }}
-        >
-          <ChevronRight size={12} />
-        </span>
-      )}
+      {/* 前导槽:**每行都有**(含文件夹行),故所有图标左边缘对齐、尺寸也一致(见 .t2s-lead)。
+          槽内恒显图标(emoji 优先,否则类型兜底图标);**可展开的行 hover 才把图标换成箭头**(用户拍板)。 */}
+      <span className="t2s-lead">
+        {icons[path]
+          ? <span className="amx-page-emoji">{icons[path]}</span>
+          : <LeadIcon className="t2s-lead-icon t2s-dim" />}
+        {merged && (
+          <span
+            className={`t2s-chev t2s-lead-chev${merged.open ? ' open' : ''}`}
+            onClick={(e) => { e.stopPropagation(); toggle(merged.fd) }}
+          >
+            <ChevronRight size={12} />
+          </span>
+        )}
+      </span>
       {renaming === path ? (
         <input
           ref={renameRef}
@@ -504,17 +766,18 @@ export function AmadeusPagesView() {
         />
       ) : (
         <span className="t2s-srow-title">
-          {!isNote && (isDbPath(path)
-            ? <Database size={11} className="t2s-dim" style={{ marginRight: 5, verticalAlign: -1 }} />
-            : <Paperclip size={11} className="t2s-dim" style={{ marginRight: 5, verticalAlign: -1 }} />)}
-          {isNote && icons[path] && <span className="amx-page-emoji">{icons[path]}</span>}
-          {isNote ? baseName(path) : path.split(/[\\/]/).pop()}
+          {isNote || isDraw ? baseName(path) : path.split(/[\\/]/).pop()}
         </span>
       )}
-      {merged && renaming !== path && <span className="t2s-count">{merged.count}</span>}
+      {/* 行尾顺序:… 在左、+ 在右(同文件夹头);+ 仅笔记有(附件/.db 没有 .fd)。 */}
       <span className="t2s-srow-menu" onClick={(e) => { e.stopPropagation(); setMenu({ kind: ctxKind, path, x: e.clientX, y: e.clientY }) }}>
         <MoreHorizontal size={14} />
       </span>
+      {isNote && (
+        <span className="t2s-srow-menu" title="新建子笔记" onClick={(e) => { e.stopPropagation(); newChild(path) }}>
+          <Plus size={14} />
+        </span>
+      )}
     </button>
     )
   }
@@ -547,6 +810,7 @@ export function AmadeusPagesView() {
     const folder = node.path
     const isCol = !expanded.has(folder)
     const fileCount = node.children.filter((c) => c.kind === 'file').length
+    const dirCount = node.children.length - fileCount
     const folderDragOver = (e: RDragEvent<HTMLDivElement>): void => {
       if (!dragPath) return
       e.stopPropagation()
@@ -564,18 +828,24 @@ export function AmadeusPagesView() {
         <div
           ref={(el) => { if (folder === flash) flashRef.current = el }}
           className={`t2s-group${folder === flash ? ' amx-flash' : ''}${dragPath && dragOver === folder ? ' amx-drop-into' : ''}`}
-          style={depth > 0 ? { paddingLeft: depth * 14 } : undefined}
+          style={{ paddingLeft: folderPadLeft(depth) }}
+          {...tipProps(() => [tipT('tip.folder', { files: fileCount, folders: dirCount })])}
           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ kind: 'folder', path: folder, x: e.clientX, y: e.clientY }) }}
           onDragOver={folderDragOver}
           onDragLeave={() => { if (dragOver === folder) setDragOver(null) }}
           onDrop={(e) => { e.preventDefault(); e.stopPropagation(); dropTo(folder) }}
         >
-          <button className="t2s-group-toggle" onClick={() => toggle(folder)}>
-            <span className={`t2s-chev${isCol ? '' : ' open'}`}><ChevronRight size={12} /></span>
-            <span className="t2s-group-name"><Folder size={12} /><span className="t2s-group-label">{folderName(folder)}</span><span className="t2s-count">{fileCount}</span></span>
+          {/* 与笔记行同构:前导槽(图标 ↔ hover 换箭头)+ 名字。展开态靠 FolderOpen/Folder 表达
+              —— 箭头默认不显了(用户拍板),没有它就得由图标担起「展开了没」这个信息。 */}
+          <button className="t2s-group-toggle t2s-folder-row" onClick={() => toggle(folder)}>
+            <span className="t2s-lead">
+              {isCol ? <Folder className="t2s-lead-icon" /> : <FolderOpen className="t2s-lead-icon" />}
+              <span className={`t2s-chev t2s-lead-chev${isCol ? '' : ' open'}`}><ChevronRight size={12} /></span>
+            </span>
+            <span className="t2s-group-label">{folderName(folder)}</span>
           </button>
-          <button className="t2s-group-add" title="在此文件夹新建笔记" onClick={() => { setExpanded((prev) => new Set([...prev, ...prefixesOf(folder)])); void ps().createPageInFolder(folder) }}><Plus size={14} /></button>
           <button className="t2s-group-add" title="文件夹操作" onClick={(e) => { e.stopPropagation(); setMenu({ kind: 'folder', path: folder, x: e.clientX, y: e.clientY }) }}><MoreHorizontal size={14} /></button>
+          <button className="t2s-group-add" title="在此文件夹新建笔记" onClick={() => { setExpanded((prev) => new Set([...prev, ...prefixesOf(folder)])); void ps().createPageInFolder(folder) }}><Plus size={14} /></button>
         </div>
         {/* 展开的文件夹内部(含其中的笔记行)也是该文件夹的落点——与文件管理器语义一致。 */}
         {!isCol && (
@@ -631,16 +901,71 @@ export function AmadeusPagesView() {
             <>
               <div className="t2s-special-group">
                 <button className="t2s-special" onClick={() => void ps().createPage()}>
-                  <span className="t2s-special-ic"><SquarePen size={15} /></span>
+                  <span className="t2s-special-ic"><SquarePen /></span>
                   <span className="t2s-special-title">新建笔记</span>
+                </button>
+                <button className="t2s-special" onClick={() => newDrawing('')}>
+                  <span className="t2s-special-ic"><PenTool /></span>
+                  <span className="t2s-special-title">新建白板</span>
                 </button>
                 {/* 「今天」已移除;「Vault」入口移到底部 footer(回收站下方)。 */}
               </div>
 
               {!vaultRoot && <div className="t2s-hint">打开一个 Vault 文件夹开始。</div>}
+              <PinnedSection row={row} dragPath={dragPath} />
+              {vaultSide === 'local' && <CloudSyncSection dragPath={dragPath} />}
               <SharedWithMeSection />
               <PrefsSections row={row} pages={pages} />
-              {tree.children.map((n) => renderNode(n, 0))}
+              {cloudSections ? (
+                <>
+                  {/* 云端侧:Cloud工作区(非同步Vault部分)+ 每个同步 Vault 一个分区(镜像内容,双向可编辑;
+                      注册表有名字但镜像还没拉到时也占位显示)。 */}
+                  <CloudSkipWarn />
+                  <SideSection id="cloud-ws" defaultOpen label="Cloud工作区">
+                    {cloudSections.rest.length ? cloudSections.rest.map((n) => renderNode(n, 0)) : <div className="t2s-hint amx-sec-hint">空</div>}
+                  </SideSection>
+                  {cloudSections.vaultSecs.map(({ name, node }) => (
+                    <SideSection key={name} id={`vault:${name}`} defaultOpen label={name}>
+                      {node && node.children.length
+                        ? node.children.map((c) => renderNode(c, 0))
+                        : <div className="t2s-hint amx-sec-hint">{node ? '空' : '同步内容尚未到达'}</div>}
+                    </SideSection>
+                  ))}
+                </>
+              ) : vaultRoot ? (
+                // 本地侧:<Vault名> 分区,现有树整体挂其下;分区内空白区保留「拖回根目录」落点。
+                <div className="amx-prefs-group">
+                  <button className="t2s-group-toggle" onClick={toggleVault}>
+                    <span className="t2s-group-name amx-sec-head">
+                      <span className="t2s-group-label">{baseName(vaultRoot)}</span>
+                      <span className={`t2s-chev${vaultOpen ? ' open' : ''}`}><ChevronRight size={12} /></span>
+                    </span>
+                  </button>
+                  {vaultOpen && (
+                    <div
+                      className={`t2s-group-sessions${dragPath && dragOver === '' ? ' amx-drop-root' : ''}`}
+                      onDragOver={(e) => {
+                        // 根目录落点:分区内真空白(行/文件夹自己的 handler 已 stopPropagation)。
+                        if (!dragPath || parentOf(dragPath) === '' || q) return
+                        if ((e.target as HTMLElement).closest('.t2s-srow, .t2s-group')) return
+                        e.preventDefault()
+                        e.dataTransfer.dropEffect = 'move'
+                        if (dragOver !== '') setDragOver('')
+                      }}
+                      onDragLeave={() => { if (dragOver === '') setDragOver(null) }}
+                      onDrop={(e) => {
+                        if ((e.target as HTMLElement).closest('.t2s-srow, .t2s-group')) return
+                        e.preventDefault()
+                        dropTo('')
+                      }}
+                    >
+                      {tree.children.map((n) => renderNode(n, 0))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                tree.children.map((n) => renderNode(n, 0))
+              )}
             </>
           )}
         </div>
@@ -652,7 +977,7 @@ export function AmadeusPagesView() {
             onClick={() => (cloudLib ? setCloudPanel(true) : void ps().openVault())}
             title={cloudLib ? '云端笔记库(切换 / 成员 / 分享)' : vaultRoot || undefined}
           >
-            <span className="t2s-special-ic"><FolderOpen size={15} /></span>
+            <span className="t2s-special-ic"><FolderOpen /></span>
             <span className="t2s-special-title">{cloudLib ? '云端笔记库' : vaultRoot ? `Vault：${baseName(vaultRoot)}` : '打开 Vault'}</span>
           </button>
         </div>
@@ -661,18 +986,18 @@ export function AmadeusPagesView() {
       {menu?.kind === 'page' && (
         <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
           <button onClick={() => { void openNote(menu.path, { newTab: true }); setMenu(null) }}><Plus size={13} /> 在新标签页打开</button>
-          <button onClick={() => {
-            const p = menu.path
-            setMenu(null)
-            void ps().createChildNote(p, '未命名').then((np) => {
-              setExpanded((prev) => new Set([...prev, ...prefixesOf(fdDirOf(p))]))
-              void ps().loadPage(np)
-            })
-          }}><SquarePen size={13} /> 新建子笔记</button>
+          <button onClick={() => { const p = menu.path; setMenu(null); newChild(p) }}><SquarePen size={13} /> 新建子笔记</button>
           <button onClick={() => startRename(menu.path)}><Pencil size={13} /> 重命名</button>
           <button onClick={() => { useAmadeusPrefs.getState().toggleStar(menu.path); setMenu(null) }}>
             <Star size={13} /> {useAmadeusPrefs.getState().starred.includes(menu.path) ? '取消收藏' : '收藏'}
           </button>
+          {window.amadeusSync?.entrySyncEnable && vaultSide === 'local' && (
+            isSyncedEntry(vaultRoot, menu.path) ? (
+              <button onClick={() => { const p = menu.path; setMenu(null); void window.amadeusSync!.entrySyncDisable!(p) }}><CloudOff size={13} /> 关闭云同步</button>
+            ) : (
+              <button onClick={() => { const p = menu.path; setMenu(null); openCloudSyncDialog(p, 'page') }}><Cloud size={13} /> 开启云同步</button>
+            )
+          )}
           <button onClick={() => { void amadeus.revealInFileManager(menu.path); setMenu(null) }}><FolderOpen size={13} /> 在文件管理器中显示</button>
           <button className="danger" onClick={() => { const p = menu.path; setMenu(null); if (confirmedDelete('note', p)) { useRecentViews.getState().remove(`note:${p}`); void ps().deletePage(p) } }}><Trash2 size={13} /> 删除</button>
         </div>
@@ -683,6 +1008,16 @@ export function AmadeusPagesView() {
             <>
               <button onClick={() => { openDb(menu.path); setMenu(null) }}><Eye size={13} /> 打开</button>
               <button onClick={() => startRename(menu.path)}><Pencil size={13} /> 重命名</button>
+              <button onClick={() => { void amadeus.openVaultFile(menu.path).catch(() => {}); setMenu(null) }}><ExternalLink size={13} /> 用系统程序打开</button>
+            </>
+          ) : isPdfPath(menu.path) ? (
+            <>
+              <button onClick={() => { openPdf(menu.path); setMenu(null) }}><Eye size={13} /> 打开(可批注)</button>
+              <button onClick={() => { void amadeus.openVaultFile(menu.path).catch(() => {}); setMenu(null) }}><ExternalLink size={13} /> 用系统程序打开</button>
+            </>
+          ) : isDrawingPath(menu.path) ? (
+            <>
+              <button onClick={() => { openDrawing(menu.path); setMenu(null) }}><Eye size={13} /> 打开白板</button>
               <button onClick={() => { void amadeus.openVaultFile(menu.path).catch(() => {}); setMenu(null) }}><ExternalLink size={13} /> 用系统程序打开</button>
             </>
           ) : (
@@ -697,8 +1032,16 @@ export function AmadeusPagesView() {
           <button onClick={() => { setExpanded((prev) => new Set([...prev, ...prefixesOf(menu.path)])); void ps().createPageInFolder(menu.path); setMenu(null) }}><SquarePen size={13} /> 新建笔记</button>
           <button onClick={() => newFolder(menu.path)}><FolderPlus size={13} /> 新建子文件夹</button>
           <button onClick={() => newBase(menu.path)}><Database size={13} /> 新建 Base</button>
+          <button onClick={() => newDrawing(menu.path)}><PenTool size={13} /> 新建白板</button>
           <button onClick={() => { const f = menu.path; setMenu(null); void askString('重命名文件夹', folderName(f)).then((name) => { const n = name?.trim(); if (n) void ps().renameFolder(f, n) }) }}><Pencil size={13} /> 重命名</button>
           <button onClick={() => { void amadeus.revealInFileManager(menu.path); setMenu(null) }}><FolderOpen size={13} /> 在文件管理器中显示</button>
+          {window.amadeusSync?.entrySyncEnable && vaultSide === 'local' && (
+            isSyncedEntry(vaultRoot, menu.path) ? (
+              <button onClick={() => { const f = menu.path; setMenu(null); void window.amadeusSync!.entrySyncDisable!(f) }}><CloudOff size={13} /> 关闭云同步</button>
+            ) : (
+              <button onClick={() => { const f = menu.path; setMenu(null); openCloudSyncDialog(f, 'folder') }}><Cloud size={13} /> 开启云同步</button>
+            )
+          )}
           {window.amadeusCollab && (
             <button onClick={() => {
               const f = menu.path
@@ -716,6 +1059,7 @@ export function AmadeusPagesView() {
           <button onClick={() => { void ps().createPage(); setMenu(null) }}><SquarePen size={13} /> 新建笔记</button>
           <button onClick={() => newFolder('')}><FolderPlus size={13} /> 新建文件夹</button>
           <button onClick={() => newBase('')}><Database size={13} /> 新建 Base</button>
+          <button onClick={() => newDrawing('')}><PenTool size={13} /> 新建白板</button>
         </div>
       )}
 
@@ -1051,8 +1395,15 @@ function NoteTitle() {
           onChange={(e) => setVal(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() }
-            if (e.key === 'Escape') { setVal(shown); e.currentTarget.blur() }
+            // 标题 → 正文:回车 / 光标已在末尾再按 →↓ 都进正文(blur 触发 commit 改名;空正文则建首块)。
+            const el = e.currentTarget
+            const atEnd = el.selectionStart === el.value.length && el.selectionEnd === el.value.length
+            if (e.key === 'Enter' || ((e.key === 'ArrowRight' || e.key === 'ArrowDown') && atEnd)) {
+              // 必须先 focusBody 再 blur:blur→commit→renamePage 会同步快照 manifest 并在返回时回填,
+              // 顺序反了则空正文刚建的首块会被这次回填冲掉(光标也就无处可落)。
+              e.preventDefault(); focusBody(); el.blur()
+            }
+            if (e.key === 'Escape') { setVal(shown); el.blur() }
           }}
         />
       </div>
@@ -1134,6 +1485,13 @@ export function AmadeusEditorView({ leaf }: ViewProps) {
   const [shareCard, setShareCard] = useState<{ x: number; y: number } | null>(null) // 共享/发布卡片(web/桌面 collab)
   const printHostRef = useRef<HTMLElement | null>(null) // 本编辑器实例的 EditorScope 根(分屏下导出各自的)
   const starred = useAmadeusPrefs((s) => !!activePage && s.starred.includes(activePage))
+  const pinned = useAmadeusPrefs((s) => !!activePage && s.pins.includes(activePage))
+  // 云同步按钮(图钉右侧,仅桌面本地侧):点亮=本笔记已是显式同步条目;点击开启走关联勾选弹窗,再点关闭。
+  const vaultSide = usePageStore((s) => s.vaultSide)
+  useEntrySync((s) => s.vaults) // 订阅注册表变更驱动重渲(isSyncedEntry 读 getState)
+  useEffect(() => { ensureEntrySyncSubscribed() }, [])
+  const canEntrySync = !!window.amadeusSync?.entrySyncEnable && vaultSide === 'local'
+  const synced = canEntrySync && !!activePage && isSyncedEntry(ps().vaultRoot, activePage)
   useEffect(() => {
     if (!noteMenu) return
     const close = (): void => setNoteMenu(null)
@@ -1253,6 +1611,26 @@ export function AmadeusEditorView({ leaf }: ViewProps) {
         <div className="amx-toolbar">
           <Breadcrumb />
           <PluginStatusItems />
+          {/* 置顶图钉(字数统计右侧):写 amadeusPrefs(每 vault localStorage),侧边栏「置顶」分区同步点亮。 */}
+          <button
+            className={`amx-mode-btn amx-pin-btn${pinned ? ' amx-pin-on' : ''}`}
+            title={pinned ? '取消置顶' : '置顶'}
+            onClick={() => useAmadeusPrefs.getState().togglePin(activePage)}
+          >
+            <Pin size={14} />
+          </button>
+          {canEntrySync && (
+            <button
+              className={`amx-mode-btn amx-pin-btn${synced ? ' amx-pin-on' : ''}`}
+              title={synced ? '关闭云同步(云端副本保留)' : '开启云同步'}
+              onClick={() => {
+                if (synced) void window.amadeusSync?.entrySyncDisable?.(activePage)
+                else openCloudSyncDialog(activePage, 'page')
+              }}
+            >
+              <Cloud size={14} />
+            </button>
+          )}
           {window.amadeusCollab && <PresenceDots />}
           {window.amadeusCollab && (
             <button

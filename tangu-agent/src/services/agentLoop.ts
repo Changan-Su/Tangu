@@ -386,7 +386,8 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
   // 文本兜底也没解出来)时,回灌一次纠正提示让它改用原生函数调用,而非静默收尾。
   const MAX_TOOLCALL_RECOVERY = 2;
   let toolCallRecoveryUsed = 0;
-  const thinkingLevel: ThinkingLevel = agentConfig.thinkingLevel || 'off';
+  // 未显式设置的会话默认思考·中(2026-07-16 产品拍板);显式 'off' 仍关。UI 显示默认须同步(ModelPill)。
+  const thinkingLevel: ThinkingLevel = agentConfig.thinkingLevel || 'medium';
   const attachments = input.attachments || [];
   // host-exec（TUI/桌面本机模式）注入：execMode/cwd/approvalMode 只经 per-run agentConfig 传入。
   // 缺省 sandbox + full-auto → microserver/standalone-server/worker 行为零变化（审批仅 host 激活）。
@@ -951,8 +952,16 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
       return toolResults;
     };
 
-    const user = await getUserById(userId);
-    if (!user) throw new LlmError(404, 'User not found');
+    // 直连(BYOK/订阅)模型不依赖 Forsion 云端:未登录时 getUserById 打云端会 401,曾把纯本地
+    // 对话整个打挂("brain /api/brain/users/me 401")。命中直连 → 云端用户探针失败降级为本地
+    // 桩用户(standalone 的 billing 本就 no-op,user 只喂 user.id/username);云端部署无
+    // hasDirectModel → 行为不变,用户不存在仍硬失败。
+    const isDirectModel = !!deps().brain.models.hasDirectModel?.(modelId);
+    let user = await getUserById(userId).catch((e) => { if (!isDirectModel) throw e; return null; });
+    if (!user) {
+      if (!isDirectModel) throw new LlmError(404, 'User not found');
+      user = { id: userId, username: 'local' };
+    }
 
     const estCost = await calculateCost(modelId, JSON.stringify(workingMessages).length / 4, 500);
     const pre = await canConsumeTokenPoints(user.id, estCost);
@@ -1077,7 +1086,11 @@ async function runLoop(runId: string, ac: AbortController): Promise<void> {
             `[agent-core] run=${runId} LLM 调用瞬时失败,${wait}ms 后重试 ${attempt + 1}/${MODEL_MAX_RETRIES}: ` +
               `${(err as any)?.status ?? (err as any)?.name ?? 'net'} ${(err as any)?.message || err}`,
           );
-          void publish(runId, 'status', { phase: 'llm_retry', attempt: attempt + 1, iteration });
+          // max/waitMs/error 供客户端渲染「第 N/M 次重试,Xs 后」——没有它们 UI 只能干等(用户报告像死机)。
+          void publish(runId, 'status', {
+            phase: 'llm_retry', attempt: attempt + 1, max: MODEL_MAX_RETRIES, waitMs: wait,
+            error: String((err as any)?.message || err).slice(0, 160), iteration,
+          });
           await new Promise((r) => setTimeout(r, wait));
           if (ac.signal.aborted) throw new AbortLikeError();
         }

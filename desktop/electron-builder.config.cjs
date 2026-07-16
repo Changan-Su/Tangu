@@ -40,6 +40,11 @@ module.exports = {
     '!node_modules/@rollup/**',
     '!node_modules/@types/**',
   ],
+  // sherpa-onnx-node(本地语音识别)是原生插件:.node + onnxruntime 动态库不能从 asar 内加载,整体解包。
+  asarUnpack: [
+    '**/node_modules/sherpa-onnx-node/**',
+    '**/node_modules/sherpa-onnx-{darwin,linux,win}-*/**',
+  ],
   extraResources: [
     // 托盘/菜单栏图标:运行时主进程读 resources/tray.png(build/ 不进包,故显式复制)。
     { from: 'build/icon.png', to: 'tray.png' },
@@ -55,7 +60,7 @@ module.exports = {
       : []),
   ],
   linux: { target: 'AppImage', icon: 'build/icon.png' },
-  mac: { target: 'dmg', icon: 'build/icon.icns', identity: null },
+  mac: { target: 'dmg', icon: 'build/icon.icns', identity: null, extendInfo: { NSMicrophoneUsageDescription: 'Forsion 需要访问麦克风以进行语音输入(将语音转写为文字)。' } },
   dmg: {
     window: { width: 560, height: 440 },
     contents: [

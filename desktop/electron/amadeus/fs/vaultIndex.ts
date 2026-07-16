@@ -6,6 +6,7 @@
 // expose each block for cross-note embeds, and record which blocks each note embeds.
 
 import { promises as fs } from 'node:fs'
+import path from 'node:path'
 import { linkTarget, pageKey, parseEmbeds, parseTags, parseWikiLinks, resolvePageName, stripForIndex } from '@amadeus-shared/links'
 import { parseBody, stripFrontmatter } from '@amadeus-shared/compiler'
 import type { BacklinkRef, SearchHit, TagCount } from '@amadeus-shared/ipc'
@@ -121,6 +122,77 @@ export class VaultIndex {
     const out: Record<string, string> = {}
     for (const e of this.entries.values()) if (e.icon) out[e.path] = e.icon
     return out
+  }
+
+  /**
+   * 「开启云同步」弹窗的递归关联闭包:从条目出发,沿 [[出链]]/![[嵌入]]/markdown 图片
+   * 一路收集关联笔记与附件(visited 防环),只返回**种子范围之外**的部分
+   * (范围内的东西 scope 本来就带,不需要用户勾选)。
+   */
+  async relatedClosure(rootRel: string, kind: 'page' | 'folder'): Promise<{ pages: string[]; files: string[] }> {
+    const nfc = (s: string): string => s.replace(/\\/g, '/').normalize('NFC')
+    const root = nfc(rootRel)
+    const allPages = [...this.entries.keys()].sort()
+    const byNfc = new Map(allPages.map((p) => [nfc(p), p]))
+    const seedFd = `${root.replace(/\.md$/i, '')}.fd/`
+    const inSeedScope = (rel: string): boolean => {
+      const r = nfc(rel)
+      if (kind === 'folder') return r === root || r.startsWith(`${root}/`)
+      return r === root || r.startsWith(seedFd)
+    }
+    const seeds = allPages.filter((p) => inSeedScope(p))
+    const vaultRoot = this.vault.getRoot()
+    const visited = new Set<string>()
+    const files = new Set<string>()
+    const queue = [...seeds]
+    // 镜像 shared/amadeus/assets.ts 的 IMG_RE(未导出;落盘形态标准 md 图片不在 links/embeds 里)。
+    const IMG_RE = /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+    const isExternal = (u: string): boolean => /^(https?:|data:|amadeus-asset:|blob:|\/)/.test(u)
+    const addFile = async (pagePath: string, ref: string): Promise<void> => {
+      if (!vaultRoot) return
+      const abs = await this.vault.resolveAttachment(pagePath, ref).catch(() => null)
+      if (!abs) return
+      const alive = await fs.stat(abs).then((s) => s.isFile()).catch(() => false)
+      if (!alive) return
+      const rel = path.relative(vaultRoot, abs).split(path.sep).join('/')
+      if (rel.startsWith('..')) return
+      files.add(rel)
+    }
+    while (queue.length) {
+      const p = queue.pop()!
+      if (visited.has(p)) continue
+      visited.add(p)
+      const e = this.entries.get(p)
+      if (!e) continue
+      const fd = `${p.replace(/\.md$/i, '')}.fd/`
+      for (const q of allPages) if (nfc(q).startsWith(nfc(fd)) && !visited.has(q)) queue.push(q)
+      for (const t of e.links) {
+        const hit = resolvePageName(t, allPages, p)
+        if (hit && !visited.has(hit)) queue.push(hit)
+      }
+      for (const raw of e.embeds) {
+        const hash = raw.lastIndexOf('#')
+        const base = (hash >= 0 ? raw.slice(0, hash) : raw).trim()
+        if (!base) continue // 本笔记内块嵌入
+        const ext = /\.([a-z0-9]+)$/i.exec(base)?.[1]
+        if (!ext || /^md$/i.test(ext)) {
+          const hit = resolvePageName(base.replace(/\.md$/i, ''), allPages, p) ?? byNfc.get(nfc(base))
+          if (hit && !visited.has(hit)) queue.push(hit)
+        } else {
+          await addFile(p, base)
+        }
+      }
+      let m: RegExpExecArray | null
+      IMG_RE.lastIndex = 0
+      while ((m = IMG_RE.exec(e.text))) {
+        const u = m[1].trim()
+        if (!isExternal(u)) await addFile(p, u)
+      }
+    }
+    return {
+      pages: [...visited].filter((p) => !inSeedScope(p)).sort(),
+      files: [...files].filter((f) => !inSeedScope(f)).sort(),
+    }
   }
 
   /** Resolve a `![[note#id]]` embed to its content + owning note (note-scoped by id). */

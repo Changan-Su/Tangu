@@ -29,6 +29,8 @@ export interface AggDb {
   folder?: string
   columns: DbColumn[]
   rows: AggRow[]
+  /** 只读源(如 agent 日程 `agent://…` 合成库):Calendar 不可拖拽/编辑,图例无默认库星标。 */
+  readonly?: boolean
 }
 
 /** 任意 cell → 展示文本(供名称列/其它列只读展示)。 */
@@ -37,9 +39,9 @@ export const cellText = (v: CellValue | undefined): string => {
   return typeof s === 'string' ? s : String(s ?? '')
 }
 
-/** 聚合全库「含某属性类型列」的多维表;随底层 store 变化重渲染。
+/** 聚合全库所有多维表(含笔记视图);随底层 store 变化重渲染。不做类型过滤。
  *  .db 路径直接取自 pageStore.files(vault 就绪 / 结构变更即到位)—— 重启后无需手动刷新即自动出现。 */
-export function useAggregatedDatabases(type: string): AggDb[] {
+export function useAllDatabases(): AggDb[] {
   const files = usePageStore((s) => s.files)
   const entries = useDbStore((s) => s.entries)
   const folders = useNoteViewStore((s) => s.folders)
@@ -68,7 +70,7 @@ export function useAggregatedDatabases(type: string): AggDb[] {
     for (const p of paths) {
       const e = entries[p]
       const db = e?.status === 'ok' ? e.data : null
-      if (!db || !db.columns.some((c) => c.type === type)) continue
+      if (!db) continue
       const folder = db.source?.folder
       if (folder !== undefined) {
         const props = folders[folder]?.props ?? []
@@ -88,7 +90,28 @@ export function useAggregatedDatabases(type: string): AggDb[] {
       }
     }
     return out
-  }, [paths, entries, folders, type])
+  }, [paths, entries, folders])
+}
+
+/** 「含某属性类型列」的子集(旧接口保留;新日历/待办改走成员制)。 */
+export function useAggregatedDatabases(type: string): AggDb[] {
+  const all = useAllDatabases()
+  return useMemo(() => all.filter((db) => db.columns.some((c) => c.type === type)), [all, type])
+}
+
+/** 日历锚点日期列 = primitive/自定义 baseType=date,或富类型 calendarDate(baseType=text)。 */
+export const isDateCol = (c: DbColumn): boolean => resolveBaseType(c.type) === 'date' || c.type === 'calendarDate'
+/** 完成/待办勾选列 = baseType=checkbox(含 primitive checkbox 与旧 todo 类型)。 */
+export const isCheckboxCol = (c: DbColumn): boolean => resolveBaseType(c.type) === 'checkbox'
+export const firstDateCol = (db: AggDb): DbColumn | undefined => db.columns.find(isDateCol)
+export const firstCheckboxCol = (db: AggDb): DbColumn | undefined => db.columns.find(isCheckboxCol)
+
+/** 全库 .db 是否都已「落定」(非 loading)——一次性迁移前用它等齐,防只迁到先加载好的那几个。 */
+export function useDatabasesReady(): boolean {
+  const files = usePageStore((s) => s.files)
+  const entries = useDbStore((s) => s.entries)
+  const paths = useMemo(() => files.filter((f) => DB_RE.test(f)), [files])
+  return paths.length > 0 && paths.every((p) => { const st = entries[p]?.status; return !!st && st !== 'loading' })
 }
 
 /** 写回一格:经典表 → dbStore.mutate;笔记视图 → noteViewStore.setProp。自定义类型按 baseType 落盘。 */

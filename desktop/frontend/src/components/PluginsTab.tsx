@@ -4,7 +4,7 @@
  * 插件清单与 agents 由 SettingsModal 统一持有并下传(避免双拉,启用态变更即时反映到 nav)。仅本地后端可用。
  */
 import React, { useEffect, useState } from 'react'
-import { setPluginEnabled, uninstallPlugin, type PluginInfo } from '../services/backendService'
+import { setPluginEnabled, uninstallPlugin, installPluginFromNpm, type PluginInfo } from '../services/backendService'
 import { useApp } from '../stores/appStore'
 import type { TanguDesktopConfig } from '../types'
 import { useI18n } from '../i18n'
@@ -25,6 +25,11 @@ export const PluginsTab: React.FC<{
     window.tangu?.pluginsUserInstalled?.().then((l) => setUserIds(new Set(l.map((x) => x.id)))).catch(() => {})
   }, [plugins])
 
+  // 从 npm 一条命令装引擎插件。
+  const [spec, setSpec] = useState('')
+  const [preferMirror, setPreferMirror] = useState(false)
+  const [installing, setInstalling] = useState(false)
+
   const toggle = async (p: PluginInfo): Promise<void> => {
     try { await setPluginEnabled(cfg, p.id, !p.enabled); onReload() } catch { /* ignore */ }
   }
@@ -42,12 +47,51 @@ export const PluginsTab: React.FC<{
     }
   }
 
-  if (!plugins) return <div className="hint">{t('common.loading')}</div>
-  if (!plugins.length) return <div className="hint">{t('settings.plugins.empty')}</div>
+  const doInstall = async (): Promise<void> => {
+    const s = spec.trim()
+    if (!s) return
+    const norm = s.startsWith('npm:') ? s : `npm:${s}`
+    if (!window.confirm(t('settings.plugins.npmInstallConfirm', { spec: norm }))) return
+    setInstalling(true)
+    try {
+      const r = await installPluginFromNpm(cfg, norm, preferMirror)
+      useApp.getState().toast(t('settings.plugins.installed', { id: r.id, version: r.version }))
+      setSpec('')
+      onReload()
+    } catch (e: any) {
+      useApp.getState().toast(e?.message || String(e), true)
+    } finally { setInstalling(false) }
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {plugins.map((p) => (
+      <div style={{ border: 'var(--border-width) solid var(--border)', borderRadius: 'var(--radius-lg, 10px)', padding: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ fontSize: 12, fontWeight: 600 }}>{t('settings.plugins.npmInstallTitle')}</div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            className="input"
+            placeholder="npm:@scope/plugin[@version]"
+            value={spec}
+            disabled={installing}
+            onChange={(e) => setSpec(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void doInstall() }}
+            style={{ flex: 1, minWidth: 200 }}
+          />
+          <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
+            <input type="checkbox" checked={preferMirror} onChange={(e) => setPreferMirror(e.target.checked)} />
+            {t('settings.plugins.preferMirror')}
+          </label>
+          <button className="btn sm" onClick={() => void doInstall()} disabled={installing || !spec.trim()}>
+            {installing ? t('settings.plugins.installing') : t('settings.plugins.installBtn')}
+          </button>
+        </div>
+        <div style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>{t('settings.plugins.npmInstallHint')}</div>
+      </div>
+      {!plugins
+        ? <div className="hint">{t('common.loading')}</div>
+        : !plugins.length
+          ? <div className="hint">{t('settings.plugins.empty')}</div>
+          : plugins.map((p) => (
         <div key={p.id} style={{ border: 'var(--border-width) solid var(--border)', borderRadius: 'var(--radius-lg, 10px)', padding: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ flex: 1, minWidth: 0 }}>

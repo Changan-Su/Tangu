@@ -12,6 +12,16 @@ import 'katex/dist/katex.min.css'
 import { Copy, Check } from 'lucide-react'
 import { useI18n } from '../i18n'
 import { normalizeMath } from '../services/mathNormalize'
+import { remarkWiki } from './wikiChat'
+import { ChatWikiLink } from './ChatWikiLink'
+
+// [[双链]] 经 remarkWiki 变成 #wiki= 链接,在这里拦下渲染;其余链接维持默认 <a>。
+const WikiAnchor = ({ href, children, node: _node, ...rest }: any) =>
+  typeof href === 'string' && href.startsWith('#wiki=') ? (
+    <ChatWikiLink inner={decodeURIComponent(href.slice(6))} />
+  ) : (
+    <a href={href} {...rest}>{children}</a>
+  )
 
 const CodeBlock: React.FC<React.HTMLAttributes<HTMLPreElement>> = ({ children, ...props }) => {
   const { t } = useI18n()
@@ -45,7 +55,7 @@ const CodeBlock: React.FC<React.HTMLAttributes<HTMLPreElement>> = ({ children, .
  */
 export const Markdown: React.FC<{ content: string; anchorPrefix?: string }> = React.memo(
   ({ content, anchorPrefix }) => {
-    const components: Record<string, any> = { pre: CodeBlock }
+    const components: Record<string, any> = { pre: CodeBlock, a: WikiAnchor }
     if (anchorPrefix) {
       const counter = { i: 0 }
       const heading = (level: 1 | 2 | 3) => {
@@ -62,7 +72,7 @@ export const Markdown: React.FC<{ content: string; anchorPrefix?: string }> = Re
     }
     return (
       <ReactMarkdown
-        remarkPlugins={[remarkMath, remarkGfm]}
+        remarkPlugins={[remarkMath, remarkGfm, remarkWiki]}
         rehypePlugins={[[rehypeKatex, { throwOnError: false }], [rehypeHighlight, { ignoreMissing: true, detect: false }]]}
         components={components}
       >

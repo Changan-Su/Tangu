@@ -1,4 +1,5 @@
 /** Calendar View 的纯日期数学(原生 Date,本地时区)。'YYYY-MM-DD' 刻意用本地构造避 UTC 午夜坑。 */
+import { parseCalDate, splitSide } from '@amadeus-shared/db/calDate'
 
 export const WEEK_START = 0 // 0=周日
 export const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
@@ -84,4 +85,43 @@ export function rangeLabel(days: Date[]): string {
   if (days.length === 1) return `${a.getFullYear()}年${a.getMonth() + 1}月${a.getDate()}日`
   const bm = a.getMonth() === b.getMonth() ? `${b.getDate()}日` : `${b.getMonth() + 1}月${b.getDate()}日`
   return `${a.getFullYear()}年${a.getMonth() + 1}月${a.getDate()}日 – ${bm}`
+}
+
+// ── 事件详情卡的时间摘要(Notion 式:主时段 + 副日期 + 时长徽章)──────────────────
+/** 时长(分)→ 中文简写:30分钟 / 1小时 / 1小时30分钟 / 2天(整天倍数)。 */
+export function fmtDur(min: number): string {
+  if (min <= 0) return ''
+  if (min < 60) return `${min}分钟`
+  if (min % 1440 === 0) return `${min / 1440}天`
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  return m ? `${h}小时${m}分钟` : `${h}小时`
+}
+
+/** side('YYYY-MM-DD[THH:mm]')→ 绝对分钟(纯算术、TZ 无关;仅用于求两侧差)。 */
+function sideMinutes(side: string): number {
+  const { date, time } = splitSide(side)
+  const [y, m, d] = date.split('-').map(Number)
+  const day = Date.UTC(y, m - 1, d) / 86_400_000
+  const [hh, mm] = time ? time.split(':').map(Number) : [0, 0]
+  return day * 1440 + hh * 60 + mm
+}
+
+/** 事件时间摘要(展示用):head=主行(时段/日期)、date=副行(日期+星期,定时才有)、
+ *  badge=时长或「全天」。纯字符串分段算,不经 Date 显示(避开 'YYYY-MM-DD' 被当 UTC 午夜的坑)。 */
+export function eventTimeSummary(raw: string): { head: string; date: string; badge: string } | null {
+  const cd = parseCalDate(raw)
+  if (!cd) return null
+  const md = (s: string): string => { const [, m, d] = s.split('-'); return `${Number(m)}月${Number(d)}日` }
+  const dow = (s: string): string => { const [y, m, d] = s.split('-').map(Number); return `周${WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]}` }
+  const a = splitSide(cd.start)
+  const b = cd.end ? splitSide(cd.end) : null
+  if (cd.allDay) {
+    const head = b && b.date !== a.date ? `${md(a.date)} → ${md(b.date)}` : `${md(a.date)} ${dow(a.date)}`
+    return { head, date: '', badge: '全天' }
+  }
+  if (!b) return { head: a.time, date: `${md(a.date)} ${dow(a.date)}`, badge: '' }
+  const badge = fmtDur(sideMinutes(cd.end!) - sideMinutes(cd.start))
+  if (a.date === b.date) return { head: `${a.time} → ${b.time}`, date: `${md(a.date)} ${dow(a.date)}`, badge }
+  return { head: `${md(a.date)} ${a.time} → ${md(b.date)} ${b.time}`, date: '', badge }
 }

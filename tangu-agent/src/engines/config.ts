@@ -93,14 +93,28 @@ function binOnPath(bin: string): boolean {
   return dirs.some((d) => names.some((n) => existsSync(path.join(d, n))));
 }
 
-/** 快速检测:该 agent 是否已装/已登录(配置目录存在 / 相关 env 已设 / bin 在 PATH)。无 detect 提示 → 默认可用(不隐藏用户自配引擎)。 */
-export function isEngineAvailable(def: EngineDef): boolean {
+export type EngineStatus = 'available' | 'needs-signin' | 'not-installed';
+
+/**
+ * 三态检测:
+ * - `available`     — 有鉴权信号(配置目录存在 或 相关 env 已设),或无 detect 提示(不隐藏用户自配引擎)。
+ * - `needs-signin`  — bin 在 PATH(装了)但无鉴权信号(没登录/没配 key)。
+ * - `not-installed` — 三者全不命中。
+ * 依据:claude-code/codex 运行走 `npx @…-acp`,`bin` 只是「装了」的探测提示;有 ~/.claude / API key 即真正可用,
+ * 故「有 auth 无 bin」并入 available、不设独立 unavailable 态(三态够用)。
+ */
+export function engineStatus(def: EngineDef): EngineStatus {
   const d = def.detect;
-  if (!d) return true;
-  if (d.dirs?.some((p) => existsSync(expandHome(p)))) return true;
-  if (d.env?.some((k) => !!process.env[k])) return true;
-  if (d.bin && binOnPath(d.bin)) return true;
-  return false;
+  if (!d) return 'available';
+  const hasAuth = !!(d.dirs?.some((p) => existsSync(expandHome(p))) || d.env?.some((k) => !!process.env[k]));
+  if (hasAuth) return 'available';
+  if (d.bin && binOnPath(d.bin)) return 'needs-signin';
+  return 'not-installed';
+}
+
+/** 兼容旧真值语义:非 not-installed 即「已检测」(needs-signin 也返回 true,由 UI 分辨是否需登录)。 */
+export function isEngineAvailable(def: EngineDef): boolean {
+  return engineStatus(def) !== 'not-installed';
 }
 
 export interface EnginePrefs {

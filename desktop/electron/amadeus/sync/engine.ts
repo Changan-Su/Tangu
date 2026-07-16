@@ -84,6 +84,9 @@ interface EngineDeps {
   /** P2 presence(可选):本引擎 SSE 收到的在线态(vaultId 由绑定决定)。 */
   onPresence?: (vaultId: string, data: unknown) => void
   onPresenceRoster?: (vaultId: string, data: unknown) => void
+  /** 远端结构事件已应用到本地后的回调(move/rename-folder/move-folder/delete*)。
+   *  按条目同步用它跟进注册表路径,否则远端改名后 scope 失配静默停同步。 */
+  onRemoteApplied?: (ev: CloudChange) => void
 }
 
 /** 绑定配置:一个引擎实例同步「一个本地目录 ↔ 一个云 vault 的一个范围」。 */
@@ -96,10 +99,21 @@ export interface EngineBinding {
   vaultId: 'first' | string
   /** 服务端路径前缀(共享页所在目录;own='')。本地 rel ↔ serverDir/rel。 */
   serverDir: string
-  /** 拉取侧范围过滤(共享=页+子页面+资产;own=undefined 全量)。 */
+  /** 范围过滤(共享=页+子页面+资产;own=undefined 全量)。推拉双向:拉侧 3 处消费,
+   *  推侧经 toServer 单咽喉——不加推侧过滤,localRoot=整个本地 vault 的按条目绑定会
+   *  (a)整库误上传 (b)缩小 scope 时 decide=deleteLocal 删掉用户本地文件(过滤后=dropShadow 干净解绑)。 */
   inScope?: (serverPath: string, kind: string) => boolean
   /** 本地排除前缀(own 引擎排除「与我共享/」,交给各共享绑定)。 */
   excludePrefixes?: string[]
+  /** 附加到 X-Amadeus-Client 的后缀(deviceId#suffix)。按条目绑定与 own 引擎同挂一个云 vault,
+   *  不区分 clientId 时 own 引擎会把条目绑定的推送当自回声只推游标 → 镜像永不物化。 */
+  clientIdSuffix?: string
+  /** localRoot 必须已存在(按条目绑定指向用户 vault,可能在外置盘上)。
+   *  不设时 restart 会 mkdir——对拔掉的挂载点会凭空造空根 → pushDelete 级联清空云端。 */
+  requireRootExists?: boolean
+  /** 目录名黑名单(如 .git/node_modules/.trash):遍历不下钻、事件不入队。
+   *  防止同步一个代码文件夹时 node_modules 洪水上传;own 镜像不设,行为不变。 */
+  ignoreNames?: string[]
 }
 
 const sha256 = (data: string | Buffer): string => createHash('sha256').update(data).digest('hex')
@@ -111,12 +125,16 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
   serverDir: '',
   excludePrefixes: ['与我共享/'],
 }) {
-  /** 本地相对路径(POSIX 化)↔ 服务端路径 的绑定映射。 */
+  /** 本地相对路径(POSIX 化)↔ 服务端路径 的绑定映射。
+   *  推侧过滤单咽喉:walkLocal/watcher/notifyLocal/notifyLocalMove 全经此处,scope 外一律 null。 */
   const toServer = (rel: string): string | null => {
     const sp = toServerPath(rel, '')
     if (!sp) return null
     for (const ex of binding.excludePrefixes ?? []) if (sp === ex.replace(/\/$/, '') || sp.startsWith(ex)) return null
-    return binding.serverDir ? `${binding.serverDir}/${sp}` : sp
+    if (binding.ignoreNames?.length && sp.split('/').some((seg) => binding.ignoreNames!.includes(seg))) return null
+    const full = binding.serverDir ? `${binding.serverDir}/${sp}` : sp
+    if (binding.inScope && !binding.inScope(full, kindForServerPath(full))) return null
+    return full
   }
   const fromServer = (serverPath: string): string | null => {
     if (!binding.serverDir) {
@@ -317,7 +335,10 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
         bytes = await client.getAsset(shadow.vaultId, serverPath)
       } catch (e) {
         if (e instanceof CloudHttpError && e.status === 404) {
-          await applyRemoteDelete(serverPath)
+          // asset 404 ≠ 权威删除:服务端把「无记录/无读权限/OSS 字节缺失」混在同一个 404 里,
+          // 按删除处理会毁掉本地唯一幸存副本。记 skipped 留待下次对账;真删除走 change op=delete。
+          skipped.set(serverPath, 'ASSET_404')
+          emitStatus()
           return
         }
         throw e
@@ -463,6 +484,13 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
     }
     shadow.cursor = ev.seq
     saver.save(shadow)
+    if (ev.op === 'move' || ev.op === 'rename-folder' || ev.op === 'move-folder' || ev.op === 'delete' || ev.op === 'delete-folder') {
+      try {
+        deps.onRemoteApplied?.(ev)
+      } catch {
+        /* 回调故障不阻断同步 */
+      }
+    }
   }
 
   // ── 推(本地 → 服务端)─────────────────────────────────────────────────────
@@ -551,9 +579,24 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
     dropShadowEntry(serverPath)
   }
 
+  /** requireRootExists 绑定的防线:根目录不在(外置盘拔了)时禁止一切推断——
+   *  否则空目录会被解读成「本地全删」→ pushDelete 级联清空云端。 */
+  const rootAlive = async (): Promise<boolean> => {
+    if (!binding.requireRootExists) return true
+    if (!boundRoot) return false
+    try {
+      return (await fs.stat(boundRoot)).isDirectory()
+    } catch {
+      setState('error', `vault 目录不存在: ${boundRoot}`)
+      scheduleRetry()
+      return false
+    }
+  }
+
   /** 本地触发的单路径对账(远端视角用 shadow 基线近似;真变更由 PUT 409 兜住)。 */
   const reconcileLocal = async (serverPath: string): Promise<void> => {
     if (!shadow) return
+    if (!(await rootAlive())) return
     const local = await localHashOf(serverPath)
     const entry = shadow.files[serverPath] ?? null
     const d = decide(local?.hash ?? null, entry, entry ? { seq: entry.seq, hash: entry.hash } : null)
@@ -592,6 +635,7 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
       }
       for (const e of entries) {
         if (isIgnoredName(e.name)) continue
+        if (e.isDirectory() && binding.ignoreNames?.includes(e.name)) continue
         const abs = path.join(dir, e.name)
         if (e.isDirectory()) {
           await walk(abs)
@@ -611,6 +655,7 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
   /** 轻量扫描:stat 与 shadow 不符的路径入队对账(推方向兜底)。 */
   const scanJob = async (): Promise<void> => {
     if (!shadow) return
+    if (!(await rootAlive())) return
     const seen = await walkLocal()
     for (const [sp, st] of seen) {
       const entry = shadow.files[sp]
@@ -625,6 +670,7 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
   /** 全量三方对账(首次启用 / reset / 追赶缺口 / 手动 syncNow)。 */
   const fullReconcile = async (): Promise<void> => {
     if (!client || !shadow || !boundRoot) return
+    if (!(await rootAlive())) return
     const tree = await client.tree(shadow.vaultId)
     const remote = new Map<string, CloudTreeEntry>()
     for (const e of tree.entries) {
@@ -727,7 +773,10 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
     watcher = chokidar.watch(boundRoot, {
       ignoreInitial: true,
       depth: 12,
-      ignored: (p: string) => isIgnoredName(path.basename(p)),
+      ignored: (p: string) => {
+        const base = path.basename(p)
+        return isIgnoredName(base) || !!binding.ignoreNames?.includes(base)
+      },
     })
     const onPath = (abs: string): void => {
       if (!boundRoot) return
@@ -809,7 +858,18 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
       return
     }
     boundRoot = binding.localRoot
-    await fs.mkdir(boundRoot, { recursive: true })
+    if (binding.requireRootExists) {
+      // 指向用户 vault 的绑定:根不在(外置盘拔了/目录被移走)绝不 mkdir——
+      // 空根会被当成「本地全删」推给服务端。停在 error 态定时重试。
+      const alive = await fs.stat(boundRoot).then((s) => s.isDirectory()).catch(() => false)
+      if (!alive) {
+        setState('error', `vault 目录不存在: ${boundRoot}`)
+        scheduleRetry()
+        return
+      }
+    } else {
+      await fs.mkdir(boundRoot, { recursive: true })
+    }
     const creds = deps.loadCreds()
     if (!creds.cloudUrl || !creds.token) {
       setState('auth-required', '未登录 Forsion 账号')
@@ -817,7 +877,9 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
     }
     setState('starting', null)
     const deviceId = cs?.deviceId ?? (await ensureDeviceId())
-    client = createCloudClient({ baseUrl: creds.cloudUrl, token: creds.token, clientId: deviceId })
+    // 按条目绑定带后缀:与 own 镜像引擎同挂一个云 vault,同 clientId 会被互相当自回声。
+    const clientId = binding.clientIdSuffix ? `${deviceId}#${binding.clientIdSuffix}` : deviceId
+    client = createCloudClient({ baseUrl: creds.cloudUrl, token: creds.token, clientId })
 
     try {
       let vaultId = binding.vaultId === 'first' ? cs?.vaultId : binding.vaultId

@@ -4,10 +4,70 @@
  * 显示 spinner + 提示。**一个 Session 只用一种引擎**:故仅在新会话(无消息)出现,选定即用,
  * 有消息后不再显示、引擎不可改。Tangu 内置 = id ''。
  */
-import React from 'react'
-import { Loader2 } from 'lucide-react'
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Loader2, MoreHorizontal } from 'lucide-react'
 import { useI18n } from '../i18n'
 import { EngineIcon } from './EngineIcon'
+import { isOverflowing, nextPageLeft } from './pillBar'
+
+/**
+ * pill 选择条外壳:宽度放不下时右端钉一个「⋯」,点击平滑翻到下一页(落点对齐 pill 边界),
+ * 末页再点循环回第一页(用户拍板)。AgentPicker 复用。
+ * ⋯ 与渐隐挂在外框(非滚动容器)上,故 pill 是从它下面滚过去的,⋯ 始终在原位。
+ */
+export const PillBar: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => {
+  const { t } = useI18n()
+  const ref = useRef<HTMLDivElement>(null)
+  const [more, setMore] = useState(false)
+
+  // 溢出与否要盯两头:容器变窄(拖侧栏/缩窗)和内容变宽(pill 数量变化、选中态展开名字)。
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const sync = (): void => setMore(isOverflowing(el.scrollWidth, el.clientWidth))
+    sync()
+    const ro = new ResizeObserver(sync)
+    ro.observe(el)
+    for (const c of Array.from(el.children)) ro.observe(c)
+    return () => ro.disconnect()
+  }, [children])
+
+  // 选中项落在后面几页时,开局先把它露出来(否则新会话看不到自己当前选的 agent)。
+  // 直接改 scrollLeft 而非 scrollIntoView —— 后者会连带滚动祖先(聊天区)。
+  useEffect(() => {
+    const el = ref.current
+    const sel = el?.querySelector<HTMLElement>('[aria-checked="true"]')
+    if (!el || !sel) return
+    const bar = el.getBoundingClientRect()
+    const p = sel.getBoundingClientRect()
+    if (p.right > bar.right) el.scrollLeft += p.right - bar.right + 6
+    else if (p.left < bar.left) el.scrollLeft -= bar.left - p.left + 6
+    // 只在挂载时纠一次:之后是用户在翻页,别跟他抢滚动位置。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const page = useCallback((): void => {
+    const el = ref.current
+    if (!el) return
+    const bar = el.getBoundingClientRect()
+    const pills = Array.from(el.children).map((c) => {
+      const r = c.getBoundingClientRect()
+      return { start: r.left - bar.left + el.scrollLeft, end: r.right - bar.left + el.scrollLeft }
+    })
+    el.scrollTo({ left: nextPageLeft({ left: el.scrollLeft, width: el.clientWidth, content: el.scrollWidth }, pills), behavior: 'smooth' })
+  }, [])
+
+  return (
+    <div className="engine-picker-bar" data-more={more || undefined}>
+      <div className="engine-picker-scroll" ref={ref} role="radiogroup" aria-label={label}>{children}</div>
+      {more && (
+        <button type="button" className="engine-picker-more" onClick={page} title={t('pill.more')} aria-label={t('pill.more')}>
+          <MoreHorizontal size={16} />
+        </button>
+      )}
+    </div>
+  )
+}
 
 export const EnginePicker: React.FC<{
   engines: Array<{ id: string; name: string }>
@@ -20,7 +80,7 @@ export const EnginePicker: React.FC<{
   const warmingName = warmingId ? options.find((o) => o.id === warmingId)?.name || '' : ''
   return (
     <div className="engine-picker">
-      <div className="engine-picker-bar" role="radiogroup" aria-label={t('engine.pickTitle')}>
+      <PillBar label={t('engine.pickTitle')}>
         {options.map((o) => {
           const selected = o.id === selectedId
           const warming = !!warmingId && o.id === warmingId
@@ -42,7 +102,7 @@ export const EnginePicker: React.FC<{
             </button>
           )
         })}
-      </div>
+      </PillBar>
       <div className="engine-picker-hint">{warmingId ? t('engine.warming', { name: warmingName }) : t('engine.pickTitle')}</div>
     </div>
   )

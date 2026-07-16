@@ -1,7 +1,7 @@
 /** App 根:启动副作用(连接/轮询/更新)+ 主题桥接给纯引擎 Shell + 设置/引导/更新横幅浮层。 */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Shell } from '@lcl/engine'
+import { Shell, UI_MODE } from '@lcl/engine'
 import { useApp } from './stores/appStore'
 import { useTheme } from './stores/themeStore'
 import { getLanguage } from './theme/registry'
@@ -10,12 +10,33 @@ import { buildDefaultLayout } from './bootstrapEngine'
 import { TopBar } from './views/TopBar'
 import { SettingsModal } from './components/SettingsModal'
 import { AmadeusOverlays } from './amadeusOverlays'
+import { QuickFind } from './quickFind'
+import { HoverTip } from './hoverTip'
 import { MarketModal } from './components/MarketModal'
 import { OnboardingWizard, ONBOARDING_DISMISS_KEY } from './components/OnboardingWizard'
 import { FeedbackModal } from './components/FeedbackModal'
 import { AchievementsModal } from './achievements/AchievementsModal'
 import { AchievementToast } from './achievements/AchievementToast'
 import { useShallow } from 'zustand/react/shallow'
+
+const PREVIEW_SIZES: Array<[number, string]> = [[390, 'iPhone'], [414, 'Max'], [768, 'iPad']]
+/** 桌面/web 移动预览「手机框」:套在整个 app 外(引擎壳 + 设置/商店/成就等 fixed 浮层),
+ *  靠 .sc-device 的 transform 包含块把框内所有 fixed 后代收进设备框,二级界面不再撑满桌面窗口。
+ *  非 mobile 预览态直接透传 children(桌面路径零改);真机走 MobileRoot 不经此处。 */
+function MobilePreviewFrame({ children }: { children: ReactNode }) {
+  const [w, setW] = useState(390)
+  if (UI_MODE !== 'mobile') return <>{children}</>
+  return (
+    <div className="sc-frame">
+      <div className="sc-bar">
+        {PREVIEW_SIZES.map(([px, name]) => (
+          <button key={px} className={`sc-size${w === px ? ' on' : ''}`} onClick={() => setW(px)}>{name} · {px}</button>
+        ))}
+      </div>
+      <div className="sc-device" style={{ width: w }}>{children}</div>
+    </div>
+  )
+}
 
 export function Root() {
   useBootstrap()
@@ -57,13 +78,16 @@ export function Root() {
   }, [a.onboarding])
 
   return (
-    <>
+    <MobilePreviewFrame>
       <div className={`shell-host${revealMain ? ' main-enter' : ''}`}>
         <Shell dark={theme.mode === 'dark'} soft={!!getLanguage(theme.lang)?.manifest.panelGap} buildDefault={buildDefaultLayout} header={<TopBar />} />
       </div>
 
       {/* Amadeus 全局浮层(快速切换等):须在 shell-host 之后(拖窗区 DOM 顺序,同下)。 */}
       {window.amadeus && <AmadeusOverlays />}
+      <QuickFind />
+      <HoverTip />
+
 
       {/* 更新提示已改为检测到新版自动弹出「更新」标签页(见 stores/bootstrap.ts),不再用顶部横幅。 */}
 
@@ -186,6 +210,6 @@ export function Root() {
           </div>
         ))}
       </div>
-    </>
+    </MobilePreviewFrame>
   )
 }

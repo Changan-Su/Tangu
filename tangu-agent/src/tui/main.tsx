@@ -53,6 +53,11 @@ async function main(): Promise<void> {
     }
     return;
   }
+  // npm 式一条命令装/卸引擎插件。动态 import 保持廉价路由纪律(不给 tangu/login 增依赖负担)。
+  if (sub === 'install' || sub === 'uninstall') {
+    const m = await import('../cli/install.js');
+    process.exit(await (sub === 'install' ? m.runInstallCommand : m.runUninstallCommand)(process.argv.slice(3)));
+  }
   if (sub && !sub.startsWith('-') && sub !== 'login') {
     const handled = await dispatchPluginCommand(sub, process.argv.slice(3));
     if (handled !== null) return; // 插件已处理;进程存活与否由其打开的句柄决定（如 worker 的 listening server）

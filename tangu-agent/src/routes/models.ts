@@ -64,18 +64,21 @@ router.get('/agent/models', authMiddleware, async (req: AuthRequest, res) => {
       }
     }
 
+    // 直连模型暴露为 `<providerId>/<模型>`(registry 形式 1,本就是自由填约定):裸模型名与云端托管
+    // 模型同名(如订阅 codex 的 gpt-5.5 vs Forsion 托管 gpt-5.5)时曾被下方去重吞掉 —— 用户加了
+    // provider 却"看不到自己的模型"。前缀化后 id 永不与云端相撞,选谁走谁也不再有歧义;
+    // 旧会话存的裸 id 仍由 registry 形式 2(modelIds 精确命中)照常解析。name 保留裸名供展示。
     const directProviders = deps().brain.models.listDirectProviders?.() ?? [];
     for (const p of directProviders) {
       for (const mid of p.modelIds ?? []) {
-        models.push({ id: mid, name: mid, provider: p.providerId, source: 'direct', modelType: 'llm', contextWindow: modelContextWindow(mid) });
+        models.push({ id: `${p.providerId}/${mid}`, name: mid, provider: p.providerId, source: 'direct', modelType: 'llm', contextWindow: modelContextWindow(mid) });
       }
       for (const mid of p.imageModelIds ?? []) {
-        models.push({ id: mid, name: mid, provider: p.providerId, source: 'direct', modelType: 'image_gen', contextWindow: 0 });
+        models.push({ id: `${p.providerId}/${mid}`, name: mid, provider: p.providerId, source: 'direct', modelType: 'image_gen', contextWindow: 0 });
       }
     }
 
-    // 选择器按 id 选用(value={m.id}),同 id 重复(如某模型既在云端又在直连 provider)无法区分且会撞
-    // React key —— 按 id 去重,保留首次出现(cloud 优先于 direct,因 cloud 先 push)。
+    // 选择器按 id 选用(value={m.id})→ 按 id 去重兜底(direct 已前缀化,正常不会撞)。
     const seenId = new Set<string>();
     const uniqueModels = models.filter((m) => (seenId.has(m.id) ? false : (seenId.add(m.id), true)));
 

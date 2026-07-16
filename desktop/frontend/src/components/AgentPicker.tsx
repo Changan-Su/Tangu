@@ -5,6 +5,7 @@
  */
 import React from 'react'
 import { useI18n } from '../i18n'
+import { PillBar } from './EnginePicker'
 import { DEFAULT_AGENT_SLUG } from '../types'
 import type { NormalAgentDef } from '../types'
 
@@ -25,7 +26,7 @@ export const AgentPicker: React.FC<{
   const effective = selectedSlug || defaultSlug || DEFAULT_AGENT_SLUG
   return (
     <div className="engine-picker agent-picker">
-      <div className="engine-picker-bar" role="radiogroup" aria-label={t('agent.pickTitle')}>
+      <PillBar label={t('agent.pickTitle')}>
         {agents.map((a) => {
           const selected = a.slug === effective
           const url = avatars[a.slug]
@@ -49,7 +50,7 @@ export const AgentPicker: React.FC<{
             </button>
           )
         })}
-      </div>
+      </PillBar>
       <div className="engine-picker-hint">{t('agent.pickTitle')}</div>
     </div>
   )

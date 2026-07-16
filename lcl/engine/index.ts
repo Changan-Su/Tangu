@@ -13,6 +13,10 @@ export type {
 export { label } from './types'
 
 export { Shell } from './Shell'
+export { SingleColumnHost } from './SingleColumnHost'
+export { MiniColumnHost } from './MiniColumnHost'
+export { UI_MODE, setUiMode } from './uiMode'
+export type { UiMode } from './uiMode'
 export { registerView, unregisterView, getView, allViews } from './viewRegistry'
 export { useWorkspace, activeMainPanel, scheduleWorkspaceSave } from './workspaceStore'
 export type { MainTab, SideTab } from './workspaceStore'
@@ -32,3 +36,5 @@ export {
 } from './layoutPersist'
 export type { PersistedPanel } from './layoutPersist'
 export { setEngineI18n, useEngineI18n } from './i18nSeam'
+export { setDetachApi, getDetachApi } from './detachSeam'
+export type { DetachApi, ViewRef } from './detachSeam'

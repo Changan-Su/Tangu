@@ -1,7 +1,6 @@
 /** 桌面壳的 Amadeus 插件装载(vendored pluginStore 保持与独立版同构,桌面差异全部收在这里):
  *  - 选择性安装 builtins:callout 标注 + 字数统计。跳过 core-commands(指向未挂载的 Amadeus 面板/与壳重复)、
  *    outline(壳有原生大纲视图)、extra-themes(其 [data-theme=…] 选择器在桌面 EditorScope 下永不命中)。
- *  - vault 切换 → 重载外部插件(.amadeus/plugins/,镜像独立版 App.tsx 的行为)。
  *  - 插件贡献的 commands 桥进 engine 命令面板(仅 Amadeus Space 激活时可见,id 前缀 amadeus:)。
  *  - 插件 API 的 openSearch/openSwitcher(uiStore.palette)映射到桌面等价物,外部插件不改也能用。 */
 import { usePluginStore } from '@amadeus/plugins/pluginStore'
@@ -20,11 +19,6 @@ export function installAmadeusPlugins(): void {
   const store = usePluginStore.getState()
   store.init([calloutBlocks, wordCount])
   void store.loadExternal()
-
-  // vault 切换 → 外部插件重载。
-  usePageStore.subscribe((s, p) => {
-    if (s.vaultRoot && s.vaultRoot !== p.vaultRoot) void usePluginStore.getState().reloadExternal()
-  })
 
   // 插件 commands → engine 命令面板(只在 Amadeus Space 内挂着;量小,整批撤了重加即可)。
   let bridged: string[] = []

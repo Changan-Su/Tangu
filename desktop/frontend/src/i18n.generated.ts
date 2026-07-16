@@ -6,6 +6,10 @@
 import { registerMessages } from "./i18n"
 
 registerMessages({
+  "input.cloudModelHint": {
+    "zh": "云端会话在云端执行,仅可用 Forsion 托管模型;直连 provider 的模型只在本地会话可选。",
+    "en": "Cloud sessions run in the cloud and can only use Forsion-hosted models; direct-provider models are available in local sessions only."
+  },
   "app.planArchived": {
     "zh": "计划已存档:{file}",
     "en": "Plan archived: {file}"
@@ -273,6 +277,22 @@ registerMessages({
   "input.micComingSoon": {
     "zh": "语音输入即将上线",
     "en": "Voice input coming soon"
+  },
+  "input.micStart": {
+    "zh": "语音输入(点击开始录音)",
+    "en": "Voice input (click to record)"
+  },
+  "input.micStop": {
+    "zh": "停止并转写",
+    "en": "Stop & transcribe"
+  },
+  "input.micBusy": {
+    "zh": "转写中…",
+    "en": "Transcribing…"
+  },
+  "input.micListening": {
+    "zh": "聆听中",
+    "en": "Listening"
   },
   "input.stop": {
     "zh": "停止",
@@ -786,6 +806,90 @@ registerMessages({
     "zh": "选中即设为默认生图模型;agent 调 generate_image 时自动使用(也可在调用里指定 model)。",
     "en": "Selecting one sets it as the default; the agent uses it automatically when calling generate_image (it can also specify a model)."
   },
+  "settings.model.asrModelsLabel": {
+    "zh": "语音识别模型(语音输入用)",
+    "en": "Speech models (for voice input)"
+  },
+  "settings.model.asrEmpty": {
+    "zh": "未检测到语音识别模型。请在 Forsion 后台启用语音识别模型,或在下方「自定义 provider」填写「语音识别模型 id」。",
+    "en": "No speech-recognition models found. Enable speech models in the Forsion admin, or fill in \"Speech models\" under Custom Provider below."
+  },
+  "settings.model.asrHelp": {
+    "zh": "选中即设为默认语音识别模型;chatbox 语音输入按此转写(空=跟随 app 级默认或本地模型)。",
+    "en": "Selecting one sets the default speech-recognition model; the chatbox voice input transcribes with it (empty = follow the app default or local model)."
+  },
+  "settings.model.asrFollowingDefault": {
+    "zh": "未手动选择,当前跟随云端语音识别默认:{model}。点击任一模型可改为手动指定,再点一次取消。",
+    "en": "No manual pick — following the cloud speech default: {model}. Click a model to pin your own choice; click again to unpin."
+  },
+  "settings.asr.localTitle": {
+    "zh": "本地语音模型(离线,SenseVoice Small)",
+    "en": "Local speech model (offline, SenseVoice Small)"
+  },
+  "settings.asr.localHint": {
+    "zh": "下载后语音输入完全在本机转写、不联网、不计额度;支持中英日韩粤。约 230 MB。",
+    "en": "Once downloaded, voice input transcribes fully on-device — offline, no quota. Supports zh/en/ja/ko/yue. ~230 MB."
+  },
+  "settings.asr.download": {
+    "zh": "下载本地模型(~230 MB)",
+    "en": "Download local model (~230 MB)"
+  },
+  "settings.asr.downloading": {
+    "zh": "下载中…",
+    "en": "Downloading…"
+  },
+  "settings.asr.localReady": {
+    "zh": "本地模型已就绪",
+    "en": "Local model ready"
+  },
+  "settings.asr.preferLocal": {
+    "zh": "语音输入优先用本地",
+    "en": "Prefer local for voice input"
+  },
+  "settings.asr.localRemove": {
+    "zh": "删除",
+    "en": "Remove"
+  },
+  "settings.asr.chooseLabel": {
+    "zh": "语音输入用哪个模型",
+    "en": "Which model powers voice input"
+  },
+  "settings.asr.chooseHint": {
+    "zh": "选中即用。本地=离线、不计额度;云端=Forsion 按时长计费,或你自带 provider 走自己的 key。",
+    "en": "Click to use. Local = offline, no quota; Cloud = Forsion billed by duration, or your own provider with your key."
+  },
+  "settings.asr.localName": {
+    "zh": "本地 SenseVoice",
+    "en": "Local SenseVoice"
+  },
+  "settings.asr.offlineTag": {
+    "zh": "离线",
+    "en": "Offline"
+  },
+  "settings.asr.noCloudHint": {
+    "zh": "暂无云端语音识别模型(Forsion 后台配置后出现,或在下方加自带 provider)。",
+    "en": "No cloud speech models yet (appear after Forsion admin config, or add your own provider below)."
+  },
+  "onboarding.speech.stepLabel": {
+    "zh": "语音输入",
+    "en": "Voice input"
+  },
+  "onboarding.speech.intro": {
+    "zh": "给聊天框(以后还有笔记等)加语音输入。推荐下载本地模型:离线、私密、不计额度。",
+    "en": "Add voice input to the chatbox (and later notes, etc). Recommended: download the local model — offline, private, no quota."
+  },
+  "onboarding.speech.cloudLabel": {
+    "zh": "或用云端语音识别模型",
+    "en": "Or use a cloud speech model"
+  },
+  "onboarding.speech.cloudEmpty": {
+    "zh": "暂无云端语音识别模型;下载本地模型,或稍后在设置里加自带 provider。",
+    "en": "No cloud speech models yet; download the local model, or add your own provider later in Settings."
+  },
+  "onboarding.speech.cloudHint": {
+    "zh": "选中即设为默认并切到云端(Forsion 云端计入额度;自带 provider 走你自己的 key)。",
+    "en": "Selecting one sets it as the default and switches to cloud (Forsion cloud counts against quota; your own provider uses your key)."
+  },
   "settings.provider.loginLabel": {
     "zh": "Provider 账号登录(用订阅账号当 LLM,直连不计 Forsion 额度)",
     "en": "Provider account login (use a subscription account as the LLM; direct calls don't count against Forsion quota)"
@@ -877,6 +981,14 @@ registerMessages({
   "settings.customProvider.imageModelsPlaceholder": {
     "zh": "如 gpt-image-1, dall-e-3",
     "en": "e.g. gpt-image-1, dall-e-3"
+  },
+  "settings.customProvider.asrModelsLabel": {
+    "zh": "语音识别模型(逗号分隔,可空)",
+    "en": "Speech models (comma-separated, optional)"
+  },
+  "settings.customProvider.asrModelsPlaceholder": {
+    "zh": "如 FunAudioLLM/SenseVoiceSmall, whisper-1",
+    "en": "e.g. FunAudioLLM/SenseVoiceSmall, whisper-1"
   },
   "settings.customProvider.savedReloading": {
     "zh": "已保存;托管后端重启加载中…",
@@ -1498,7 +1610,7 @@ registerMessages({
 registerMessages({
   "sidebar.emptyTitle": { "zh": "空侧栏", "en": "Empty sidebar" },
   "sidebar.empty": { "zh": "这个侧栏是空的,把标签页拖进来试试。", "en": "This sidebar is empty, try dragging a tab here." },
-  "input.fileref.note": { "zh": "引用工作区文件(插入相对路径)", "en": "Reference a workspace file (inserts its relative path)" },
+  "input.fileref.note": { "zh": "引用笔记 / 工作区文件", "en": "Reference a note / workspace file" },
   "command.navBack": { "zh": "后退(本标签页)", "en": "Back (this tab)" },
   "command.navForward": { "zh": "前进(本标签页)", "en": "Forward (this tab)" },
   "view.workspace": { "zh": "工作区", "en": "Workspace" },

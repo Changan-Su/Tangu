@@ -92,6 +92,20 @@ export interface StatusItemContribution {
   component: ComponentType
 }
 
+/** A user-tunable setting a plugin declares. The host renders the form on the plugin's detail
+ *  page and persists values to localStorage `plugin.<pluginId>.<key>` — the plugin reads the
+ *  same key at use time (poll-loop reads pick changes up next round; no change notification). */
+export interface SettingContribution {
+  /** Storage key suffix (localStorage `plugin.<pluginId>.<key>`). */
+  key: string
+  label: string
+  type: 'number' | 'boolean' | 'text'
+  default: string | number | boolean
+  min?: number
+  max?: number
+  description?: string
+}
+
 export interface PluginContext {
   app: PluginAppApi
   registerSlashItem(item: SlashContribution): void
@@ -99,6 +113,8 @@ export interface PluginContext {
   registerTheme(theme: ThemeContribution): void
   registerPanel(panel: PanelContribution): void
   registerStatusItem(item: StatusItemContribution): void
+  /** Declare a tunable setting (rendered on the plugin detail page; localStorage-backed). */
+  registerSetting(def: SettingContribution): void
   /** Register a custom Database property/column type (Obsidian-style open extension point). */
   registerPropertyType(def: PropertyTypeContribution): void
   /** Achievements: register a series and bump its counters. Series/achievement ids and events
@@ -122,11 +138,13 @@ export interface AmadeusPlugin {
   description?: string
   /** Built-in plugins ship with the app and can't be uninstalled (only disabled). */
   builtin?: boolean
-  /** External plugin origin: vault-local (.amadeus/plugins) or global (~/.forsion/amadeus/plugins). */
-  source?: 'vault' | 'global'
   /** Manifest apiVersion (missing → 1). */
   apiVersion?: number
   minAppVersion?: string
+  /** Companion app id (manifest.requiresApp); detail page renders install/probe UI when whitelisted in KNOWN_APPS. */
+  requiresApp?: string
+  /** README.md content for the detail page (external plugins only). */
+  readme?: string
   /** Present → gated out by the host: 'api' = apiVersion mismatch, 'minApp' = app too old. Never activated. */
   blocked?: 'api' | 'minApp'
   /** Wire up contributions; optionally return a disposer for teardown on disable. */

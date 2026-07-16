@@ -50,7 +50,7 @@
   align-items: center;
   padding: 8px 0;
   background: var(--sidebar-bg);
-  border-right: var(--border-width, 1px) solid var(--border);
+  /* 与侧栏之间刻意无分割线(用户拍板):两侧同为 --sidebar-bg,连成一片背景。 */
   /* 顶部交通灯避让:mac 下只在 ribbon 顶部留空(交通灯落此),中间 tab 栏 / 右栏直接顶到最上,免中/右留白。 */
   -webkit-app-region: drag;
 }
@@ -264,7 +264,7 @@
   background: var(--bg);
 }
 
-/* ── Resize divider(sash):默认极弱 1px 中线,hover/拖拽 150ms ease-out 渐显柔化 accent;
+/* ── Resize divider(sash):静止态完全不可见(用户拍板:去掉各区之间的淡分割线),hover/拖拽 150ms ease-out 渐显柔化 accent;
  *    无满铺无粗线无布局位移。主区浮卡内缩 8px 后视觉边缘偏离组缝,::before 把 4px 热区扩到
  *    10px 以覆盖观感边界;鼠标处的 tick 刻度由 sashAffordance.ts 的单例 .lcl-sash-tick 提供。 ── */
 .dockview-theme-lcl .dv-sash-container .dv-sash::before {
@@ -280,7 +280,7 @@
 .dockview-theme-lcl .dv-sash-container .dv-sash::after {
   content: '';
   position: absolute;
-  background: color-mix(in srgb, var(--border) 45%, transparent);
+  background: transparent; /* 静止不画线;下面的 :hover/:active 规则才把它染成 accent(线本体保留 = 只做 hover 渐显的载体) */
   transition: background 150ms ease-out;
   pointer-events: none;
 }
@@ -326,9 +326,9 @@
 .lcl-sash-tick.show { opacity: 1; }
 .lcl-sash-tick.h { width: 3px; height: 12px; }
 
-/* 标签栏:内容垂直居中(修「偏上」);命名标签 = 圆角胶囊(激活浅底+圆角,无顶部细线)。 */
+/* 标签栏:内容垂直居中(修「偏上」);命名标签 = 圆角胶囊(激活浅底+圆角,无顶部细线)。
+ * 与正文之间刻意无底线(用户拍板):主区靠「浮卡圆角 + --bg 纸面」自分界,侧栏则与正文连成一片。 */
 .dockview-theme-lcl .dv-tabs-and-actions-container {
-  border-bottom: var(--border-width, 1px) solid var(--border);
   font-family: var(--font-ui);
   font-size: 12px;
   height: 36px;

@@ -3,7 +3,7 @@
  * 负责:建窗 + 配置持久化(IPC)+ 托管内置 tangu-server(managed 模式,backendManager)。
  * agent 调用由 renderer 直连 HTTP/SSE(localhost),不经主进程代理。
  */
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell, nativeImage, Notification } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, screen, globalShortcut, session, shell, nativeImage, Notification } from 'electron'
 import { basename, dirname, join } from 'path'
 import { pathToFileURL } from 'url'
 import { readFile, writeFile, mkdir, chmod, readdir, stat, lstat, rename, cp, open as fsOpen, unlink, rm } from 'fs/promises'
@@ -23,10 +23,14 @@ import { createTray } from './tray'
 import { readThemesDir, seedDefaultThemes } from './themes'
 import { extractZipToDir, MARKET_SUBDIR, MARKET_MANIFEST, isSafeSlug, readInstalledVersion, readUserPluginDirs } from './marketInstall'
 import { serveDir as codePreviewServe, stopCodePreview } from './codePreview'
+import { transcribeViaOpenAI, transcribeViaForsion } from './asr'
+import { localModelReady, localModelSize, downloadLocalModel, removeLocalModel, transcribeLocal } from './asrLocal'
 // Amadeus Space:vendored 笔记后端(vault IPC + 资产协议)。renderImport 别名后保持 verbatim。
 import { registerIpc as registerAmadeusIpc } from './amadeus/ipc'
 import { logActivity, setActivityLogEnabled, pruneActivity, exportActivity, flushAllNoteEdits } from './activityLog'
+import { KNOWN_APPS } from '../shared/knownApps'
 import { registerAssetSchemes as registerAmadeusAssetSchemes, registerAssetProtocol as registerAmadeusAssetProtocol } from './amadeus/assetProtocol'
+import { nearestEdge, collapsedBounds, expandedBounds, miniSizeFromWidth, visibleRect, pointInRect, growRect, type Rect, type Edge } from './windowGeometry'
 
 /** ~/.tangu(与包内 core/tanguHome.ts 同约定;TANGU_HOME 可整体重定向)。 */
 setDevMode(!app.isPackaged) // dev 数据目录 ~/.forsion-dev,与正式版隔离(模块装载即定,先于一切路径解析)
@@ -91,6 +95,7 @@ interface DirectProviderConfig {
   modelIds?: string[]
   imageModelIds?: string[]
   ttsModelIds?: string[]
+  asrModelIds?: string[]
 }
 
 async function readProvidersFile(): Promise<DirectProviderConfig[]> {
@@ -252,6 +257,10 @@ interface TanguStoredConfig {
   backendUrl: string // external 模式
   token: string // external 模式
   modelId: string
+  /** 默认语音识别模型 id(语音输入转写用;持久化到 config.json asr.modelId;缺省=跟随 app 级 asr 默认)。 */
+  asrModelId: string
+  /** 语音输入偏好后端:local=本地 SenseVoice(需下载);cloud=自带-key/Forsion 云端。缺省 cloud。 */
+  asrBackend: 'local' | 'cloud'
   cloudUrl: string // managed:传给 tangu-server 的 Forsion 云端
   cloudToken: string // managed:forsion_token(空则子进程回退 tangu login 凭证)
   sandbox: 'auto' | 'docker' | 'none'
@@ -307,6 +316,8 @@ const DEFAULT_CONFIG: TanguStoredConfig = {
   backendUrl: 'http://localhost:8787',
   token: '',
   modelId: '',
+  asrModelId: '',
+  asrBackend: 'cloud',
   cloudUrl: '',
   cloudToken: '',
   sandbox: 'auto',
@@ -387,7 +398,7 @@ async function readShellConfig(): Promise<Partial<TanguStoredConfig>> {
 async function loadConfig(): Promise<TanguStoredConfig> {
   const shell = await readShellConfig()
   const home = await readHomeConfig()
-  const cloud = home.cloud || {}, browser = home.browser || {}, wechat = home.wechat || {}, notes = home.notes || {}, tts = home.tts || {}
+  const cloud = home.cloud || {}, browser = home.browser || {}, wechat = home.wechat || {}, notes = home.notes || {}, tts = home.tts || {}, asr = home.asr || {}
   const merged: TanguStoredConfig = {
     ...DEFAULT_CONFIG,
     ...shell, // 旧 desktop 文件:既给 shell 键,也作未迁移段的回落
@@ -415,6 +426,7 @@ async function loadConfig(): Promise<TanguStoredConfig> {
       ttsSpeed: typeof tts.speed === 'number' ? tts.speed : 1,
       ttsAutoSpeak: !!tts.autoSpeak,
     } : {}),
+    ...(home.asr !== undefined ? { asrModelId: asr.modelId || '', asrBackend: asr.backend === 'local' ? 'local' : 'cloud' } : {}),
   }
   // 环境变量兜底:TANGU_CLOUD_URL(managed/登录默认)、TANGU_BACKEND_URL(external 外部地址)。
   if (!merged.cloudUrl) {
@@ -438,11 +450,13 @@ async function saveConfig(patch: Partial<TanguStoredConfig>): Promise<TanguStore
   }
   // config-backed 键 → config.json 段
   const home = await readHomeConfig()
-  const cloud = { ...(home.cloud || {}) }, browser = { ...(home.browser || {}) }, wechat = { ...(home.wechat || {}) }, notes = { ...(home.notes || {}) }, tts = { ...(home.tts || {}) }
-  let cT = false, bT = false, wT = false, oT = false, nT = false, tT = false
+  const cloud = { ...(home.cloud || {}) }, browser = { ...(home.browser || {}) }, wechat = { ...(home.wechat || {}) }, notes = { ...(home.notes || {}) }, tts = { ...(home.tts || {}) }, asr = { ...(home.asr || {}) }
+  let cT = false, bT = false, wT = false, oT = false, nT = false, tT = false, aT = false
   if ('cloudUrl' in patch) { cloud.url = patch.cloudUrl; cT = true }
   if ('cloudToken' in patch) { cloud.token = patch.cloudToken; cT = true }
   if ('modelId' in patch) { cloud.defaultModel = patch.modelId; cT = true }
+  if ('asrModelId' in patch) { asr.modelId = patch.asrModelId; aT = true }
+  if ('asrBackend' in patch) { asr.backend = patch.asrBackend; aT = true }
   if ('sandbox' in patch) { home.sandbox = patch.sandbox; oT = true }
   if ('defaultWorkspaceDir' in patch) { home.workspace = patch.defaultWorkspaceDir; oT = true }
   if ('browserEnabled' in patch) { browser.enabled = patch.browserEnabled; bT = true }
@@ -466,7 +480,8 @@ async function saveConfig(patch: Partial<TanguStoredConfig>): Promise<TanguStore
   if (wT) home.wechat = wechat
   if (nT) home.notes = notes
   if (tT) home.tts = tts
-  if (cT || bT || wT || oT || nT || tT) await writeHomeConfig(home)
+  if (aT) home.asr = asr
+  if (cT || bT || wT || oT || nT || tT || aT) await writeHomeConfig(home)
   return loadConfig()
 }
 
@@ -521,6 +536,24 @@ function ensureBackend(): Promise<void> {
   return ensureChain
 }
 
+/** 所有窗口(主窗 + 独立窗 + mini)共用的 webPreferences:同一份 preload → 同一 window.tangu 暴露面。 */
+function satelliteWebPreferences(): Electron.WebPreferences {
+  return {
+    preload: join(__dirname, '../preload/preload.mjs'),
+    contextIsolation: true,
+    nodeIntegration: false,
+    // sandbox:true 不支持 ESM preload(electron-vite 产出 .mjs);renderer 无 Node 能力,暴露面仅 contextBridge 最小 API。
+    sandbox: false,
+    plugins: true, // Chromium 内置 PDFium(blob pdf 预览)
+  }
+}
+
+/** 子窗口打开处理:http(s) 转系统浏览器,其余一律拒绝(不产生游离子窗口)。 */
+function denyExternal({ url }: { url: string }): { action: 'deny' } {
+  if (url.startsWith('https://') || url.startsWith('http://')) shell.openExternal(url)
+  return { action: 'deny' }
+}
+
 function createWindow(): void {
   // Windows/Linux 默认会渲染 File/Edit/View/Window 菜单条;macOS 菜单在系统栏(不在窗口内)。
   // 置空菜单让 Windows/Linux 与 macOS 观感一致(无窗口内菜单条);文本框的复制/粘贴等由 Chromium 原生处理,不依赖菜单。
@@ -536,22 +569,10 @@ function createWindow(): void {
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     autoHideMenuBar: true, // 即便保留了菜单也不在窗口内显示(Alt 不唤出);与置空菜单双保险
     backgroundColor: '#fbf8f5', // 启动闪屏底色(动画 stage 底色),避免首帧白屏闪烁
-    webPreferences: {
-      preload: join(__dirname, '../preload/preload.mjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      // sandbox:true 不支持 ESM preload(electron-vite 产出 .mjs);renderer 无 Node 能力,
-      // 暴露面仅 contextBridge 的最小 API,风险可控。改 CJS preload 后可翻转。
-      sandbox: false,
-      // 启用 Chromium 内置 PDFium —— <iframe src="blob:…pdf"> 预览 PDF 依赖此项,默认关。
-      plugins: true,
-    },
+    webPreferences: satelliteWebPreferences(),
   })
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https://') || url.startsWith('http://')) shell.openExternal(url)
-    return { action: 'deny' }
-  })
+  mainWindow.webContents.setWindowOpenHandler(denyExternal)
 
   // 崩溃自愈:渲染进程被 OOM / GPU 崩溃杀死时,窗口只剩一张白页且不会自己恢复(React ErrorBoundary
   // 只接 JS 渲染异常,接不到进程级死亡)。这里监听进程死亡 + 无响应 + 加载失败,自动 reload 兜底。
@@ -578,12 +599,216 @@ function loadRenderer(win: BrowserWindow): void {
   else win.loadFile(join(__dirname, '../renderer/index.html'))
 }
 
+/** 载入同一渲染包但带 URL 参数(?window=…&id=…&ui=…):卫星窗口据此分流(见 frontend/windowKind)。 */
+function loadRendererWith(win: BrowserWindow, params: Record<string, string>): void {
+  if (process.env.ELECTRON_RENDERER_URL) {
+    const u = new URL(process.env.ELECTRON_RENDERER_URL)
+    u.search = new URLSearchParams(params).toString()
+    void win.loadURL(u.toString())
+  } else {
+    void win.loadFile(join(__dirname, '../renderer/index.html'), { query: params })
+  }
+}
+
 /** 召回主窗:隐藏则显示、最小化则还原、销毁则重建。托盘/通知/单实例/activate 共用。 */
 function showMainWindow(): void {
   if (!mainWindow || mainWindow.isDestroyed()) { createWindow(); return }
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.show()
   mainWindow.focus()
+}
+
+// ══ 卫星窗口:独立窗(拖出的 dockview,无 ribbon)+ mini 悬浮卡片 ═══════════════════════
+interface ViewDesc { type: string; params?: Record<string, unknown> }
+
+const detachedWindows = new Map<string, BrowserWindow>()
+const pendingDetachedViews = new Map<string, ViewDesc[]>() // 拖出登记的初始视图,渲染端 detachedReady 时 pull
+let persistedDetached: Array<{ id: string; bounds: Electron.Rectangle }> = [] // 内存副本 + 落盘(重启恢复)
+let detachedSeq = 0
+
+const detachedStatePath = (): string => join(app.getPath('userData'), 'detached-windows.json')
+
+async function loadDetachedState(): Promise<void> {
+  try {
+    const arr = JSON.parse(await readFile(detachedStatePath(), 'utf8'))
+    if (Array.isArray(arr)) persistedDetached = arr.filter((x) => x && typeof x.id === 'string' && x.bounds)
+  } catch { persistedDetached = [] }
+}
+let saveDetachedTimer: NodeJS.Timeout | null = null
+function scheduleSaveDetachedState(): void {
+  if (saveDetachedTimer) clearTimeout(saveDetachedTimer)
+  saveDetachedTimer = setTimeout(() => { void writeFile(detachedStatePath(), JSON.stringify(persistedDetached)).catch(() => {}) }, 400)
+}
+function upsertDetachedBounds(id: string, bounds: Electron.Rectangle): void {
+  const i = persistedDetached.findIndex((x) => x.id === id)
+  if (i >= 0) persistedDetached[i].bounds = bounds
+  else persistedDetached.push({ id, bounds })
+  scheduleSaveDetachedState()
+}
+function removeDetachedState(id: string): void {
+  persistedDetached = persistedDetached.filter((x) => x.id !== id)
+  scheduleSaveDetachedState()
+}
+
+function nextDetachedId(): string { detachedSeq += 1; return `d${Date.now().toString(36)}_${detachedSeq}` }
+
+function createDetachedWindow(opts: { id?: string; views?: ViewDesc[]; bounds?: Partial<Electron.Rectangle> }): string {
+  const id = opts.id || nextDetachedId()
+  if (opts.views?.length) pendingDetachedViews.set(id, opts.views)
+  const win = new BrowserWindow({
+    width: opts.bounds?.width ?? 900,
+    height: opts.bounds?.height ?? 680,
+    x: opts.bounds?.x,
+    y: opts.bounds?.y,
+    minWidth: 480,
+    minHeight: 360,
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    autoHideMenuBar: true,
+    backgroundColor: '#fbf8f5',
+    webPreferences: satelliteWebPreferences(),
+  })
+  detachedWindows.set(id, win)
+  win.webContents.setWindowOpenHandler(denyExternal)
+  const persist = (): void => { if (!win.isDestroyed()) upsertDetachedBounds(id, win.getBounds()) }
+  win.on('moved', persist)
+  win.on('resized', persist)
+  win.on('closed', () => {
+    console.log('[win] detached closed', id)
+    detachedWindows.delete(id)
+    pendingDetachedViews.delete(id)
+    removeDetachedState(id) // 用户主动关 = 不再恢复;布局键留 localStorage 无害
+  })
+  upsertDetachedBounds(id, win.getBounds()) // 立即登记(拖出后崩溃也能恢复)
+  console.log('[win] detached open', id, 'views=', opts.views?.map((v) => v.type).join(','))
+  loadRendererWith(win, { window: 'detached', id, ui: 'desktop' })
+  return id
+}
+
+async function restoreDetachedWindows(): Promise<void> {
+  await loadDetachedState()
+  for (const { id, bounds } of [...persistedDetached]) createDetachedWindow({ id, bounds })
+}
+
+let miniWindow: BrowserWindow | null = null
+/** 贴边吸附态:edge=贴哪条边,expanded=当前是否展开。null=未贴边(自由浮动)。 */
+let miniDock: { edge: Edge; expanded: boolean } | null = null
+let suppressMiniMoved = false // 抑制程序化 setBounds 触发的 moved(否则折叠/展开自激)
+let miniDragging = false // 用户正在拖窗(moved 连发中);其间不吸附/不轮询,避免和拖拽对打(修「拖不出来」)
+let miniSettleTimer: NodeJS.Timeout | null = null
+let miniPollTimer: NodeJS.Timeout | null = null
+
+const MINI_PEEK = 8 // 折叠后露出的薄条 px
+const MINI_TRIGGER_PAD = 6 // 悬停触发容差(薄条外扩,好点中)
+const MINI_HYSTERESIS = 28 // 展开后离开迟滞(出界超此才折叠,修「一动就弹回」)
+
+function createMiniWindow(): void {
+  const { width, height } = miniSizeFromWidth(300) // 300×400,3:4 竖比
+  const wa = screen.getPrimaryDisplay().workArea
+  miniWindow = new BrowserWindow({
+    width, height,
+    x: wa.x + wa.width - width - 24,
+    y: wa.y + 24,
+    minWidth: width, minHeight: height, maxWidth: width, maxHeight: height, // 锁 3:4
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: true,
+    backgroundColor: '#00000000',
+    webPreferences: satelliteWebPreferences(),
+  })
+  miniWindow.setAlwaysOnTop(true, 'floating')
+  miniWindow.webContents.setWindowOpenHandler(denyExternal)
+  miniWindow.on('moved', onMiniMoved)
+  miniWindow.on('closed', () => { console.log('[win] mini closed'); miniWindow = null; miniDock = null; stopMiniPoll() })
+  console.log('[win] mini open')
+  loadRendererWith(miniWindow, { window: 'mini', ui: 'mobile' })
+}
+
+function toggleMiniWindow(): void {
+  if (miniWindow && !miniWindow.isDestroyed()) {
+    if (miniWindow.isVisible()) miniWindow.hide()
+    else { miniWindow.show(); miniWindow.focus() }
+  } else createMiniWindow()
+}
+
+/** 设 bounds;mac 传 animate=true 走原生滑动动画(修「无动画」),win/linux 瞬时。程序化移动抑制 moved 自激。 */
+function setMiniBounds(r: Rect, animate = true): void {
+  if (!miniWindow || miniWindow.isDestroyed()) return
+  suppressMiniMoved = true
+  miniWindow.setBounds(r, animate && process.platform === 'darwin')
+  setTimeout(() => { suppressMiniMoved = false }, animate && process.platform === 'darwin' ? 320 : 60)
+}
+
+// moved 连发 = 用户在拖窗;只在**停稳 200ms 后**才判贴边(拖拽过程中绝不折叠 → 能自由拖出)。
+function onMiniMoved(): void {
+  if (!miniWindow || suppressMiniMoved) return // 程序化移动不算用户拖拽
+  miniDragging = true
+  if (miniSettleTimer) clearTimeout(miniSettleTimer)
+  miniSettleTimer = setTimeout(onMiniSettled, 200)
+}
+
+function onMiniSettled(): void {
+  miniDragging = false
+  if (!miniWindow || miniWindow.isDestroyed()) return
+  const b = miniWindow.getBounds()
+  const wa = screen.getDisplayMatching(b).workArea
+  const edge = nearestEdge(b, wa)
+  if (edge) {
+    miniDock = { edge, expanded: false }
+    setMiniBounds(collapsedBounds(b, edge, wa, MINI_PEEK)) // 停在边上 → 折叠(动画)
+    ensureMiniPoll()
+  } else {
+    miniDock = null // 拖离边 → 解除吸附
+    stopMiniPoll()
+  }
+}
+
+// 贴边时轮询光标(替掉 frameless 透明窗上不可靠的 DOM mouseenter/leave):折叠态触到薄条→展开,展开态离开(超迟滞)→折叠。
+function ensureMiniPoll(): void {
+  if (miniPollTimer) return
+  miniPollTimer = setInterval(pollMiniCursor, 90)
+}
+function stopMiniPoll(): void {
+  if (miniPollTimer) { clearInterval(miniPollTimer); miniPollTimer = null }
+}
+function pollMiniCursor(): void {
+  if (!miniWindow || miniWindow.isDestroyed() || !miniDock || miniDragging || suppressMiniMoved) return
+  const pt = screen.getCursorScreenPoint()
+  const b = miniWindow.getBounds()
+  const wa = screen.getDisplayMatching(b).workArea
+  if (!miniDock.expanded) {
+    // 折叠:光标触到薄条(可见交集 + 容差)→ 展开
+    if (pointInRect(pt.x, pt.y, growRect(visibleRect(b, wa), MINI_TRIGGER_PAD))) {
+      miniDock.expanded = true
+      setMiniBounds(expandedBounds(b, miniDock.edge, wa))
+    }
+  } else {
+    // 展开:光标离开窗口 + 迟滞边距 → 折叠(小幅移动不触发,修「一动就弹回」)
+    if (!pointInRect(pt.x, pt.y, growRect(b, MINI_HYSTERESIS))) {
+      miniDock.expanded = false
+      setMiniBounds(collapsedBounds(b, miniDock.edge, wa, MINI_PEEK))
+    }
+  }
+}
+
+/** 可作跨窗拖拽落点的 dockview 窗口(主窗 + 独立窗;mini 卡片不是 dockview,排除)。 */
+function dockviewWindows(): BrowserWindow[] {
+  return [mainWindow, ...detachedWindows.values()].filter((w): w is BrowserWindow => !!w && !w.isDestroyed())
+}
+/** 屏幕点(screenX,screenY)命中哪个 dockview 窗口(排除 exclude=源窗);无则 null。z 序未细分,重叠取首个。 */
+function windowAtPoint(x: number, y: number, exclude?: BrowserWindow | null): BrowserWindow | null {
+  for (const w of dockviewWindows()) {
+    if (w === exclude || !w.isVisible()) continue
+    const b = w.getBounds()
+    if (x >= b.x && x < b.x + b.width && y >= b.y && y < b.y + b.height) return w
+  }
+  return null
+}
+/** 给所有 dockview 窗口清除跨窗落点预览。 */
+function clearAllDragPreview(): void {
+  for (const w of dockviewWindows()) w.webContents.send('window:dragPreview', null)
 }
 
 // 60s 内崩溃≥3 次则熔断(避免崩溃-重载风暴),弹框让用户决定重载或退出。
@@ -623,6 +848,26 @@ registerAmadeusAssetSchemes()
 app.whenReady().then(async () => {
   // Windows 系统通知前提(无 AppUserModelId 时 Notification 可能不弹);mac/linux 无副作用。
   app.setAppUserModelId('com.forsion.tangu')
+  // 媒体权限(麦克风,语音输入):Electron 层放行——部分平台/版本默认拒 getUserMedia。callback(true) 沿用
+  // 「未设 handler=全放行」的既有默认,不回归其他权限(通知等)。macOS 仍受系统隐私设置门控(拒了要去设置改)。
+  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(true))
+  session.defaultSession.setPermissionCheckHandler(() => true)
+  // 本机服务(ActivityWatch 等)通常不回 CORS 头——CSP connect-src 虽放行 localhost,浏览器 CORS 仍会
+  // 挡死 renderer 直连(插件轮询/依赖应用 probe 全靠这条)。只补缺失的 ACAO,已有的不动(vite/引擎后端不受扰)。
+  try {
+    session.defaultSession.webRequest.onHeadersReceived(
+      { urls: ['http://localhost:*/*', 'http://127.0.0.1:*/*'] },
+      (details, cb) => {
+        const h = details.responseHeaders || {}
+        if (!Object.keys(h).some((k) => k.toLowerCase() === 'access-control-allow-origin')) {
+          h['Access-Control-Allow-Origin'] = ['*']
+        }
+        cb({ responseHeaders: h })
+      },
+    )
+  } catch (e) {
+    console.error('[main] localhost CORS 补头注册失败(外置插件直连本机服务会被 CORS 挡):', e)
+  }
   migrateForsionHome() // 品牌迁移 ~/.tangu→~/.forsion + ~/Tangu→~/Forsion(改名+兼容软链;最早期,先于一切读盘)
   migrateEngineData() // 两层布局:顶层引擎条目 → ~/.forsion/tangu/ + ~/.tangu 软链改指(dev 家同法;须在 backend spawn/读盘之前)
   await loadTanguEnvFile() // 先于一切 loadConfig(其 env 兜底读 TANGU_CLOUD_URL/TANGU_BACKEND_URL)
@@ -724,6 +969,22 @@ app.whenReady().then(async () => {
     // 目录在前,各自按名排序
     out.sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1))
     return out
+  })
+  /** 单条目 stat(侧栏悬停提示用;悬停 1s 才调 = 天然节流,不进 listDir 热路径)。
+   *  文件 → 修改/创建时间;目录 → 另带直接子项计数。⚠️birthtime 只有 mac/Windows 可靠,
+   *  Linux 部分文件系统拿不到 → Node 给 0(或悄悄回退 ctime);0 一律当「无」,由渲染层省略该行。 */
+  ipcMain.handle('fs:stat', async (_e, p: string) => {
+    if (!p || typeof p !== 'string') return null
+    try {
+      const st = await stat(p)
+      const birthtimeMs = st.birthtimeMs > 0 ? st.birthtimeMs : null
+      if (!st.isDirectory()) return { isDir: false, mtimeMs: st.mtimeMs, birthtimeMs }
+      const es = await readdir(p, { withFileTypes: true }).catch(() => [])
+      let files = 0
+      let folders = 0
+      for (const e of es) e.isDirectory() ? folders++ : files++
+      return { isDir: true, mtimeMs: st.mtimeMs, birthtimeMs, files, folders }
+    } catch { return null }
   })
   const MIME_BY_EXT: Record<string, string> = {
     txt: 'text/plain', md: 'text/markdown', markdown: 'text/markdown', json: 'application/json',
@@ -908,6 +1169,15 @@ app.whenReady().then(async () => {
       })
     })
   })
+  // ── Forsion 插件依赖应用一键安装:白名单表(shared/knownApps)查命令 → 登记 opaque id,
+  // 执行/流式输出复用 env:run 通道。插件只能声明 id,命令文本永远在宿主,无注入面。──
+  ipcMain.handle('plugin:request-install', (_e, appId: string) => {
+    const cmd = KNOWN_APPS[String(appId)]?.install[process.platform as 'darwin' | 'win32' | 'linux']
+    if (!cmd) return null // 表外 id / 本平台无一键命令 → 前端降级「打开官网」
+    const installId = `app_${String(appId)}_${Date.now().toString(36)}`
+    pendingInstallCommands.set(installId, cmd)
+    return { installId, command: cmd }
+  })
   // 镜像连通性测试:让用户在切「中国大陆镜像」前后确认 registry 是否真的可达/更快。URL 走固定枚举表
   // (不接受 renderer 传 URL → 无 SSRF);每个目标各自 catch,整体绝不抛(任一挂了不影响另一个)。
   ipcMain.handle('env:test-mirror', async (_e, mirrorArg?: 'default' | 'china') => {
@@ -1025,6 +1295,41 @@ app.whenReady().then(async () => {
     if (stored.mode === 'managed') void ensureBackend()
     return list
   })
+
+  // ── 桌面级共享语音转写(任意功能复用:聊天框、Amadeus…;本地/自带-key,不经引擎/服务端)──
+  ipcMain.handle('asr:transcribe', async (_e, req: { audioBase64: string; mime?: string; modelId?: string; language?: string }) => {
+    const cfg = await loadConfig()
+    const audio = Buffer.from(req?.audioBase64 || '', 'base64')
+    if (!audio.length) throw new Error('空音频')
+    // 本地优先:选了本地且模型就绪 → 离线转写(不联网)。
+    if (cfg.asrBackend === 'local' && localModelReady()) {
+      return transcribeLocal(audio)
+    }
+    // 云端:自带 provider(<provider>/<model> 命中 providers.json)→ 主进程直连上游;否则走 Forsion 托管(计费)。
+    const modelId = (req?.modelId || cfg.asrModelId || '').trim()
+    const i = modelId.indexOf('/')
+    const provider = i > 0 ? (await readProvidersFile()).find((p) => p.providerId === modelId.slice(0, i)) : undefined
+    if (provider) {
+      return transcribeViaOpenAI({ baseUrl: provider.baseUrl, apiKey: provider.apiKey, model: modelId.slice(i + 1), audio, mime: req?.mime || 'audio/wav', language: req?.language })
+    }
+    // 非自带 provider = Forsion 托管模型(或未选,让服务端用 app asr 默认)→ 直连 Forsion 服务端(token 不下发 renderer)。
+    const creds = loadTanguCreds()
+    const cloudUrl = cfg.cloudUrl || creds.cloudUrl || ''
+    const token = cfg.cloudToken || creds.token || ''
+    if (!cloudUrl || !token) throw new Error('未设置语音识别:选一个自带 provider 的语音识别模型 + key,或登录 Forsion 用云端,或下载本地语音模型。')
+    return transcribeViaForsion({ cloudUrl, token, modelId, audioB64: req?.audioBase64 || '', mime: req?.mime || 'audio/wav', language: req?.language })
+  })
+
+  // ── 本地语音模型(SenseVoice)下载 / 状态 / 删除。下载进度经 'asr:localProgress' 推回发起窗口。──
+  ipcMain.handle('asr:localStatus', () => ({ ready: localModelReady(), sizeBytes: localModelSize() }))
+  ipcMain.handle('asr:localDownload', async (e) => {
+    const cfg = await loadConfig()
+    await downloadLocalModel(cfg.mirror === 'china' ? 'china' : 'default', (received, total) => {
+      if (!e.sender.isDestroyed()) e.sender.send('asr:localProgress', { received, total })
+    })
+    return { ok: true, ready: localModelReady() }
+  })
+  ipcMain.handle('asr:localRemove', async () => { await removeLocalModel(); return { ok: true } })
 
   // ── Forsion 账号 / provider OAuth 登录(与 `tangu login` 同一份凭证)──
   const broadcast = (channel: string, payload: any): void => {
@@ -1327,8 +1632,51 @@ app.whenReady().then(async () => {
     }
   })
 
+  // ── 多窗口 IPC:独立窗 + mini 卡片 ──
+  ipcMain.handle('window:detachedReady', (_e, id: string) => {
+    const v = pendingDetachedViews.get(String(id)) || []
+    pendingDetachedViews.delete(String(id))
+    return v
+  })
+  ipcMain.handle('window:openDetached', (_e, views: ViewDesc[], at?: { screenX: number; screenY: number }) => {
+    const list = Array.isArray(views) ? views.filter((v) => v && typeof v.type === 'string') : []
+    const bounds = at ? { x: Math.round(at.screenX), y: Math.round(at.screenY), width: 900, height: 680 } : undefined
+    return { id: createDetachedWindow({ views: list, bounds }) }
+  })
+  ipcMain.on('window:openMini', () => toggleMiniWindow())
+  ipcMain.on('window:closeSelf', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
+  // 跨窗撕拽:实时坐标 → 命中窗口显落点预览、其余清除。
+  ipcMain.on('window:dragUpdate', (e, p: { screenX: number; screenY: number; view: ViewDesc }) => {
+    const src = BrowserWindow.fromWebContents(e.sender)
+    const target = windowAtPoint(p.screenX, p.screenY, src)
+    for (const w of dockviewWindows()) {
+      if (w === src) continue
+      if (w === target) { const b = w.getBounds(); w.webContents.send('window:dragPreview', { localX: p.screenX - b.x, localY: p.screenY - b.y }) }
+      else w.webContents.send('window:dragPreview', null)
+    }
+  })
+  // 跨窗撕拽:最终落点路由。命中另一 dockview 窗 → acceptView 并入;空桌面 → 建新独立窗;都算已路由(源窗关 panel)。
+  ipcMain.handle('window:dropView', (e, p: { screenX: number; screenY: number; view: ViewDesc }) => {
+    clearAllDragPreview()
+    if (!p?.view || typeof p.view.type !== 'string') return { routed: false }
+    const src = BrowserWindow.fromWebContents(e.sender)
+    const target = windowAtPoint(p.screenX, p.screenY, src)
+    if (target) {
+      console.log('[win] dropView → merge into existing', target.id)
+      target.webContents.send('window:acceptView', p.view)
+      target.focus()
+      return { routed: true }
+    }
+    console.log('[win] dropView → new detached window')
+    createDetachedWindow({ views: [p.view], bounds: { x: Math.round(p.screenX), y: Math.round(p.screenY), width: 900, height: 680 } })
+    return { routed: true }
+  })
+  // mini 全局快捷键(默认 ⌘/Ctrl+⇧+M;register 返回 false=被占用,吞掉不阻塞启动)。
+  try { globalShortcut.register('CommandOrControl+Shift+M', () => toggleMiniWindow()) } catch { /* 快捷键冲突 */ }
+
   void ensureBackend()
   createWindow()
+  void restoreDetachedWindows() // 恢复上次退出时的独立窗(位置/尺寸 + 各窗自恢复布局)
   // 系统托盘 / mac 菜单栏图标:显示窗口 / 检查更新 / 退出。
   createTray({
     show: showMainWindow,
@@ -1348,6 +1696,7 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', (e) => {
   isQuitting = true // 放行 window close 拦截(否则 hide 会吞掉退出)
+  globalShortcut.unregisterAll() // 释放 mini 全局快捷键
   flushAllNoteEdits() // 活动日志:5 分钟合并窗口内未落盘的 note.edit 冲出去
   // 优雅停后端(SIGTERM→3s→SIGKILL);停完再真正退出。
   const st = backend.getStatus().state

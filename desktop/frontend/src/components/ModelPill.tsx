@@ -1,12 +1,12 @@
 /**
- * 模型选择器 pill(参考 AionUI):圆角 pill(模型名 + 下拉箭头,长名跑马灯;无前导图标)+ 下拉菜单
+ * 模型选择器 pill(参考 AionUI):圆角 pill(前导图标 + 模型名 + 下拉箭头,长名跑马灯;窄屏收成纯图标)+ 下拉菜单
  * (reasoning 组 + 模型组,分组标题吸顶,左勾号 + 高亮)+ 三态(只读「用引擎默认」/ 交互)。
  *
  * 数据源由调用方决定:Tangu 模式传 groups=按 provider 分组 + thinking;外部引擎模式传 groups=引擎模型单组、
  * 无 thinking、emptyLabel=「用引擎默认」。组件本身与数据来源无关。
  */
 import React, { useEffect, useRef, useState } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Cpu } from 'lucide-react'
 import { useI18n } from '../i18n'
 import type { AgentConfig } from '../types'
 
@@ -41,8 +41,10 @@ export const ModelPill: React.FC<{
   onThinkingChange?: (lv: Thinking) => void
   /** 无可选模型时的只读标签(外部引擎:「用引擎默认」)。 */
   emptyLabel?: string
+  /** 菜单底部说明(云端会话解释「为什么直连模型不在列表里」,免得用户以为丢了)。 */
+  footnote?: string
   title?: string
-}> = ({ disabled, modelId, groups, onSelect, thinkingLevel, onThinkingChange, emptyLabel, title }) => {
+}> = ({ disabled, modelId, groups, onSelect, thinkingLevel, onThinkingChange, emptyLabel, footnote, title }) => {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLSpanElement>(null)
@@ -62,11 +64,14 @@ export const ModelPill: React.FC<{
   // 三态:无 thinking(=外部引擎模式)且无可选模型 + 有 emptyLabel → 只读 pill。
   const readonly = !onThinkingChange && !hasModels && !!emptyLabel
   const label = current?.name || emptyLabel || t('input.selectModel')
-  const effort = thinkingLevel && thinkingLevel !== 'off' ? ` · ${t(thinkingShortKey[thinkingLevel])}` : ''
+  // 未显式设置 = 引擎默认思考·中(agentLoop 同款回退)——显示必须与实际执行一致。
+  const effLevel: Thinking = thinkingLevel || 'medium'
+  const effort = effLevel !== 'off' ? ` · ${t(thinkingShortKey[effLevel])}` : ''
 
   if (readonly) {
     return (
       <span className="composer-chip composer-chip--readonly" title={title}>
+        <Cpu size={13} />
         <MarqueeLabel text={label} />
       </span>
     )
@@ -75,6 +80,7 @@ export const ModelPill: React.FC<{
   return (
     <span ref={wrapRef} style={{ position: 'relative', display: 'inline-flex' }} data-cmenu>
       <button className="composer-chip" title={title || t('input.modelChipTitle')} disabled={disabled} onClick={() => setOpen((o) => !o)}>
+        <Cpu size={13} />
         <MarqueeLabel text={label + effort} />
         <ChevronDown size={10} />
       </button>
@@ -86,10 +92,10 @@ export const ModelPill: React.FC<{
               {(['off', 'low', 'medium', 'high'] as const).map((lv) => (
                 <button
                   key={lv}
-                  className={`menu-item${(thinkingLevel || 'off') === lv ? ' active' : ''}`}
+                  className={`menu-item${effLevel === lv ? ' active' : ''}`}
                   onClick={() => onThinkingChange(lv)}
                 >
-                  <span className="mi-check">{(thinkingLevel || 'off') === lv ? '✓' : ''}</span>
+                  <span className="mi-check">{effLevel === lv ? '✓' : ''}</span>
                   <span className="grow">{t(thinkingLabelKey[lv])}</span>
                 </button>
               ))}
@@ -112,6 +118,7 @@ export const ModelPill: React.FC<{
             </React.Fragment>
           ))}
           {!hasModels && !onThinkingChange && <div className="menu-section">{t('common.loading')}</div>}
+          {footnote && <div className="menu-section" style={{ whiteSpace: 'normal', letterSpacing: 0 }}>{footnote}</div>}
         </div>
       )}
     </span>

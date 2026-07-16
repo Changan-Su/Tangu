@@ -26,7 +26,10 @@ export function askString(title: string, initial = '', opts?: { label?: string; 
   })
 }
 
-/** 挂载一次(AmadeusOverlays);.am-app 载体让 .dialog-* 样式命中。 */
+/** 挂载一次(AmadeusOverlays);.am-app 载体让 .dialog-* 样式命中。
+ *  必须带 .tangu-lovable:.dialog 的取色 token(--surface-2/--primary…)被 amadeus 主题包的裸
+ *  [data-mode] 选择器钉在 <html> 上(Origin 硬编码色),只有经 bridge 重映射到 LCL 皮肤词表
+ *  才跟当前主题/明暗走 —— 所有弹窗载体(WikiCreateConfirm/CloudSyncDialogHost)同款。 */
 export function AskStringHost() {
   const req = usePromptStore((s) => s.req)
   if (!req) return null
@@ -36,7 +39,7 @@ export function AskStringHost() {
     req.resolve(v)
   }
   return (
-    <div className="am-app" style={{ display: 'contents' }}>
+    <div className="am-app tangu-lovable" style={{ display: 'contents' }}>
       <PromptDialog
         title={req.title}
         label={req.label}

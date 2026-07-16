@@ -1,7 +1,7 @@
 /** Calendar View —— Notion Calendar 式,连续原生滚动(跟手、无顿挫):
  *  周/3日/日 = 一条横向滚动的日列条(横滚一天一天连续推进);月 = 一条纵向滚动的周行条。
  *  小时线用背景渐变(零 DOM),事件拖拽走命令式 DOM(不触发整条重渲),故几百列仍丝滑。
- *  颜色/显隐/默认库来自 calendarConfigStore;数据经 dbAggregateStore 聚合全库 calendarDate 列。 */
+ *  颜色/显隐/默认库/成员映射来自 calendarConfigStore;数据经 calendarMembers 汇成员库(+ agent 只读源)。 */
 import {
   forwardRef,
   useEffect,
@@ -23,14 +23,17 @@ import { AstryxScope } from '../theme/astryxBridge'
 import { parseCalDate } from '@amadeus-shared/db/calDate'
 import { usePageStore } from '../amadeus/store/pageStore'
 import {
-  useAggregatedDatabases,
   setAggCell,
   createAggEvent,
+  firstDateCol,
   type AggDb,
   type AggRow,
 } from '../amadeus/store/dbAggregateStore'
+import { useCalendarMembers } from '../amadeus/store/calendarMembers'
 import { useCalendarConfig, colorForDb, isHidden, defaultDbPath } from '../amadeus/store/calendarConfigStore'
 import { useCalendarNav, type CalMode } from '../amadeus/store/calendarNavStore'
+import { useAgentSchedules, useAgentCalDbs } from '../stores/agentScheduleStore'
+import { useApp } from '../stores/appStore'
 import { EventCard, type Anchor } from './calendar/EventCard'
 import {
   HOURS,
@@ -70,17 +73,18 @@ interface CalEvent {
   start: Date
   end: Date | null
   allDay: boolean
+  /** 只读源事件(agent 日程):不可拖拽/缩放/编辑,点击只开只读卡。 */
+  readonly?: boolean
 }
 
-function buildEvents(dbs: AggDb[], vault: string, byVault: Parameters<typeof colorForDb>[1]): CalEvent[] {
+interface CalEntry { db: AggDb; dateCol: string }
+function buildEvents(entries: CalEntry[], vault: string, byVault: Parameters<typeof colorForDb>[1]): CalEvent[] {
   const out: CalEvent[] = []
-  dbs.forEach((db, di) => {
+  entries.forEach(({ db, dateCol }, di) => {
     if (isHidden(vault, byVault, db.path)) return
-    const col = db.columns.find((c) => c.type === 'calendarDate')
-    if (!col) return
     const color = colorForDb(vault, byVault, db.path, di)
     for (const r of db.rows) {
-      const raw = typeof r.cells[col.id] === 'string' ? (r.cells[col.id] as string) : ''
+      const raw = typeof r.cells[dateCol] === 'string' ? (r.cells[dateCol] as string) : ''
       const cd = parseCalDate(raw)
       if (!cd) continue
       out.push({
@@ -88,12 +92,13 @@ function buildEvents(dbs: AggDb[], vault: string, byVault: Parameters<typeof col
         color,
         db,
         row: r,
-        colId: col.id,
+        colId: dateCol,
         title: r.name, // 真实名(可空):无名事件不进网格(见 visible 过滤),编辑卡显示空而非编码
         raw,
         start: toLocalDate(cd.start),
         end: cd.end ? toLocalDate(cd.end) : null,
         allDay: cd.allDay,
+        readonly: db.readonly,
       })
     }
   })
@@ -116,7 +121,9 @@ const commitTime = (ev: CalEvent, start: Date, end: Date | null): void =>
   setAggCell(ev.db, ev.row.rowId, ev.colId, eventValue(start, end, ev.allDay))
 
 export function CalendarView() {
-  const dbs = useAggregatedDatabases('calendarDate')
+  const members = useCalendarMembers()
+  const agentDbs = useAgentCalDbs()
+  const cfg = useApp((s) => s.cfg)
   const vault = usePageStore((s) => s.vaultRoot) ?? ''
   const byVault = useCalendarConfig((s) => s.byVault)
   const mode = useCalendarNav((s) => s.mode)
@@ -135,27 +142,44 @@ export function CalendarView() {
     if (d) api.current?.goto(toLocalDate(d))
   }, [jumpNonce])
 
-  const events = useMemo(() => buildEvents(dbs, vault, byVault), [dbs, vault, byVault])
+  // agent 日程只读源:打开即拉 + 60s 轮询(引擎侧 SCHEDULE.db 由工具/自动化写,无推送通道)。
+  useEffect(() => {
+    const pull = (): void => void useAgentSchedules.getState().refresh(cfg)
+    pull()
+    const t = window.setInterval(pull, 60_000)
+    return () => window.clearInterval(t)
+  }, [cfg])
+
+  // 成员库 + agent 只读源汇入事件流;resolveDefaultDb 只吃成员库(双击新建绝不落到 agent:// 假路径)。
+  const entries = useMemo<CalEntry[]>(
+    () => [
+      ...members.map((m) => ({ db: m.db, dateCol: m.dateCol })),
+      ...agentDbs.map((db) => ({ db, dateCol: firstDateCol(db)?.id })).filter((x): x is CalEntry => !!x.dateCol),
+    ],
+    [members, agentDbs],
+  )
+  const events = useMemo(() => buildEvents(entries, vault, byVault), [entries, vault, byVault])
   // 无名事件不上网格,但仍留在 events 里:编辑卡清空名字时卡片会话不许闪关(选中走全量查找)。
   const visible = useMemo(() => events.filter((e) => e.title), [events])
   const selected = card ? events.find((e) => e.key === card.key) ?? null : null
   const openCard = (key: string, at: Anchor): void => setCard({ key, at })
 
-  const resolveDefaultDb = (): AggDb | null => {
+  const resolveDefaultDb = (): CalEntry | null => {
     const dp = defaultDbPath(vault, byVault)
-    return dbs.find((d) => d.path === dp) ?? dbs.find((d) => !d.isNoteView) ?? dbs[0] ?? null
+    const m = members.find((x) => x.db.path === dp) ?? members.find((x) => !x.db.isNoteView) ?? members[0] ?? null
+    return m ? { db: m.db, dateCol: m.dateCol } : null
   }
   const create = async (day: Date, min: number | null, at: Anchor): Promise<void> => {
-    const db = resolveDefaultDb()
-    const col = db?.columns.find((c) => c.type === 'calendarDate')
-    if (!db || !col) return
+    const target = resolveDefaultDb()
+    if (!target) return
+    const { db, dateCol } = target
     let value: string
     if (min === null) value = fmtStamp(day, true)
     else {
       const start = addMinutes(startOfDay(day), min)
       value = `${fmtStamp(start, false)}/${fmtStamp(addMinutes(start, 30), false)}`
     }
-    const newId = await createAggEvent(db, col.id, value, '新事件')
+    const newId = await createAggEvent(db, dateCol, value, '新事件')
     openCard(`${db.path}::${newId}`, at)
   }
 
@@ -370,6 +394,7 @@ const TimeScroll = forwardRef<CalApi, TimeProps>(function TimeScroll({ n, events
 
   const down = (ev: CalEvent, e: ReactPointerEvent): void => {
     e.stopPropagation()
+    if (ev.readonly) return // 只读源:不设 dragRef 不 capture;up() 里补点击开卡
     const el = e.currentTarget as HTMLElement
     const rect = el.getBoundingClientRect()
     const offY = e.clientY - rect.top
@@ -445,7 +470,10 @@ const TimeScroll = forwardRef<CalApi, TimeProps>(function TimeScroll({ n, events
   const up = (ev: CalEvent, e: ReactPointerEvent): void => {
     const d = dragRef.current
     dragRef.current = null
-    if (!d) return
+    if (!d) {
+      if (ev.readonly) onPick(ev.key, rectOf(e)) // down() 对只读早退过 → 这里就是「点击开卡」
+      return
+    }
     d.el.classList.remove('dragging')
     if (d.mode === 'move') {
       d.el.style.transform = ''
@@ -481,6 +509,7 @@ const TimeScroll = forwardRef<CalApi, TimeProps>(function TimeScroll({ n, events
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   }
   const allUp = (ev: CalEvent, e: ReactPointerEvent): void => {
+    if (ev.readonly) { onPick(ev.key, rectOf(e)); return } // 只读:不许「拖出来转定时」,只开卡
     const cell = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest('.amx-cal-daycol2')
     const iso = cell?.getAttribute('data-date')
     if (cell && iso) {
@@ -532,9 +561,9 @@ const TimeScroll = forwardRef<CalApi, TimeProps>(function TimeScroll({ n, events
               .map((e) => (
                 <button
                   key={e.key}
-                  className="amx-cal-chip-ev amx-cal-alldrag"
+                  className={`amx-cal-chip-ev amx-cal-alldrag${e.readonly ? ' readonly' : ''}`}
                   style={{ background: e.color }}
-                  title={`${e.title}（可拖入时间格设为定时）`}
+                  title={e.readonly ? e.title : `${e.title}（可拖入时间格设为定时）`}
                   onPointerDown={allDown}
                   onPointerUp={(pe) => allUp(e, pe)}
                 >
@@ -562,7 +591,7 @@ const TimeScroll = forwardRef<CalApi, TimeProps>(function TimeScroll({ n, events
                 return (
                   <button
                     key={e.key}
-                    className="amx-cal-event"
+                    className={`amx-cal-event${e.readonly ? ' readonly' : ''}`}
                     style={{ top: box.top, height: Math.max(14, box.height), background: e.color }}
                     title={e.title}
                     onPointerDown={(pe) => down(e, pe)}
@@ -668,6 +697,7 @@ const MonthScroll = forwardRef<CalApi, MonthProps>(function MonthScroll({ events
   }
   const chipUp = (ev: CalEvent, e: ReactPointerEvent): void => {
     const rect = rectOf(e)
+    if (ev.readonly) { onPick(ev.key, rect); return } // 只读:月视图芯片不可跨日拖,只开卡
     const cell = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest('.amx-cal-mcell')
     const iso = cell?.getAttribute('data-date')
     if (iso) {
@@ -704,7 +734,7 @@ const MonthScroll = forwardRef<CalApi, MonthProps>(function MonthScroll({ events
                 >
                   <div className="amx-cal-mnum">{day.getDate() === 1 ? `${day.getMonth() + 1}月1` : day.getDate()}</div>
                   {dayEvents.slice(0, 3).map((e) => (
-                    <button key={e.key} className="amx-cal-chip-ev" style={{ background: e.color }} title={e.title} onPointerDown={chipDown} onPointerUp={(pe) => chipUp(e, pe)}>
+                    <button key={e.key} className={`amx-cal-chip-ev${e.readonly ? ' readonly' : ''}`} style={{ background: e.color }} title={e.title} onPointerDown={chipDown} onPointerUp={(pe) => chipUp(e, pe)}>
                       {!e.allDay && sameDay(e.start, day) && <span className="amx-cal-chip-t">{hhmm(e.start)}</span>} {e.title}
                     </button>
                   ))}

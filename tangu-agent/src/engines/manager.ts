@@ -5,7 +5,7 @@
  */
 import type { ToolCall } from '../core/types.js';
 import type { ApprovalDecision } from '../services/approvals.js';
-import { loadEngines, isEngineAvailable, loadEnginePrefs, saveEngineDefaultModel, type EngineDef } from './config.js';
+import { loadEngines, engineStatus, loadEnginePrefs, saveEngineDefaultModel, type EngineDef, type EngineStatus } from './config.js';
 import { runAcpEngine, probeAcpEngine } from './acpEngine.js';
 
 /** externalEngineLoop 传入：一次外部引擎 turn 所需的上下文 + 回灌接缝。 */
@@ -42,11 +42,14 @@ export interface EngineCapabilities {
   commands: Array<{ name: string; description: string; hint?: string }>;
 }
 
-/** 列表项:含快速检测的 available + 每引擎默认模型(prefs)。 */
+/** 列表项:含快速检测的 available/status + 每引擎默认模型(prefs)。 */
 export interface EngineListItem {
   id: string;
   name: string;
+  /** 严格「可直接用」= status==='available'(已登录);needs-signin 时为 false,故新建会话选择器不列它。 */
   available: boolean;
+  /** 三态:available / needs-signin / not-installed(设置页据此显示「需登录」等)。 */
+  status: EngineStatus;
   defaultModel?: string;
 }
 
@@ -70,7 +73,10 @@ export function createEngineManager(configFile?: string): EngineManager {
   const capsCache = new Map<string, { caps: EngineCapabilities; at: number }>();
   let prefs = loadEnginePrefs();
   return {
-    list: () => engines.map((e) => ({ id: e.id, name: e.name, available: isEngineAvailable(e), defaultModel: prefs[e.id]?.defaultModel })),
+    list: () => engines.map((e) => {
+      const status = engineStatus(e);
+      return { id: e.id, name: e.name, available: status === 'available', status, defaultModel: prefs[e.id]?.defaultModel };
+    }),
     has: (id) => byId.has(id),
     capabilities: async (id) => {
       const def = byId.get(id);

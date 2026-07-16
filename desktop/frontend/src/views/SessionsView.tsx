@@ -5,6 +5,7 @@ import { SidebarPane } from './chat2/SidebarPane'
 import { useApp } from '../stores/appStore'
 import { openSpecial } from './SpecialViews'
 import { useWorkspace } from '@lcl/engine'
+import { openSession } from '../sessionNav'
 import { useShallow } from 'zustand/react/shallow'
 
 /** sideFilter(工作区 view 左栏胶囊):cloud=只看云端(无 project_path 的会话+云端工作区),
@@ -19,7 +20,6 @@ export function SessionsView({ sideFilter }: { sideFilter?: 'local' | 'cloud' } 
     cfg: state.cfg,
     modelsResp: state.modelsResp,
     desktopConfig: state.desktopConfig,
-    specialEnabled: state.specialEnabled,
     activeSpecial: state.activeSpecial,
     setActiveId: state.setActiveId,
     setNewChatWs: state.setNewChatWs,
@@ -67,13 +67,8 @@ export function SessionsView({ sideFilter }: { sideFilter?: 'local' | 'cloud' } 
       cfg={s.cfg}
       modelId={activeSession?.model_id || s.cfg.modelId || s.modelsResp?.defaultModelId || ''}
       activeSession={activeSession}
-      onSelect={(id) => {
-        s.setActiveId(id)
-        useWorkspace.getState().openView('chat', { followActive: true, reuseKey: 'primary' }, 'main')
-      }}
-      showSpecial={!!window.tangu?.backendStatus}
-      historianEnabled={s.specialEnabled.historian}
-      museEnabled={s.specialEnabled.muse}
+      onSelect={(id) => openSession(id)}
+      showSpecial={true} // 新对话 = createSession HTTP,云 web(无本地后端)同样可用,不 gate backendStatus
       wechatEnabled={wechatEnabled}
       specialView={s.activeSpecial}
       onOpenSpecial={(v) => openSpecial(v)}
@@ -81,7 +76,6 @@ export function SessionsView({ sideFilter }: { sideFilter?: 'local' | 'cloud' } 
         s.setActiveId(null); s.setNewChatWs(null); s.setNewChatCfg(() => ({})); s.setNewChatModel(null)
         useWorkspace.getState().openView('chat', { followActive: true, reuseKey: 'primary' }, 'main')
       }}
-      onOpenAgentsSettings={() => s.openSettings('agents')}
       onOpenWorkspace={(wsKey) => openSpecial('workspace', wsKey)}
       workspaces={workspaces}
       onNewInWorkspace={(ws) => void s.createInWorkspace(ws)}

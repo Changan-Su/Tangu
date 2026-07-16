@@ -15,6 +15,16 @@ interface Entry {
   embeds: string[]
   tags: string[]
   blocks: { id: string; content: string }[]
+  /** frontmatter `icon:`(页面 emoji 图标;desktop vaultIndex 同款)。 */
+  icon?: string
+}
+
+function parseFmIcon(raw: string): string | undefined {
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(raw)?.[1]
+  if (!fm) return undefined
+  const m = /^icon:[ \t]*["']?([^"'\r\n]+?)["']?[ \t]*$/m.exec(fm)
+  const v = m?.[1]?.trim()
+  return v || undefined
 }
 
 const READ_CONCURRENCY = 16
@@ -79,7 +89,15 @@ export class VaultIndex {
       embeds: parseEmbeds(raw),
       tags: parseTags(text),
       blocks,
+      icon: parseFmIcon(raw),
     }
+  }
+
+  /** 全库页面 emoji 图标(path → icon;只含设置了的)。 */
+  pageIcons(): Record<string, string> {
+    const out: Record<string, string> = {}
+    for (const e of this.entries.values()) if (e.icon) out[e.path] = e.icon
+    return out
   }
 
   resolveBlock(target: string): { path: string; content: string; type: string } | null {

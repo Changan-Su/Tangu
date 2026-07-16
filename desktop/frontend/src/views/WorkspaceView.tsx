@@ -4,11 +4,12 @@
  *
  * 模式体全部**包裹复用**现有组件(SessionsView / FilesPanel / AmadeusPagesView / TocView /
  * AmadeusOutlineView),本文件只提供:模式状态(存 leaf params,随布局持久化)+ 头部切换器 + 自动跟随。
- * 自动规则:主视图=chat → 左=会话、右=文件(当前会话工作区);主视图=编辑器 → 左=笔记、右=文件
- * (定位到笔记所在目录;笔记与工作区层级不一致时以笔记所在目录为准);其他主视图 → 维持上一模式。
+ * 自动规则两级(见 workspaceMode.ts):主视图**硬规则**优先且跨 Space 一致(chat → 左=会话、右=文件;
+ * Amadeus 文档家族(编辑器/图/多维表/PDF)→ 左=笔记、右=文件,定位到笔记所在目录;code-studio → 文件);
+ * 无硬规则 → 落**本 Space 的默认档**(SpaceDefinition.autoWorkspaceMode,如 Amadeus → 笔记)。右栏恒为文件。
  */
-import { useMemo, useRef, useState, useEffect, type ReactNode } from 'react'
-import { useWorkspace, activeMainPanel, scheduleWorkspaceSave } from '@lcl/engine'
+import { useMemo, useState, useEffect, type ReactNode } from 'react'
+import { useWorkspace, activeMainPanel, scheduleWorkspaceSave, useSpaceStore } from '@lcl/engine'
 import type { ViewProps } from '@lcl/engine'
 import { useApp } from '../stores/appStore'
 import { useI18n } from '../i18n'
@@ -92,9 +93,9 @@ export function WorkspaceView({ leaf }: ViewProps) {
   const raw = leaf.params.mode
   const override: WorkspaceMode | 'auto' =
     raw === 'sessions' || raw === 'files' || (raw === 'notes' && hasNotes) ? raw : 'auto'
-  const autoRef = useRef<WorkspaceMode>(loc === 'right' ? 'files' : 'sessions')
-  const auto = autoWorkspaceMode(loc, mainType, autoRef.current)
-  autoRef.current = auto
+  // 主视图无硬规则时落本 Space 的默认档(如 Amadeus → 笔记);缺省 sessions = 与其它 Space 一致。
+  const spaceAuto = useSpaceStore((s) => s.spaces.find((sp) => sp.id === s.activeSpaceId)?.autoWorkspaceMode)
+  const auto = autoWorkspaceMode(loc, mainType, spaceAuto)
   const mode: WorkspaceMode = override === 'auto' ? (auto === 'notes' && !hasNotes ? 'files' : auto) : override
 
   const vaultRoot = usePageStore((s) => s.vaultRoot)

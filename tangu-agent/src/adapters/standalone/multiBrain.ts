@@ -9,7 +9,7 @@
  */
 import type { CloudBrainServices, BuildPayloadOpts, StreamOpts, ImageGenRequest, ImageGenResult, SpeechRequest, SpeechResult } from '../../seams/cloudBrain.js';
 import type { ProviderRegistry } from '../../llm/providerRegistry.js';
-import { buildOpenAiCompatPayload, streamOpenAiCompat, DIRECT_MARK, PROTOCOL_MARK } from '../../llm/openaiCompat.js';
+import { buildOpenAiCompatPayload, tuneOpenAiDirectPayload, streamOpenAiCompat, DIRECT_MARK, PROTOCOL_MARK } from '../../llm/openaiCompat.js';
 import { streamAnthropicOAuth } from '../../llm/anthropicMessages.js';
 import { streamOpenAiResponses } from '../../llm/openaiResponses.js';
 import WebSocket from 'ws';
@@ -167,6 +167,7 @@ export function createMultiBrain(httpBrain: CloudBrainServices, registry: Provid
       // 直连 provider 目录(模型选择器/Providers 页用;剥掉 apiKey,baseUrl 仅供 UI 展示)。
       listDirectProviders: () =>
         registry.list().map((p) => ({ providerId: p.providerId, baseUrl: p.baseUrl, modelIds: p.modelIds, imageModelIds: p.imageModelIds, ttsModelIds: p.ttsModelIds })),
+      hasDirectModel: (modelId: string) => registry.has(modelId),
     },
     images: {
       // 生图分发:命中直连 provider 的图像模型(imageModelIds 或 <providerId>/<model>)→ 直连用户端点;
@@ -205,7 +206,12 @@ export function createMultiBrain(httpBrain: CloudBrainServices, registry: Provid
         return httpBrain.llm.resolveModelAndKey(modelId);
       },
       buildProviderPayload: async (opts: BuildPayloadOpts) => {
-        if ((opts.model as any)?.[DIRECT_MARK]) return buildOpenAiCompatPayload(opts);
+        if ((opts.model as any)?.[DIRECT_MARK]) {
+          const payload = buildOpenAiCompatPayload(opts);
+          // 官方 OpenAI 的 gpt-5.x:思考关补 reasoning_effort:'none',思考开改道 /v1/responses(见 tune 注释)。
+          tuneOpenAiDirectPayload(payload, opts.thinkingLevel, registry.resolve((opts.model as any).id)?.baseUrl);
+          return payload;
+        }
         return httpBrain.llm.buildProviderPayload(opts);
       },
       streamProviderCompletion: async (opts: StreamOpts) => {

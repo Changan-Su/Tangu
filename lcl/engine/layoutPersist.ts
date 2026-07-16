@@ -36,7 +36,16 @@ export interface KV {
 
 // 旧 desktop 的 forsion_tangu_layout 与新注册表布局不兼容 → 用新 key,不迁移旧 blob。
 // v2: Phase 1 早期「会话+对话挤同组」坏布局;v3: 旧 blob 无 params.__type(toggle 会读不到类型)→ 提版本重建。
-export const LAYOUT_KEY = 'tangu2_layout_v4'
+// 独立窗口(?window=detached&id=X)按 id 命名空间隔离布局键,免与主窗互相覆盖;每窗独立 realm、id 固定,
+// 故模块初始化时算一次即可。node 测试无 location → 回退主键(现状零变)。
+function computeLayoutKey(): string {
+  try {
+    const p = new URLSearchParams(location.search)
+    if (p.get('window') === 'detached') return `tangu2_layout_detached_${p.get('id') || 'default'}`
+  } catch { /* 无 location(node/测试)*/ }
+  return 'tangu2_layout_v4'
+}
+export const LAYOUT_KEY = computeLayoutKey()
 export const LEGACY_LAYOUT_KEY = 'tangu2_layout_v3'
 export const NAMED_LAYOUTS_KEY = 'tangu2_named_layouts'
 

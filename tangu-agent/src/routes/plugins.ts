@@ -64,6 +64,32 @@ router.post('/agent/plugins/rescan', authMiddleware, async (_req: AuthRequest, r
   } catch (e: any) { res.status(400).json({ detail: e?.message || 'rescan failed' }); }
 });
 
+// npm 一条命令装引擎插件(仅本地形态)。要求显式 confirm:true —— 装前风险确认由桌面 UI 弹框负责,
+// 路由不做交互。只接受 npm: 源(本地路径/.tgz 通道限 CLI,缩注入面)。装后内联 activateNewPlugins 即时生效。
+router.post('/agent/plugins/install', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    const b = req.body || {};
+    if (b.confirm !== true) return res.status(400).json({ detail: '需显式 confirm:true(装前请在 UI 确认插件以完整系统权限运行的风险)' });
+    const raw = String(b.spec || '').trim();
+    if (!raw.startsWith('npm:')) return res.status(400).json({ detail: '路由仅支持 npm: 源(本地目录/.tgz 走 CLI)' });
+    const { parseInstallSpec, installPlugin } = await import('../plugins/npmInstall.js');
+    const r = await installPlugin(parseInstallSpec(raw), raw, { preferMirror: !!b.preferMirror, force: !!b.force });
+    const { activateNewPlugins } = await import('../plugins/bootstrap.js');
+    const { addedIds, needsRestart } = await activateNewPlugins();
+    res.json({ ok: true, id: r.id, version: r.version, addedIds, needsRestart, plugins: listPluginMetas().map(pluginView) });
+  } catch (e: any) { res.status(400).json({ detail: e?.message || 'install failed' }); }
+});
+
+// 读某插件的安装来源(.tangu-source.json):桌面显示「来自 npm:xxx@ver」与更新检查。
+router.get('/agent/plugins/:id/source', authMiddleware, async (req: AuthRequest, res) => {
+  if (!ensureLocal(res)) return;
+  try {
+    const { readInstalledSource } = await import('../plugins/npmInstall.js');
+    res.json({ source: readInstalledSource(req.params.id) });
+  } catch (e: any) { res.status(400).json({ detail: e?.message || 'read failed' }); }
+});
+
 // 卸载数据清理:注销 meta + 清全局/每-agent 设置与 blob。插件文件夹删除与后端重启由桌面端负责。
 // 故意不查 meta 是否存在 —— 也用于清理「加载失败插件」的孤儿设置。
 router.delete('/agent/plugins/:id', authMiddleware, async (req: AuthRequest, res) => {

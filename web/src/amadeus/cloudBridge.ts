@@ -26,15 +26,20 @@ import {
 } from '@amadeus-shared/compiler'
 import { joinRel } from '@amadeus-shared/assets'
 import { dbFileSchema, parseDb, serializeDb, type DbFile } from '@amadeus-shared/db/schema'
+import { parseDrawing, withSceneJson } from '@amadeus-shared/excalidraw/format'
+import { mergeScenes, type SceneLike } from '@amadeus-shared/excalidraw/reconcile'
 import { parseFmObject, setFmExtraOnSource } from '@amadeus-shared/db/pageFrontmatter'
 import type {
   AmadeusApi,
   BacklinkRef,
   DbReadResult,
+  DrawingReadResult,
   EmbedResolved,
+  LinkMeta,
   PageProps,
   SearchHit,
   TagCount,
+  TrashEntry,
   VaultInfo,
 } from '@amadeus-shared/ipc'
 import { createCloudHttp, is404, is409, HttpError } from './cloudHttp'
@@ -190,6 +195,9 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
     return entry.promise
   }
   const allTreePaths = (t: TreeDto): string[] => [...t.pages, ...t.files.map((f) => f.path)]
+  /** 点开头路径段(.amadeus/.trash/.forsion-vault…)对树/搜索隐身 —— 镜像桌面主进程扫描
+   *  「点目录天然跳过」语义。只滤 list* 出口;原始 tree(fetchTree)不滤,ref 解析/回收站仍可寻址。 */
+  const visiblePath = (p: string): boolean => !p.split('/').some((seg) => seg.startsWith('.'))
 
   // ---- per-path 串行写队列(rename/move 占两个 key) ---------------------------
   const queues = new Map<string, Promise<unknown>>()
@@ -245,6 +253,16 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
     assetToken: () => assetToken,
     activePage: () => lastLoadedPage,
   })
+
+  // 「同步 Vault 分区」识别:桌面开启按条目云同步时会在云端 vault 根写 <名>/.forsion-vault 标记,
+  // web 据此把这些根级文件夹提升为侧边栏分区(与桌面云端侧的注册表分区对齐)。
+  ;(window as unknown as { amadeusCloudVaults?: () => Promise<string[]> }).amadeusCloudVaults = async () => {
+    const t = await fetchTree()
+    return t.files
+      .map((f) => /^([^/]+)\/\.forsion-vault$/.exec(f.path)?.[1])
+      .filter((x): x is string => !!x)
+      .sort()
+  }
 
   // ---- SSE ------------------------------------------------------------------
   let stopEvents: (() => void) | null = null
@@ -360,13 +378,44 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
     return r
   }
 
+  // ---- 回收站(.trash/ 约定,镜像桌面 vaultManager 语义:.meta.json 记原位) --------
+  // server 无回收站概念:move 进 .trash/ 前缀实现;点前缀经 visiblePath 对树隐身。
+  const TRASH_DIR = '.trash'
+  const TRASH_META = `${TRASH_DIR}/.meta.json`
+  type TrashMetaMap = Record<string, { original: string; deletedAt: number; dir: boolean }>
+
+  const readTrashMeta = async (): Promise<{ meta: TrashMetaMap; seq: number }> => {
+    try {
+      const f = await getFile(TRASH_META)
+      const p = JSON.parse(f.content) as unknown
+      return { meta: p && typeof p === 'object' ? (p as TrashMetaMap) : {}, seq: f.seq }
+    } catch (e) {
+      if (is404(e)) return { meta: {}, seq: 0 }
+      throw e
+    }
+  }
+  /** RMW + 409 换新基准重试一次(setPageFrontmatter 同款;meta 只是账本,后写胜)。 */
+  const updateTrashMeta = async (mut: (m: TrashMetaMap) => void): Promise<void> => {
+    const first = await readTrashMeta()
+    mut(first.meta)
+    try {
+      await putFile(TRASH_META, `${JSON.stringify(first.meta, null, 2)}\n`, first.seq)
+    } catch (e) {
+      if (!is409(e)) throw e
+      const again = await readTrashMeta()
+      mut(again.meta)
+      await putFile(TRASH_META, `${JSON.stringify(again.meta, null, 2)}\n`, again.seq, true)
+    }
+  }
+
   // ---- restoreVault(openVault 同体;web 无目录对话框) ---------------------------
   let assetCounter = 0
   const openCloud = async (): Promise<VaultInfo> => {
     const v = await ensureVault()
-    const tree = await fetchTree(true)
+    // asset token 必须赶在首屏 <img> 渲染前就位:fire-and-forget 会让早期图片 URL 缺 ?at=
+    // → 401 且 <img> 不自愈。refreshAssetToken 内部全捕获永不 reject,await 无新错误路径。
+    const [tree] = await Promise.all([fetchTree(true), refreshAssetToken()])
     startEvents(v)
-    void refreshAssetToken()
     const lp = readLastPage()
     return {
       root: `cloud://${v}`,
@@ -383,9 +432,9 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
     openVault: () => openCloud(),
     restoreVault: () => openCloud(),
 
-    listPages: async () => (await fetchTree()).pages,
-    listFiles: async () => (await fetchTree()).files.map((f) => f.path),
-    listFolders: async () => (await fetchTree()).folders,
+    listPages: async () => (await fetchTree()).pages.filter(visiblePath),
+    listFiles: async () => (await fetchTree()).files.map((f) => f.path).filter(visiblePath),
+    listFolders: async () => (await fetchTree()).folders.filter(visiblePath),
 
     loadPage: async (pagePath) => {
       await ensureVault()
@@ -677,6 +726,145 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
       return r.path
     },
 
+    // ---- 回收站(五件套;树/搜索经 visiblePath 对 .trash 免疫,同桌面点目录语义) ----
+    trashEntry: async (rel) => {
+      await ensureVault()
+      const norm = rel.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+      if (!norm || norm === TRASH_DIR || norm.startsWith(`${TRASH_DIR}/`)) throw new Error('无效路径')
+      const tree = await fetchTree(true)
+      const isDir = tree.folders.includes(norm)
+      const stamp = Date.now().toString(36)
+      if (isDir) {
+        // folders/move 只保持 basename(server 无「移动即改名」)→ 撞名先原地改唯一名再移。
+        let src = norm
+        let base = basenamePosix(norm)
+        if (tree.folders.includes(`${TRASH_DIR}/${base}`)) {
+          const r = await http.post<{ path: string }>(`/amadeus/vaults/${encodeURIComponent(vid())}/folders/rename`, { path: norm, newName: `${base} (${stamp})` })
+          src = r.path
+          base = basenamePosix(r.path)
+        }
+        await http.post(`/amadeus/vaults/${encodeURIComponent(vid())}/folders/move`, { path: src, dest: TRASH_DIR })
+        forgetSeqPrefix(norm)
+        await updateTrashMeta((m) => { m[base] = { original: norm, deletedAt: Date.now(), dir: true } })
+      } else {
+        // 文件一步 move(.trash 父目录由服务端物化);扁平名防嵌套路径,撞名带时间戳前缀。
+        let name = norm.replace(/\//g, '__')
+        if (allTreePaths(tree).includes(`${TRASH_DIR}/${name}`)) name = `${stamp}-${name}`
+        await http.post(`/amadeus/vaults/${encodeURIComponent(vid())}/move`, { from: norm, to: `${TRASH_DIR}/${name}` })
+        forgetSeq(norm)
+        await updateTrashMeta((m) => { m[name] = { original: norm, deletedAt: Date.now(), dir: false } })
+      }
+      invalidateTree()
+    },
+
+    listTrash: async (): Promise<TrashEntry[]> => {
+      await ensureVault()
+      const { meta } = await readTrashMeta()
+      // 与实存对齐(另一端可能已恢复/清空):树里 .trash 下还在的才列。
+      const tree = await fetchTree()
+      const present = new Set<string>()
+      for (const p of [...allTreePaths(tree), ...tree.folders]) {
+        if (p.startsWith(`${TRASH_DIR}/`)) present.add(p.slice(TRASH_DIR.length + 1).split('/')[0])
+      }
+      return Object.entries(meta)
+        .filter(([name]) => present.has(name))
+        .map(([name, v]) => ({ name, original: v.original, deletedAt: v.deletedAt, dir: v.dir }))
+        .sort((a, b) => b.deletedAt - a.deletedAt)
+    },
+
+    restoreTrash: async (name) => {
+      await ensureVault()
+      const { meta } = await readTrashMeta()
+      const rec = meta[name]
+      if (!rec) throw new Error('回收站条目不存在')
+      const tree = await fetchTree(true)
+      const taken = (p: string): boolean => allTreePaths(tree).includes(p) || tree.folders.includes(p)
+      // 原位被占 → 占位加 " (N)"(桌面同款;文件夹整名加,文件在扩展名前加)。
+      let target = rec.original
+      for (let n = 2; taken(target); n++) {
+        if (rec.dir) target = `${rec.original} (${n})`
+        else {
+          const ext = extnamePosix(rec.original)
+          target = `${rec.original.slice(0, rec.original.length - ext.length)} (${n})${ext}`
+        }
+      }
+      if (rec.dir) {
+        // folders/move 保持 basename → 必要时先在 .trash 内改成目标名再移到目标父目录。
+        let src = `${TRASH_DIR}/${name}`
+        const wantBase = basenamePosix(target)
+        if (basenamePosix(src) !== wantBase) {
+          const r = await http.post<{ path: string }>(`/amadeus/vaults/${encodeURIComponent(vid())}/folders/rename`, { path: src, newName: wantBase })
+          src = r.path
+        }
+        await http.post(`/amadeus/vaults/${encodeURIComponent(vid())}/folders/move`, { path: src, dest: dirnamePosix(target) })
+      } else {
+        await http.post(`/amadeus/vaults/${encodeURIComponent(vid())}/move`, { from: `${TRASH_DIR}/${name}`, to: target })
+      }
+      await updateTrashMeta((m) => { delete m[name] })
+      invalidateTree()
+      return target
+    },
+
+    deleteTrashEntry: async (name) => {
+      await ensureVault()
+      const { meta } = await readTrashMeta()
+      if (meta[name]?.dir) {
+        await http.del(`/amadeus/vaults/${encodeURIComponent(vid())}/folders`, { path: `${TRASH_DIR}/${name}` }).catch((e) => { if (!is404(e)) throw e })
+      } else {
+        await http.del(fileUrl(), { path: `${TRASH_DIR}/${name}` }).catch((e) => { if (!is404(e)) throw e })
+      }
+      await updateTrashMeta((m) => { delete m[name] })
+      invalidateTree()
+    },
+
+    emptyTrash: async () => {
+      await ensureVault()
+      await http.del(`/amadeus/vaults/${encodeURIComponent(vid())}/folders`, { path: TRASH_DIR }).catch((e) => { if (!is404(e)) throw e })
+      forgetSeqPrefix(TRASH_DIR)
+      invalidateTree()
+    },
+
+    // ---- 字节读写(PDF 批注写回 / 阅读器 getDocument({data})) --------------------
+    // binary 端点按扩展名分 kind,文本类(.md/.db)会被拒 —— web 消费面只有二进制(PDF),够用。
+    saveVaultBytes: async (vaultRel, bytes) => {
+      await ensureVault()
+      const norm = normalizePosix(vaultRel.replace(/\\/g, '/'))
+      if (!norm) throw new Error('路径越出 vault')
+      await postBinary(norm, basenamePosix(norm), bytes, false) // 无 ifAbsent = 原地覆盖
+    },
+    readVaultBytes: async (vaultRel) => {
+      const v = await ensureVault()
+      const r = await fetch(
+        `${cfg.apiBase}/amadeus/vaults/${encodeURIComponent(v)}/asset?path=${encodeURIComponent(vaultRel)}`,
+        { headers: { Authorization: `Bearer ${cfg.getToken()}` } }, // assetAuth 收 Bearer 主 token,无需等 asset-token
+      )
+      if (!r.ok) throw new Error(`读取文件失败(HTTP ${r.status})`)
+      return new Uint8Array(await r.arrayBuffer())
+    },
+
+    // ---- 书签卡 / 封面图搜索 -----------------------------------------------------
+    // 浏览器抓任意网页必撞 CORS → og 元数据走 server 代理;失败一律 null(渲染端降级纯链接卡,桌面同款)。
+    fetchLinkMeta: async (url) => {
+      try {
+        return await http.get<LinkMeta | null>('/amadeus/link-meta', { url })
+      } catch {
+        return null
+      }
+    },
+    // Openverse 公开 API 自带 CORS,浏览器直连(桌面 linkMeta.ts 的精简版:无进程内缓存,失败即抛)。
+    searchImages: async (query) => {
+      const q = query.trim()
+      if (!q) return []
+      const res = await fetch(`https://api.openverse.org/v1/images/?q=${encodeURIComponent(q)}&page_size=20`, {
+        headers: { accept: 'application/json' },
+      })
+      if (!res.ok) throw new Error(`openverse HTTP ${res.status}`)
+      const j = (await res.json()) as { results?: Array<{ thumbnail?: string; url?: string; creator?: string }> }
+      return (j.results ?? [])
+        .map((r) => ({ thumb: r.thumbnail ?? '', full: r.url ?? '', author: r.creator }))
+        .filter((x) => x.thumb && x.full)
+    },
+
     // ---- 插件 / OS 集成:web 端 no-op(渲染层 `?.` 兜底 / 明确提示) --------------
     listPlugins: async () => [],
     openPluginsFolder: async () => { notify(DESKTOP_ONLY) },
@@ -721,11 +909,71 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
         }
       }),
 
+    // ---- Excalidraw 画板(.excalidraw.md;解析/序列化是渲染端纯函数,这里只搬文本) ----
+    readDrawing: async (pagePath, ref): Promise<DrawingReadResult> => {
+      await ensureVault()
+      // Obsidian 链接省略 .md:`![[Foo.excalidraw]]` 实指 Foo.excalidraw.md → 原样先试,落空补 .md(桌面同款)。
+      const resolved = (await resolveRef(pagePath, ref)) ?? (await resolveRef(pagePath, `${ref}.md`))
+      if (!resolved) return { status: 'missing' }
+      for (const candidate of resolved.endsWith('.md') ? [resolved] : [resolved, `${resolved}.md`]) {
+        try {
+          const f = await getFile(candidate)
+          return { status: 'ok', path: candidate, source: f.content }
+        } catch (e) {
+          if (!is404(e)) throw e
+        }
+      }
+      return { status: 'missing' }
+    },
+    writeDrawing: (drawingPath, source) =>
+      enqueue([drawingPath], async () => {
+        await ensureVault()
+        const base = await baseSeqFor(drawingPath)
+        try {
+          await putFile(drawingPath, source, base)
+        } catch (e) {
+          // 真并发(drawingStore 写前已预读,剩毫秒窗):拉服务端最新,元素级合并后按新 seq 重写
+          // —— 不同元素无损并集、同元素 version 高者胜;解析不出(坏档)才回落「后写胜」强写。
+          if (!is409(e)) throw e
+          try {
+            const f = await getFile(drawingPath) // noteSeq 顺带对齐
+            const mine = parseDrawing(source)
+            const theirs = parseDrawing(f.content)
+            const mineScene = mine ? (JSON.parse(mine.sceneJson) as SceneLike) : null
+            const theirScene = theirs ? (JSON.parse(theirs.sceneJson) as SceneLike) : null
+            if (mineScene && theirScene) {
+              const next = withSceneJson(f.content, JSON.stringify(mergeScenes(mineScene, theirScene)))
+              if (next) {
+                await putFile(drawingPath, next, f.seq)
+                return
+              }
+            }
+          } catch {
+            /* 合并失败 → 强写兜底 */
+          }
+          const body = (e as HttpError).body as ConflictBody | null
+          if (body && typeof body.seq === 'number') noteSeq(drawingPath, body.seq)
+          await putFile(drawingPath, source, seqMap.get(drawingPath) ?? 0, true)
+        }
+      }),
+
     // ---- 笔记视图(Bases) -------------------------------------------------------
     listPageProps: async (folder): Promise<PageProps[]> => {
       await ensureVault()
       const rows = await http.get<PagePropsDto[]>(`/amadeus/vaults/${encodeURIComponent(vid())}/page-props`, { folder })
       return rows.map((r) => ({ path: r.path, title: r.title, fm: parseFmObject(r.fmExtra || '') }))
+    },
+
+    // 页面 emoji 图标表:page-props 的全库形态(all=1)+ 渲染端抠 fm icon 键(桌面=索引供给,这里按需拉)。
+    pageIcons: async () => {
+      await ensureVault()
+      const rows = await http.get<PagePropsDto[]>(`/amadeus/vaults/${encodeURIComponent(vid())}/page-props`, { folder: '', all: '1' })
+      const out: Record<string, string> = {}
+      for (const r of rows) {
+        const icon = parseFmObject(r.fmExtra || '').icon
+        if (typeof icon === 'string' && icon) out[r.path] = icon
+      }
+      return out
     },
 
     // 外科式 frontmatter 写:客户端 RMW(GET raw → setFmExtraOnSource → PUT);409 换新基准重试一次。

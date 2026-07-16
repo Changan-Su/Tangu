@@ -12,16 +12,26 @@ import {
   type IDockviewHeaderActionsProps,
   type DockviewTheme,
 } from 'dockview-react'
-import { X, Plus, PanelLeft, PanelRight, ArrowLeft, ArrowRight } from 'lucide-react'
+import { X, Plus, PanelLeft, PanelRight, ArrowLeft, ArrowRight, AppWindow } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import 'dockview-react/dist/styles/dockview.css'
 import type { Leaf, ViewDefinition } from './types'
 import { label } from './types'
 import { allViews, getView, subscribeViews } from './viewRegistry'
-import { useWorkspace, tryRestoreLayout, scheduleWorkspaceSave, activeMainPanel, captureSideWidths } from './workspaceStore'
+import { useWorkspace, tryRestoreLayout, scheduleWorkspaceSave, activeMainPanel, captureSideWidths } from './dockviewStore'
 import { useNav } from './navStore'
 import { getActiveSpace } from './spaceRegistry'
 import { computeDropTarget, type DropTarget } from './dropModel'
+import { getDetachApi, type ViewRef } from './detachSeam'
+
+/** 从 Dockview panel.params 造可跨窗重建的 ViewRef({type, 用户 params});剥引擎私有 __loc/__type。 */
+function viewRefFromParams(params: Record<string, unknown> | undefined, component?: string): ViewRef | null {
+  const raw = (params ?? {}) as Record<string, unknown>
+  const { __loc, __type, ...userParams } = raw
+  void __loc
+  const type = (typeof __type === 'string' && __type) || component || ''
+  return type ? { type, params: userParams } : null
+}
 
 /** 从 Dockview panel props 造引擎 Leaf。 */
 function leafFromProps(props: IDockviewPanelProps): Leaf {
@@ -75,6 +85,14 @@ function makeFrameHost(cache: Map<string, React.FC<IDockviewPanelProps>>): React
 /** Surface tab = 图标 + 名称;Obsidian 层级,平整无圆角。无内联 × 关闭钮 —— 关闭走右键菜单(更干净)。
  *  侧栏(left/right)tab 仅图标(名入 tooltip,免文字 tab 溢出,贴合 Obsidian);主区 tab 图标 + 名称。 */
 const WbTab: React.FC<IDockviewPanelHeaderProps> = ({ api, params }) => {
+  // 自定义 tab 直接读可变的 api.title,React 不会因其变化重渲 → 须订阅标题变更手动触发。
+  // 否则视图挂载后 effect 里的 setTitle(会话/笔记名等)刷不到 tab:引擎无 onDidTitleChange 监听,
+  // onDidActivePanelChange 只在切换活动 tab 时才 refreshTabs(就地 navigateLeaf 后当前 tab 未变 → 标题停在视图名)。
+  const [, bumpTitle] = useState(0)
+  useEffect(() => {
+    const d = api.onDidTitleChange(() => bumpTitle((n) => n + 1))
+    return () => d.dispose()
+  }, [api])
   const type = ((params as { __type?: string } | undefined)?.__type) || (api as { component?: string }).component || ''
   const def = getView(type)
   const Icon = def?.icon
@@ -124,6 +142,17 @@ const WbTab: React.FC<IDockviewPanelHeaderProps> = ({ api, params }) => {
       )}
       {menu && createPortal(
         <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}>
+          {/* 「移到新窗口」:确定性撕出路径(不依赖跨窗拖拽);仅桌面(getDetachApi 有真身)显示。 */}
+          {getDetachApi() && (
+            <button onClick={() => {
+              const ref = viewRefFromParams(params as Record<string, unknown> | undefined, (api as { component?: string }).component)
+              const d = getDetachApi()
+              if (ref && d) { d.detach([ref]); useWorkspace.getState().closeLeaf(api.id) }
+              setMenu(null)
+            }}>
+              <AppWindow size={13} /> {document.documentElement.lang.startsWith('zh') ? '移到新窗口' : 'Move to new window'}
+            </button>
+          )}
           <button onClick={() => { useWorkspace.getState().closeLeaf(api.id); setMenu(null) }}>
             <X size={13} /> {document.documentElement.lang.startsWith('zh') ? '关闭' : 'Close'}
           </button>
@@ -200,6 +229,8 @@ function makeSuffixActions(): React.FC<IDockviewHeaderActionsProps> {
 // 唯一真源 computeDropTarget(dropModel.ts)同时驱动「提示」(竖线/半屏高亮)与「提交」(dropView 程序化 moveTo):
 // 提示显示在哪就落在哪(根治提示≠落点)。固定 3 面板:tab 栏=并标签页;正文半边=面板内分屏(侧栏仅上下,主区四向);违规=null 弹回。
 let draggingId: string | null = null
+let draggingView: ViewRef | null = null // 跨窗撕拽:源视图的可重建描述({type,params})
+let lastDragUpdate = 0 // 节流 drag→dragUpdate(屏幕坐标上报)
 let dropLineEl: HTMLDivElement | null = null
 let dropZoneEl: HTMLDivElement | null = null
 
@@ -237,6 +268,7 @@ function showTarget(t: DropTarget): void {
 // 收尾:清 draggingId + data-dv-dragging(app-region 拖窗区复位)+ 撤源 tab 标记 + 撤提示。
 function clearDragState(): void {
   draggingId = null
+  draggingView = null
   if (document.documentElement.dataset.dvDragging) delete document.documentElement.dataset.dvDragging
   document.querySelector('.dv-tab.wb-tab-dragging')?.classList.remove('wb-tab-dragging')
   hideIndicator()
@@ -251,6 +283,9 @@ function onTabDragStart(e: DragEvent, el: HTMLElement, panelId: string): void {
   e.stopPropagation()
   if (!e.dataTransfer) return
   draggingId = panelId
+  // 记源视图描述(供跨窗重建):从 panel.params 剥引擎私有键。
+  const panel = useWorkspace.getState().api?.getPanel(panelId)
+  draggingView = viewRefFromParams(panel?.params as Record<string, unknown> | undefined, (panel as { component?: string } | undefined)?.component)
   e.dataTransfer.effectAllowed = 'move'
   e.dataTransfer.setData('application/x-tangu-view', panelId)
   document.documentElement.dataset.dvDragging = '1'
@@ -298,13 +333,34 @@ export const WorkspaceHost: React.FC<{
       if (t) useWorkspace.getState().dropView(id, t)
       clearDragState()
     }
+    // 跨窗撕拽:drag 在源元素全程触发(含移出窗口)→ 节流上报屏幕坐标,主进程给光标下窗口画落点预览。
+    const onDrag = (e: DragEvent): void => {
+      const d = getDetachApi()
+      if (!draggingView || !d?.dragUpdate || (!e.screenX && !e.screenY)) return
+      const now = Date.now()
+      if (now - lastDragUpdate < 30) return
+      lastDragUpdate = now
+      d.dragUpdate(e.screenX, e.screenY, draggingView)
+    }
+    // 收尾 + 跨窗落点:释放点落在本窗**外** → 交平台钩子路由(命中别的窗=并入 / 空桌面=新窗);routed 则关源 panel。
+    const onDragEnd = (e: DragEvent): void => {
+      const id = draggingId, view = draggingView
+      const d = getDetachApi()
+      const outside = e.clientX < 0 || e.clientY < 0 || e.clientX > window.innerWidth || e.clientY > window.innerHeight
+      if (id && view && d?.drop && outside) {
+        void d.drop(e.screenX, e.screenY, view).then((routed) => { if (routed) useWorkspace.getState().closeLeaf(id) })
+      }
+      clearDragState()
+    }
     window.addEventListener('dragover', onDragOver, true)
     window.addEventListener('drop', onDrop, true)
-    window.addEventListener('dragend', clearDragState, true)
+    window.addEventListener('drag', onDrag, true)
+    window.addEventListener('dragend', onDragEnd, true)
     return () => {
       window.removeEventListener('dragover', onDragOver, true)
       window.removeEventListener('drop', onDrop, true)
-      window.removeEventListener('dragend', clearDragState, true)
+      window.removeEventListener('drag', onDrag, true)
+      window.removeEventListener('dragend', onDragEnd, true)
       clearDragState()
     }
   }, [])

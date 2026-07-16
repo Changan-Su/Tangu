@@ -12,7 +12,7 @@ import {
   LEGACY_LAYOUT_KEY,
   type KV,
 } from './layoutPersist'
-import { nextPanelId } from './workspaceStore'
+import { nextPanelId } from './dockviewStore'
 
 /** 内存版 Storage stub(node 环境,无 localStorage)。 */
 function memKV(): KV {

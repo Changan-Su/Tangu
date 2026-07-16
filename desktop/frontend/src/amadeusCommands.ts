@@ -9,6 +9,7 @@ import { useUiOverlay } from './amadeusOverlayStore'
 import { amadeus } from '@amadeus/api'
 import { openDailyNote } from './amadeusTemplates'
 import { useAmadeusPrefs } from './amadeusPrefs'
+import { createDrawing } from './amadeusNav'
 
 const ps = () => usePageStore.getState()
 const ws = () => useWorkspace.getState()
@@ -16,6 +17,7 @@ const cs = () => useCommandStore.getState()
 
 const CMDS: Command[] = [
   { id: 'amadeus-new-note', title: '新建笔记', keywords: 'new note create 新建 笔记', hotkey: 'mod+n', run: () => { if (ps().vaultRoot) void ps().createPage() } },
+  { id: 'amadeus-new-drawing', title: '新建白板', keywords: 'new drawing whiteboard canvas excalidraw 新建 白板 画板 baiban', run: () => { if (ps().vaultRoot) void createDrawing('') } },
   { id: 'amadeus-quick-switcher', title: '快速切换笔记', keywords: 'quick switcher open jump 快速 切换 跳转', hotkey: 'mod+p', run: () => useUiOverlay.getState().open('switcher') },
   { id: 'amadeus-search', title: '搜索笔记(全文)', keywords: 'search full text 搜索 全文', hotkey: 'mod+shift+f', run: () => openSearchView() },
   { id: 'amadeus-daily-note', title: '打开今天的日记', keywords: 'daily note today journal 日记 今天 riji', run: () => void openDailyNote() },

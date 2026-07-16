@@ -86,6 +86,19 @@ describe('migrateEngineData(两层布局:顶层引擎条目 → tangu/)', () => 
     expect(readFileSync(join(home, 'skills', 'old.md'), 'utf8')).toBe('old') // 并存:旧位不动
     expect(readFileSync(join(home, 'tangu', 'skills', 'new.md'), 'utf8')).toBe('new')
   })
+
+  it('Forsion 插件归位:amadeus/plugins → plugins(引擎 plugins 先迁走腾位,同轮不冲突)', () => {
+    const home = mkdtempSync(join(tmpdir(), 'fh-eng-'))
+    mkdirSync(join(home, 'plugins', 'forsion-worker'), { recursive: true }) // 引擎 agent 插件(旧顶层)
+    mkdirSync(join(home, 'amadeus', 'plugins', 'activitywatch'), { recursive: true })
+    writeFileSync(join(home, 'amadeus', 'plugins', 'activitywatch', 'manifest.json'), '{}')
+    migrateEngineData(noop, home)
+    expect(existsSync(join(home, 'tangu', 'plugins', 'forsion-worker'))).toBe(true)
+    expect(readFileSync(join(home, 'plugins', 'activitywatch', 'manifest.json'), 'utf8')).toBe('{}')
+    expect(existsSync(join(home, 'amadeus', 'plugins'))).toBe(false)
+    migrateEngineData(noop, home) // 幂等
+    expect(existsSync(join(home, 'plugins', 'activitywatch'))).toBe(true)
+  })
 })
 
 describe('dev 态目录隔离', () => {

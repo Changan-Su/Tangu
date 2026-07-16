@@ -76,6 +76,10 @@ const api = {
   /** 本机工作区文件浏览:列目录 / 读文件(主进程 fs)。 */
   listDir: (dirPath: string): Promise<Array<{ name: string; isDir: boolean; size: number; path: string }>> =>
     ipcRenderer.invoke('fs:listDir', dirPath),
+  /** 单条目 stat(侧栏悬停提示):文件→修改/创建时间;目录→另带直接子项计数。不存在/无权限 → null。
+   *  birthtimeMs 为 null = 该文件系统拿不到创建时间(Linux 常见),调用方省略「创建」那行。 */
+  statPath: (p: string): Promise<{ isDir: boolean; mtimeMs: number; birthtimeMs: number | null; files?: number; folders?: number } | null> =>
+    ipcRenderer.invoke('fs:stat', p),
   readHostFile: (filePath: string): Promise<{ mimeType: string; content: string; size: number; mtimeMs?: number; tooLarge?: boolean }> =>
     ipcRenderer.invoke('fs:readFile', filePath),
   /** 用系统默认应用打开(预览不支持的类型)。 */
@@ -148,6 +152,43 @@ const api = {
     const listener = (_e: unknown, ev: { installId: string; line: string }): void => cb(ev)
     ipcRenderer.on('env:output', listener)
     return () => ipcRenderer.removeListener('env:output', listener)
+  },
+  // Forsion 插件依赖应用:白名单查表登记 → 拿 installId 走 envRun 执行(null=无一键命令,降级官网)
+  requestKnownAppInstall: (appId: string): Promise<{ installId: string; command: string } | null> =>
+    ipcRenderer.invoke('plugin:request-install', appId),
+  // ── 桌面级共享语音转写(任意功能复用:聊天框、Amadeus…;主进程本地/自带-key,不经引擎)──
+  transcribeAudio: (req: { audioBase64: string; mime?: string; modelId?: string; language?: string }): Promise<string> =>
+    ipcRenderer.invoke('asr:transcribe', req),
+  // 本地语音模型(SenseVoice)下载 / 状态 / 删除 + 下载进度订阅。
+  asrLocalStatus: (): Promise<{ ready: boolean; sizeBytes: number }> => ipcRenderer.invoke('asr:localStatus'),
+  asrLocalDownload: (): Promise<{ ok: boolean; ready: boolean }> => ipcRenderer.invoke('asr:localDownload'),
+  asrLocalRemove: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('asr:localRemove'),
+  onAsrLocalProgress: (cb: (ev: { received: number; total: number }) => void): (() => void) => {
+    const listener = (_e: unknown, ev: { received: number; total: number }): void => cb(ev)
+    ipcRenderer.on('asr:localProgress', listener)
+    return () => ipcRenderer.removeListener('asr:localProgress', listener)
+  },
+  // ── 多窗口:独立窗(拖出的 dockview,无 ribbon)+ mini 悬浮卡片 ──
+  detachedReady: (id: string): Promise<Array<{ type: string; params?: Record<string, unknown> }>> =>
+    ipcRenderer.invoke('window:detachedReady', id),
+  openDetached: (views: Array<{ type: string; params?: Record<string, unknown> }>, at?: { screenX: number; screenY: number }): Promise<{ id: string }> =>
+    ipcRenderer.invoke('window:openDetached', views, at),
+  openMini: (): void => ipcRenderer.send('window:openMini'),
+  closeSelf: (): void => ipcRenderer.send('window:closeSelf'),
+  // 跨窗撕拽:实时坐标(节流 send)+ 最终落点路由(invoke)+ 目标窗接收订阅(on)。
+  dragUpdate: (screenX: number, screenY: number, view: { type: string; params?: Record<string, unknown> }): void =>
+    ipcRenderer.send('window:dragUpdate', { screenX, screenY, view }),
+  dropView: (screenX: number, screenY: number, view: { type: string; params?: Record<string, unknown> }): Promise<{ routed: boolean }> =>
+    ipcRenderer.invoke('window:dropView', { screenX, screenY, view }),
+  onAcceptView: (cb: (view: { type: string; params?: Record<string, unknown> }) => void): (() => void) => {
+    const listener = (_e: unknown, view: { type: string; params?: Record<string, unknown> }): void => cb(view)
+    ipcRenderer.on('window:acceptView', listener)
+    return () => ipcRenderer.removeListener('window:acceptView', listener)
+  },
+  onDragPreview: (cb: (at: { localX: number; localY: number } | null) => void): (() => void) => {
+    const listener = (_e: unknown, at: { localX: number; localY: number } | null): void => cb(at)
+    ipcRenderer.on('window:dragPreview', listener)
+    return () => ipcRenderer.removeListener('window:dragPreview', listener)
   },
 }
 

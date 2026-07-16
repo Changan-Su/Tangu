@@ -18,7 +18,8 @@ import {
 import { EngineIcon } from './EngineIcon'
 import type { TanguDesktopConfig } from '../types'
 
-type EngineRow = { id: string; name: string; available?: boolean; defaultModel?: string }
+type EngineStatus = 'available' | 'needs-signin' | 'not-installed'
+type EngineRow = { id: string; name: string; available?: boolean; status?: EngineStatus; defaultModel?: string }
 type Caps = { models: Array<{ id: string; name: string; description?: string }> }
 
 export const AgentClisTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg }) => {
@@ -107,14 +108,27 @@ export const AgentClisTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg }) => 
                   <EngineIcon engineId={e.id} size={16} />
                 </span>
                 <b style={{ flex: 1 }}>{e.name}</b>
-                {e.available ? (
-                  <span className="conn-pill ok">
-                    <span className="dot" />
-                    {t('settings.agentClis.detected')}
-                  </span>
-                ) : (
-                  <span className="hint">{t('settings.agentClis.notDetected')}</span>
-                )}
+                {(() => {
+                  // 三态:后端给 status 就用它;旧后端只有 available 时降级为二态。
+                  const status: EngineStatus = e.status ?? (e.available ? 'available' : 'not-installed')
+                  if (status === 'available') {
+                    return (
+                      <span className="conn-pill ok">
+                        <span className="dot" />
+                        {t('settings.agentClis.detected')}
+                      </span>
+                    )
+                  }
+                  if (status === 'needs-signin') {
+                    return (
+                      <span className="conn-pill warn">
+                        <span className="dot" />
+                        {t('settings.agentClis.needsSignin')}
+                      </span>
+                    )
+                  }
+                  return <span className="hint">{t('settings.agentClis.notDetected')}</span>
+                })()}
               </div>
               {e.available ? (
                 <>
@@ -126,7 +140,7 @@ export const AgentClisTab: React.FC<{ cfg: TanguDesktopConfig }> = ({ cfg }) => 
                       <select value={e.defaultModel || ''} onChange={(ev) => onPickModel(e.id, ev.target.value)}>
                         <option value="">{t('settings.agentClis.modelDefault')}</option>
                         {models.map((m) => (
-                          <option key={m.id} value={m.id}>
+                          <option key={m.id} value={m.id} title={m.description}>
                             {m.name}
                           </option>
                         ))}

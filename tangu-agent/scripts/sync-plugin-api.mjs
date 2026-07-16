@@ -20,6 +20,13 @@ const targets = existsSync(pluginsDir)
       .filter((f) => existsSync(f))
   : [];
 
+// 外部独立仓插件(与 tangu-agent 平级,如 tangu-computer-use)的 types/ 拷贝:
+// 单独 checkout 里可能不存在 → existsSync 过滤,不崩。
+for (const ext of ['tangu-computer-use']) {
+  const f = join(root, '..', ext, 'types', 'tangu-agent.d.ts');
+  if (existsSync(f)) targets.push(f);
+}
+
 let drifted = 0;
 for (const f of targets) {
   const cur = readFileSync(f, 'utf8');

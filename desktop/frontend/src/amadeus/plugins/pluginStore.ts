@@ -1,7 +1,7 @@
 // The plugin host. Holds the plugin registry, the persisted "disabled" preference, the
 // runtime active set, and the live contribution registries (slash items / commands /
 // themes) that the UI subscribes to. Built-in plugins are registered on init(); external
-// (user) plugins are discovered per-vault from .amadeus/plugins/ and evaluated here.
+// (Forsion) plugins are discovered from ~/.forsion/plugins/ and evaluated here.
 //
 // Trust model: external plugins run with the curated `ctx.app` API (and, like Obsidian,
 // full renderer scope). Only install plugins you trust.
@@ -22,6 +22,7 @@ import type {
   PluginAppApi,
   PluginContext,
   PropertyTypeContribution,
+  SettingContribution,
   SlashContribution,
   StatusItemContribution,
   ThemeContribution,
@@ -47,6 +48,7 @@ interface PluginState {
   panels: Owned<PanelContribution>[]
   statusItems: Owned<StatusItemContribution>[]
   propertyTypes: Owned<PropertyTypeContribution>[]
+  settings: Owned<SettingContribution>[]
   disposers: Record<string, (() => void) | undefined>
   initialized: boolean
   /** 注册并按偏好启用一组插件;缺省 = 全部 builtins(独立版);桌面壳传自己的选择性子集。 */
@@ -115,9 +117,10 @@ function toPlugin(src: ExternalPluginSource): AmadeusPlugin {
     version: src.version,
     description: src.description,
     builtin: false,
-    source: src.source,
     apiVersion: src.apiVersion,
     minAppVersion: src.minAppVersion,
+    requiresApp: src.requiresApp,
+    readme: src.readme,
     blocked: src.blocked,
     setup: (ctx) => {
       const fn = new Function('ctx', src.code) as (c: PluginContext) => unknown
@@ -141,6 +144,7 @@ export const usePluginStore = create<PluginState>((set, get) => {
     registerPanel: (panel) => set((s) => ({ panels: [...s.panels, { pluginId, item: panel }] })),
     registerStatusItem: (item) =>
       set((s) => ({ statusItems: [...s.statusItems, { pluginId, item }] })),
+    registerSetting: (def) => set((s) => ({ settings: [...s.settings, { pluginId, item: def }] })),
     registerPropertyType: (def) => {
       registerPropType(def)
       set((s) => ({ propertyTypes: [...s.propertyTypes, { pluginId, item: def }] }))
@@ -174,6 +178,7 @@ export const usePluginStore = create<PluginState>((set, get) => {
       panels: s.panels.filter((o) => o.pluginId !== id),
       statusItems: s.statusItems.filter((o) => o.pluginId !== id),
       propertyTypes: s.propertyTypes.filter((o) => o.pluginId !== id),
+      settings: s.settings.filter((o) => o.pluginId !== id),
       disposers: { ...s.disposers, [id]: undefined },
     }))
   }
@@ -192,6 +197,7 @@ export const usePluginStore = create<PluginState>((set, get) => {
     panels: [],
     statusItems: [],
     propertyTypes: [],
+    settings: [],
     disposers: {},
     initialized: false,
 
@@ -224,6 +230,7 @@ export const usePluginStore = create<PluginState>((set, get) => {
           panels: s.panels.filter((o) => o.pluginId !== id),
           statusItems: s.statusItems.filter((o) => o.pluginId !== id),
           propertyTypes: s.propertyTypes.filter((o) => o.pluginId !== id),
+          settings: s.settings.filter((o) => o.pluginId !== id),
         }))
         return
       }

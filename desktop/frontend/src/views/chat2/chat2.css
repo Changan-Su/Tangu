@@ -205,6 +205,9 @@
 
 /* ====== 系统行(分隔/提示) ====== */
 .t2-sys { text-align: center; font-size: 11px; color: var(--text-faint, var(--text-muted)); padding: 2px 0; }
+/* LLM 网络重试横幅:琥珀色示警但不是失败(失败是红色 t2-status-err);原始错误淡化拖尾。 */
+.t2-retry { color: #b8860b; }
+.t2-retry .t2-retry-err { opacity: 0.65; margin-left: 6px; }
 
 /* ====== 思考块 ====== */
 .t2-think { border-left: 2px solid color-mix(in srgb, var(--accent-ink) 35%, transparent); padding-left: 12px; }
@@ -401,3 +404,18 @@
   border: none; background: transparent; border-radius: 6px; cursor: pointer; color: var(--text-faint);
 }
 .t2-voice-txt:hover { color: var(--text); background: color-mix(in srgb, var(--text-muted) 14%, transparent); }
+
+/* ── 聊天气泡里的 [[双链]](assistant Markdown 经 remarkWiki、user 纯文本经 WikiText;观感对齐编辑器) ── */
+.t2-content .wikilink, .t2-user .wikilink {
+  color: var(--primary);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.t2-content .wikilink:hover, .t2-user .wikilink:hover { background: var(--drop); border-radius: 3px; }
+.t2-content .wikilink.wikilink-unresolved, .t2-user .wikilink.wikilink-unresolved {
+  color: var(--text-muted);
+  opacity: 0.75;
+  text-decoration-style: dashed;
+  cursor: default;
+}

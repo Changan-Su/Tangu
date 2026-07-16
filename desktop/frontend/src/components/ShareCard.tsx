@@ -5,8 +5,11 @@
  * 配额随套餐(服务端强制;此处仅展示与报错透传):free 共享不可用/发布3;plus 2/10;pro 10/∞。
  */
 import React, { useEffect, useState } from 'react'
-import { X, Copy, Check, Link2, Globe2, Trash2, RotateCw } from 'lucide-react'
+import { X, Copy, Check, Link2, Globe2, Trash2, RotateCw, Cloud, CloudOff } from 'lucide-react'
 import { useApp } from '../stores/appStore'
+import { usePageStore } from '@amadeus/store/pageStore'
+import { useEntrySync, isSyncedEntry } from '../stores/entrySyncStore'
+import { openCloudSyncDialog } from './CloudSyncDialog'
 import type { AmadeusPageShare, AmadeusCollabQuota } from '../types'
 
 const fmtQuota = (n: number): string => (Number.isFinite(n) ? String(n) : '无限制')
@@ -169,7 +172,30 @@ export function ShareCard({ path, anchor, onClose }: { path: string; anchor: { x
             {quota && <div className="amxc-hint">已发布 {pubCount} / {fmtQuota(quota.publish)} 页。</div>}
           </div>
         )}
+        <CloudSyncRow path={path} onClose={onClose} />
       </div>
+    </div>
+  )
+}
+
+/** 卡片底部的按条目云同步入口(仅桌面本地侧;与右键菜单同一 dialog 流)。 */
+function CloudSyncRow({ path, onClose }: { path: string; onClose: () => void }) {
+  const vaultRoot = usePageStore((s) => s.vaultRoot)
+  const vaultSide = usePageStore((s) => s.vaultSide)
+  useEntrySync((s) => s.vaults) // 订阅注册表变化以刷新 synced 态
+  if (!window.amadeusSync?.entrySyncEnable || vaultSide !== 'local') return null
+  const synced = isSyncedEntry(vaultRoot, path)
+  return (
+    <div className="amxc-body" style={{ borderTop: '1px solid var(--border, rgba(128,128,128,.25))', marginTop: 4, paddingTop: 8 }}>
+      {synced ? (
+        <button className="amxc-primary" onClick={() => { void window.amadeusSync!.entrySyncDisable!(path) }}>
+          <CloudOff size={13} /> 关闭云同步(云端副本保留)
+        </button>
+      ) : (
+        <button className="amxc-primary" onClick={() => { onClose(); openCloudSyncDialog(path, 'page') }}>
+          <Cloud size={13} /> 开启云同步(同步到云端工作区)
+        </button>
+      )}
     </div>
   )
 }

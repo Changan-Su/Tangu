@@ -3,11 +3,13 @@
  * 仅本地后端可用（后端 /agent/agents 在云端 404 → listAgents 已降级空列表）。
  */
 import React, { useEffect, useMemo, useState } from 'react'
-import { Loader2, Plus, Trash2, Pencil, Bot, Star, GripVertical, BookOpen, User, Cloud, FolderOpen } from 'lucide-react'
+import { Loader2, Plus, Trash2, Pencil, Bot, Star, GripVertical, BookOpen, User, Cloud, FolderOpen, MessagesSquare } from 'lucide-react'
+import { useWorkspace } from '@lcl/engine'
 import { listAgents, saveAgentDef, deleteAgentDef, listModels, uploadAgentAvatar, fetchAgentAvatar, deleteAgentAvatar, getAgentsMeta, putAgentsMeta, getUserProfile, putUserProfile, fetchToolCatalog } from '../services/backendService'
 import { AgentMemoryModal } from './AgentMemoryModal'
 import type { ModelInfo, NormalAgentDef, TanguDesktopConfig } from '../types'
 import { useI18n } from '../i18n'
+import { useApp } from '../stores/appStore'
 import { track } from '../achievements/store'
 import { act } from '../activity/log'
 
@@ -81,6 +83,15 @@ export const AgentsTab: React.FC<{ cfg: TanguDesktopConfig; onEditingChange?: (e
     })
     setAvatarUrl(null)
     if (a.avatar) void fetchAgentAvatar(cfg, a.slug).then(setAvatarUrl).catch(() => {})
+  }
+
+  // 「让 AI 帮我配置」:开新会话 + 预填一段创建意图,交给默认 agent(桌面 host 会话本就带 manage_agent 工具)对话式建 agent。
+  const createViaChat = (): void => {
+    const app = useApp.getState()
+    app.setPendingDraft('帮我创建一个新的 Agent。先问我几个关键点（人设/用途、默认模型、审批级别、要不要特定技能或工具），然后用 manage_agent 工具把它创建出来。')
+    void app.newSession()
+    app.closeSettings()
+    useWorkspace.getState().openView('chat', { followActive: true, reuseKey: 'primary' }, 'main')
   }
 
   const save = async (): Promise<void> => {
@@ -399,9 +410,19 @@ export const AgentsTab: React.FC<{ cfg: TanguDesktopConfig; onEditingChange?: (e
           ))}
         </div>
       )}
-      <button className="btn ghost sm" onClick={() => { setMsg(''); setEditing({ ...emptyDraft(), systemPrompt: t('settings.agents.starterTemplate') }) }}>
-        <Plus size={13} /> {t('settings.agents.new')}
-      </button>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <button className="btn ghost sm" onClick={() => { setMsg(''); setEditing({ ...emptyDraft(), systemPrompt: t('settings.agents.starterTemplate') }) }}>
+          <Plus size={13} /> {t('settings.agents.new')}
+        </button>
+        <button className="btn ghost sm" onClick={createViaChat} title={t('settings.agents.createViaChatHint')}>
+          <MessagesSquare size={13} /> {t('settings.agents.createViaChat')}
+        </button>
+        {window.tangu?.openAgentDir && (
+          <button className="btn ghost sm" style={{ marginLeft: 'auto' }} onClick={() => void window.tangu?.openAgentDir?.()}>
+            <FolderOpen size={13} /> {t('settings.agents.openFolder')}
+          </button>
+        )}
+      </div>
       {viewing && <AgentMemoryModal cfg={cfg} slug={viewing.slug} name={viewing.name} onClose={() => setViewing(null)} />}
     </div>
   )

@@ -18,7 +18,7 @@ const FULL: ProductProfile = {
   id: 'forsion',
   displayName: 'Forsion',
   defaultSpace: 'tangu',
-  spaces: ['tangu', 'inbox', 'amadeus', 'calendar', 'coding'],
+  spaces: ['tangu', 'inbox', 'amadeus', 'calendar', 'coding', 'automation'],
   agentBackend: true,
   market: true,
 }

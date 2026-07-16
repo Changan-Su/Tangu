@@ -14,6 +14,8 @@ export const IPC = {
   renamePage: 'page:rename',
   reconcilePage: 'page:reconcile',
   saveAsset: 'asset:save',
+  saveVaultBytes: 'vault:save-bytes',
+  readVaultBytes: 'vault:read-bytes',
   saveAttachment: 'attachment:save',
   openAttachment: 'attachment:open',
   openVaultFile: 'vault:open-file',
@@ -49,6 +51,8 @@ export const IPC = {
   dbRead: 'db:read',
   dbWrite: 'db:write',
   dbChange: 'db:external-change',
+  drawingRead: 'drawing:read',
+  drawingWrite: 'drawing:write',
   setPageFrontmatter: 'page:set-frontmatter',
   listPageProps: 'vault:page-props',
   renamePageFile: 'page:rename-file',
@@ -58,7 +62,7 @@ export const IPC = {
 /** Plugin API version the host implements. Manifests without apiVersion are treated as 1 (back-compat). */
 export const AMADEUS_PLUGIN_API = 1
 
-/** A user plugin discovered under <vault>/.amadeus/plugins/ or the global ~/.forsion/amadeus/plugins/. */
+/** A user (Forsion) plugin discovered under ~/.forsion/plugins/. */
 export interface ExternalPluginSource {
   id: string
   name: string
@@ -69,7 +73,10 @@ export interface ExternalPluginSource {
   /** Manifest apiVersion (missing → 1). */
   apiVersion: number
   minAppVersion?: string
-  source: 'vault' | 'global'
+  /** Companion app this plugin needs (manifest.requiresApp); only ids in the host KNOWN_APPS table get install UI. */
+  requiresApp?: string
+  /** README.md content from the plugin folder (capped), for the settings detail page. */
+  readme?: string
   /** Present → listed but not loadable: 'api' = apiVersion mismatch, 'minApp' = app too old. */
   blocked?: 'api' | 'minApp'
 }
@@ -138,6 +145,12 @@ export type DbReadResult =
   | { status: 'ok'; path: string; data: DbFile } // path = 解析后的 vault 相对路径,后续写回用它
   | { status: 'missing' }
   | { status: 'corrupt'; path: string; message: string }
+
+/** `drawing:read` 的结果:同 DbReadResult 的「错误是数据」约定,但只回原文——
+ *  解析/序列化是纯函数(shared/amadeus/excalidraw),放渲染端与编辑器同侧,主进程只管字节进出。 */
+export type DrawingReadResult =
+  | { status: 'ok'; path: string; source: string } // path = 解析后的 vault 相对路径,后续写回用它
+  | { status: 'missing' }
 
 /** 「笔记视图」一行的原料:笔记路径 + 标题(= Page Name) + 解析后的 frontmatter 对象。 */
 export interface PageProps {
@@ -208,6 +221,11 @@ export interface AmadeusApi {
   /** Save a pasted/dropped binary asset under the page's .amadeus/ folder.
    *  Returns the page-folder-relative path, e.g. ".amadeus/img-xyz.png". */
   saveAsset(pagePath: string, fileName: string, bytes: Uint8Array): Promise<string>
+  /** Overwrite an existing vault file in place by its vault-relative path (PDF 批注写回等)。 */
+  saveVaultBytes(path: string, bytes: Uint8Array): Promise<void>
+  /** Read a vault file's raw bytes by vault-relative path (PDF 阅读器 getDocument({data}) 等;避免自定义
+   *  scheme 的跨源 XHR 限制——dev 渲染器是 http://localhost 源,XHR 到 amadeus-asset:// 会被 Chromium 拦)。 */
+  readVaultBytes(path: string): Promise<Uint8Array>
   /** Import a dragged-in file to the configured attachment location (keeps its name, de-duped).
    *  Returns the page-relative path (for `[name](rel)` links) + final basename (for `![[base]]`). */
   saveAttachment(
@@ -285,6 +303,10 @@ export interface AmadeusApi {
   readDatabase(pagePath: string, ref: string): Promise<DbReadResult>
   /** 按 `db:read` 返回的确切 vault 相对路径原子写回(主进程 schema 校验,坏数据拒写)。 */
   writeDatabase(dbPath: string, data: DbFile): Promise<void>
+  /** Excalidraw 画板(`.excalidraw.md` / 裸 `.excalidraw`)读原文;ref 与附件同一 basename 语义。 */
+  readDrawing(pagePath: string, ref: string): Promise<DrawingReadResult>
+  /** 按 `drawing:read` 返回的确切 vault 相对路径原子写回(记自写账本,watcher 不把自己的写当外部改动)。 */
+  writeDrawing(drawingPath: string, source: string): Promise<void>
   /** 「笔记视图」:列出 folder 直属子级笔记的 path/title/frontmatter(行的实时数据源)。 */
   listPageProps(folder: string): Promise<PageProps[]>
   /** 外科式写笔记 frontmatter(值 = undefined 删该键):保留 amadeus_* 与正文,原子写。 */

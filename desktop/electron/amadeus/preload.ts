@@ -21,6 +21,8 @@ const api: AmadeusApi = {
     ipcRenderer.invoke(IPC.reconcilePage, pagePath, prevManifest, prevContents),
   saveAsset: (pagePath, fileName, bytes) =>
     ipcRenderer.invoke(IPC.saveAsset, pagePath, fileName, bytes),
+  saveVaultBytes: (filePath, bytes) => ipcRenderer.invoke(IPC.saveVaultBytes, filePath, bytes),
+  readVaultBytes: (filePath) => ipcRenderer.invoke(IPC.readVaultBytes, filePath),
   saveAttachment: (pagePath, fileName, bytes, opts) =>
     ipcRenderer.invoke(IPC.saveAttachment, pagePath, fileName, bytes, opts),
   openAttachment: (pagePath, ref) => ipcRenderer.invoke(IPC.openAttachment, pagePath, ref),
@@ -75,6 +77,8 @@ const api: AmadeusApi = {
   revealInFileManager: (targetPath) => ipcRenderer.invoke(IPC.revealInFileManager, targetPath),
   readDatabase: (pagePath, ref) => ipcRenderer.invoke(IPC.dbRead, pagePath, ref),
   writeDatabase: (dbPath, data) => ipcRenderer.invoke(IPC.dbWrite, dbPath, data),
+  readDrawing: (pagePath, ref) => ipcRenderer.invoke(IPC.drawingRead, pagePath, ref),
+  writeDrawing: (drawingPath, source) => ipcRenderer.invoke(IPC.drawingWrite, drawingPath, source),
   listPageProps: (folder) => ipcRenderer.invoke(IPC.listPageProps, folder),
   setPageFrontmatter: (pagePath, patch) => ipcRenderer.invoke(IPC.setPageFrontmatter, pagePath, patch),
   renamePageFile: (oldPath, newBaseName) => ipcRenderer.invoke(IPC.renamePageFile, oldPath, newBaseName),
@@ -94,6 +98,18 @@ contextBridge.exposeInMainWorld('amadeusSync', {
     ipcRenderer.on(SYNC_IPC.status, listener)
     return () => {
       ipcRenderer.removeListener(SYNC_IPC.status, listener)
+    }
+  },
+  // 按条目云同步(本地 vault 子集 ↔ 云端 <Vault名>/)
+  entrySyncGet: () => ipcRenderer.invoke(SYNC_IPC.entryGet),
+  entrySyncEnable: (payload: unknown) => ipcRenderer.invoke(SYNC_IPC.entryEnable, payload),
+  entrySyncDisable: (p: string) => ipcRenderer.invoke(SYNC_IPC.entryDisable, p),
+  entrySyncClosure: (rootRel: string, kind: 'page' | 'folder') => ipcRenderer.invoke(SYNC_IPC.entryClosure, rootRel, kind),
+  onEntrySyncChange: (cb: () => void) => {
+    const listener = (): void => cb()
+    ipcRenderer.on(SYNC_IPC.entryChange, listener)
+    return () => {
+      ipcRenderer.removeListener(SYNC_IPC.entryChange, listener)
     }
   },
 })

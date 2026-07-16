@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { toLocalDate, monthGridDays, coversDay, eventBox, sameDay, startOfWeek, WEEK_START } from './dateUtils'
+import { toLocalDate, monthGridDays, coversDay, eventBox, sameDay, startOfWeek, WEEK_START, eventTimeSummary, fmtDur } from './dateUtils'
 
 describe('toLocalDate', () => {
   it('全天 = 本地午夜(不偏 UTC)', () => {
@@ -61,5 +61,38 @@ describe('eventBox', () => {
 describe('startOfWeek', () => {
   it('落在 WEEK_START', () => {
     expect(startOfWeek(new Date(2026, 6, 15)).getDay()).toBe(WEEK_START)
+  })
+})
+
+describe('fmtDur', () => {
+  it('分 / 时 / 时分 / 天', () => {
+    expect(fmtDur(30)).toBe('30分钟')
+    expect(fmtDur(60)).toBe('1小时')
+    expect(fmtDur(90)).toBe('1小时30分钟')
+    expect(fmtDur(1440)).toBe('1天')
+    expect(fmtDur(0)).toBe('')
+  })
+})
+
+describe('eventTimeSummary', () => {
+  it('定时同日 → 时段主行 + 日期星期副行 + 时长徽章', () => {
+    const r = eventTimeSummary('2026-07-08T14:30/2026-07-08T15:00')!
+    expect(r.head).toBe('14:30 → 15:00')
+    expect(r.badge).toBe('30分钟')
+    expect(r.date).toBe('7月8日 周三') // 2026-07-08 是周三,且不偏 UTC
+  })
+  it('无结束 → 只时刻主行,无徽章', () => {
+    const r = eventTimeSummary('2026-07-08T14:30')!
+    expect(r.head).toBe('14:30')
+    expect(r.badge).toBe('')
+  })
+  it('全天 → 徽章=全天', () => {
+    const r = eventTimeSummary('2026-07-08')!
+    expect(r.badge).toBe('全天')
+    expect(r.date).toBe('')
+  })
+  it('非法/空 → null', () => {
+    expect(eventTimeSummary('')).toBeNull()
+    expect(eventTimeSummary('not-a-date')).toBeNull()
   })
 })

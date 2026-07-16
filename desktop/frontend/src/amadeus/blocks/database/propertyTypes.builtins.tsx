@@ -204,7 +204,7 @@ export function registerBuiltinPropertyTypes(): void {
   registerPropertyType({ type: 'todo', label: '待办', icon: <CheckBoxCheckSolidIcon />, baseType: 'checkbox', Cell: TodoCell })
   registerPropertyType({
     type: 'calendarDate',
-    label: '日历日期',
+    label: '日期', // ponytail: 内部 id 仍 calendarDate(存储/迁移零改),用户只见「日期」= 标准富日期属性
     icon: <TodayIcon />,
     baseType: 'text',
     Cell: CalendarDateCell,

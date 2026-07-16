@@ -1,17 +1,23 @@
 /**
- * Normal Agent CRUD（本地 ~/.tangu/agents/<slug>.md）。handler 自带 authMiddleware。
- *   GET    /agent/agents                列出全部本地 agent 定义
+ * Normal Agent CRUD。handler 自带 authMiddleware。
+ *   GET    /agent/agents                列出全部 agent 定义
  *   POST   /agent/agents { name, systemPrompt, ... }   新建（slug 由 name 派生或显式给）
  *   PATCH  /agent/agents/:slug          更新
  *   DELETE /agent/agents/:slug          删除
  *
- * **本地特性**：仅 standalone/TUI/desktop（profile.capabilities.hostExec=true）暴露；云端多租户
- * 形态(hostExec=false) 一律 404，避免共享进程级 agents 目录跨用户串写。
+ * 存储按 profile 分流：本地（hostExec=true）= 进程级 ~/.tangu/agents 文件夹（agentRegistry）；
+ * 云端多租户（hostExec=false 且注入了 brain.agentFiles）= per-user tangu_agent_files（cloudAgentStore，
+ * 定义 CRUD / 头像 / meta 已云端化，web 新会话选 agent 靠它）。memory/log/library/user-profile 仍是
+ * 本地文件特性（云端等价物是 brain.memory 另一套语义），云端继续 404。
  */
 import { Router } from 'express';
 import { authMiddleware, AuthRequest } from '../core/http.js';
 import { deps } from '../seams/runtime.js';
 import { listAgents, getAgent, saveAgent, deleteAgent, saveAgentAvatar, readAgentAvatar, deleteAgentAvatar, readAgentsMeta, writeAgentsMeta, resolveMemorySlug, listLibraryFiles, readLibraryFile, writeLibraryFile, deleteLibraryFile, MUSE_AGENT_SLUG, slugify, isValidSlug } from '../agents/agentRegistry.js';
+import {
+  cloudAgentsEnabled, cloudListAgents, cloudGetAgent, cloudSaveAgent, cloudDeleteAgent,
+  cloudSaveAgentAvatar, cloudReadAgentAvatar, cloudDeleteAgentAvatar, cloudReadAgentsMeta, cloudWriteAgentsMeta,
+} from '../agents/cloudAgentStore.js';
 import path from 'node:path';
 import { agentsDir, readUserMd, writeUserMd } from '../core/tanguHome.js';
 import { listLoadoutTools } from '../tools/toolRegistry.js';
@@ -19,7 +25,8 @@ import { createLocalMemoryStore } from '../adapters/standalone/localMemoryBrain.
 
 const router = Router();
 
-/** 本地闸门：非 host-exec profile（云端）一律拒绝。 */
+/** 本地闸门：非 host-exec profile（云端）拒绝。定义 CRUD/头像/meta 在各 handler 里先走
+ *  cloudAgentsEnabled() 云端分支,到这说明是旧云端(未注入 agentFiles)或本地深特性 → 404。 */
 function ensureLocal(res: any): boolean {
   if (!deps().profile.capabilities.hostExec) {
     res.status(404).json({ detail: 'Normal Agents 仅在本地（桌面/TUI）可用' });
@@ -28,37 +35,41 @@ function ensureLocal(res: any): boolean {
   return true;
 }
 
-router.get('/agent/agents', authMiddleware, async (_req: AuthRequest, res) => {
-  if (!ensureLocal(res)) return;
+router.get('/agent/agents', authMiddleware, async (req: AuthRequest, res) => {
   try {
+    if (cloudAgentsEnabled()) return void res.json({ agents: await cloudListAgents(req.user!.userId) });
+    if (!ensureLocal(res)) return;
     res.json({ agents: await listAgents() });
   } catch (e: any) {
     res.status(500).json({ detail: e?.message || 'list agents failed' });
   }
 });
 
-/** 工具目录:agent 编辑 UI「工具黑白名单」的可勾选项(=名单能约束的无门禁内置工具)。 */
+/** 工具目录:agent 编辑 UI「工具黑白名单」的可勾选项(=名单能约束的无门禁内置工具)。
+ *  纯静态内存注册表,无本地依赖 → 全模式放行。 */
 router.get('/agent/tool-catalog', authMiddleware, (_req: AuthRequest, res) => {
-  if (!ensureLocal(res)) return;
   res.json({ tools: listLoadoutTools() });
 });
 
 router.post('/agent/agents', authMiddleware, async (req: AuthRequest, res) => {
-  if (!ensureLocal(res)) return;
+  const cloud = cloudAgentsEnabled();
+  if (!cloud && !ensureLocal(res)) return;
   try {
     const b = req.body || {};
     if (!b.name || !b.systemPrompt) return res.status(400).json({ detail: 'name 与 systemPrompt 必填' });
+    const uid = req.user!.userId;
+    const getDef = (s: string): Promise<unknown> => (cloud ? cloudGetAgent(uid, s) : getAgent(s));
     // POST=新建语义,但 saveAgent 是按 slug 的 upsert:派生 slug 已存在时若直接传入会**静默覆盖**
     // 既有 agent(中文等非 ASCII 名全部派生为兜底 'agent',极易相撞)→ 这里先唯一化,撞了递增后缀。
     // 想更新请走 PATCH /agent/agents/:slug。
     let slug = typeof b.slug === 'string' && isValidSlug(b.slug) ? b.slug : slugify(String(b.name));
-    if (await getAgent(slug)) {
+    if (await getDef(slug)) {
       const base = slug.slice(0, 60);
       let n = 2;
-      while (await getAgent(`${base}-${n}`)) n++;
+      while (await getDef(`${base}-${n}`)) n++;
       slug = `${base}-${n}`;
     }
-    const agent = await saveAgent({
+    const input = {
       slug,
       name: String(b.name),
       description: b.description,
@@ -74,8 +85,9 @@ router.post('/agent/agents', authMiddleware, async (req: AuthRequest, res) => {
       activityAccess: b.activityAccess != null ? !!b.activityAccess : undefined,
       toolsMode: b.toolsMode !== undefined ? b.toolsMode : undefined,
       toolsList: b.toolsList !== undefined ? b.toolsList : undefined,
-      createdBy: 'user',
-    });
+      createdBy: 'user' as const,
+    };
+    const agent = cloud ? await cloudSaveAgent(uid, slug, input) : await saveAgent(input);
     res.json({ agent });
   } catch (e: any) {
     res.status(400).json({ detail: e?.message || 'create agent failed' });
@@ -83,13 +95,14 @@ router.post('/agent/agents', authMiddleware, async (req: AuthRequest, res) => {
 });
 
 router.patch('/agent/agents/:slug', authMiddleware, async (req: AuthRequest, res) => {
-  if (!ensureLocal(res)) return;
+  const cloud = cloudAgentsEnabled();
+  if (!cloud && !ensureLocal(res)) return;
   try {
     const slug = req.params.slug;
-    const cur = await getAgent(slug);
+    const cur = cloud ? await cloudGetAgent(req.user!.userId, slug) : await getAgent(slug);
     if (!cur) return res.status(404).json({ detail: 'Agent not found' });
     const b = req.body || {};
-    const agent = await saveAgent({
+    const input = {
       slug,
       name: b.name != null ? String(b.name) : cur.name,
       description: b.description != null ? b.description : cur.description,
@@ -106,7 +119,8 @@ router.patch('/agent/agents/:slug', authMiddleware, async (req: AuthRequest, res
       // null=显式清除(saveAgent 收 null → undefined 落盘);缺省保留现值
       toolsMode: b.toolsMode !== undefined ? b.toolsMode : cur.toolsMode,
       toolsList: b.toolsList !== undefined ? b.toolsList : cur.toolsList,
-    });
+    };
+    const agent = cloud ? await cloudSaveAgent(req.user!.userId, slug, input) : await saveAgent(input);
     res.json({ agent });
   } catch (e: any) {
     res.status(400).json({ detail: e?.message || 'update agent failed' });
@@ -114,6 +128,13 @@ router.patch('/agent/agents/:slug', authMiddleware, async (req: AuthRequest, res
 });
 
 router.delete('/agent/agents/:slug', authMiddleware, async (req: AuthRequest, res) => {
+  if (cloudAgentsEnabled()) {
+    try {
+      return void res.json({ ok: await cloudDeleteAgent(req.user!.userId, req.params.slug) });
+    } catch (e: any) {
+      return void res.status(500).json({ detail: e?.message || 'delete agent failed' });
+    }
+  }
   if (!ensureLocal(res)) return;
   try {
     const ok = await deleteAgent(req.params.slug);
@@ -128,11 +149,14 @@ router.delete('/agent/agents/:slug', authMiddleware, async (req: AuthRequest, re
 
 // 头像:base64 上传(≤1MB,写进该 agent 的 Library/ 并由 config.avatar 引用)/ 二进制读取。
 router.post('/agent/agents/:slug/avatar', authMiddleware, async (req: AuthRequest, res) => {
-  if (!ensureLocal(res)) return;
+  const cloud = cloudAgentsEnabled();
+  if (!cloud && !ensureLocal(res)) return;
   try {
     const b = req.body || {};
     if (!b.data || !b.mimeType) return res.status(400).json({ detail: 'data 与 mimeType 必填' });
-    const avatar = await saveAgentAvatar(req.params.slug, String(b.data), String(b.mimeType));
+    const avatar = cloud
+      ? await cloudSaveAgentAvatar(req.user!.userId, req.params.slug, String(b.data), String(b.mimeType))
+      : await saveAgentAvatar(req.params.slug, String(b.data), String(b.mimeType));
     res.json({ ok: true, avatar });
   } catch (e: any) {
     res.status(400).json({ detail: e?.message || 'upload avatar failed' });
@@ -140,9 +164,10 @@ router.post('/agent/agents/:slug/avatar', authMiddleware, async (req: AuthReques
 });
 
 router.get('/agent/agents/:slug/avatar', authMiddleware, async (req: AuthRequest, res) => {
-  if (!ensureLocal(res)) return;
+  const cloud = cloudAgentsEnabled();
+  if (!cloud && !ensureLocal(res)) return;
   try {
-    const av = await readAgentAvatar(req.params.slug);
+    const av = cloud ? await cloudReadAgentAvatar(req.user!.userId, req.params.slug) : await readAgentAvatar(req.params.slug);
     if (!av) return res.status(404).json({ detail: 'no avatar' });
     res.setHeader('Content-Type', av.mimeType);
     res.setHeader('Cache-Control', 'no-cache');
@@ -153,30 +178,36 @@ router.get('/agent/agents/:slug/avatar', authMiddleware, async (req: AuthRequest
 });
 
 router.delete('/agent/agents/:slug/avatar', authMiddleware, async (req: AuthRequest, res) => {
-  if (!ensureLocal(res)) return;
+  const cloud = cloudAgentsEnabled();
+  if (!cloud && !ensureLocal(res)) return;
   try {
-    await deleteAgentAvatar(req.params.slug);
+    if (cloud) await cloudDeleteAgentAvatar(req.user!.userId, req.params.slug);
+    else await deleteAgentAvatar(req.params.slug);
     res.json({ ok: true });
   } catch (e: any) {
     res.status(400).json({ detail: e?.message || 'delete avatar failed' });
   }
 });
 
-// 列表顺序 + 默认 agent(.meta.json)。
-router.get('/agent/agents-meta', authMiddleware, async (_req: AuthRequest, res) => {
-  if (!ensureLocal(res)) return;
+// 列表顺序 + 默认 agent(.meta.json;云端=哨兵 __meta__,桌面同步同一份 → 默认 agent 跨端共享)。
+router.get('/agent/agents-meta', authMiddleware, async (req: AuthRequest, res) => {
+  const cloud = cloudAgentsEnabled();
+  if (!cloud && !ensureLocal(res)) return;
   try {
-    res.json(readAgentsMeta());
+    res.json(cloud ? await cloudReadAgentsMeta(req.user!.userId) : readAgentsMeta());
   } catch (e: any) {
     res.status(500).json({ detail: e?.message || 'read meta failed' });
   }
 });
 
 router.put('/agent/agents-meta', authMiddleware, async (req: AuthRequest, res) => {
-  if (!ensureLocal(res)) return;
+  const cloud = cloudAgentsEnabled();
+  if (!cloud && !ensureLocal(res)) return;
   try {
     const b = req.body || {};
-    res.json(await writeAgentsMeta({ order: b.order, defaultSlug: b.defaultSlug }));
+    res.json(cloud
+      ? await cloudWriteAgentsMeta(req.user!.userId, { order: b.order, defaultSlug: b.defaultSlug })
+      : await writeAgentsMeta({ order: b.order, defaultSlug: b.defaultSlug }));
   } catch (e: any) {
     res.status(400).json({ detail: e?.message || 'update meta failed' });
   }

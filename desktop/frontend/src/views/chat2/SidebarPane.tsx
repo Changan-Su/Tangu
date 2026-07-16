@@ -6,10 +6,12 @@
  * 样式全在 sidebar2.css(t2s- 前缀,token 驱动);右键菜单复用 base.css 的 .ctx-menu。
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, MoreHorizontal, Pencil, Archive, ArchiveRestore, Trash2, ChevronDown, ChevronRight, Folder, Cloud, FolderPlus, SquarePen, Sparkles, Search, Smartphone } from 'lucide-react'
+import { Plus, MoreHorizontal, Pencil, Archive, ArchiveRestore, Trash2, ChevronRight, Folder, FolderOpen, Cloud, FolderPlus, SquarePen, Search, Smartphone, MessageSquare } from 'lucide-react'
+import { folderPadLeft, rowPadLeft } from '@amadeus/lib/treeIndent'
 import { CLOUD_WORKSPACE_KEY, type SessionRecord, type TanguDesktopConfig, type WorkspaceDescriptor } from '../../types'
 import { AnimatedCollapse } from '../../components/AnimatedUI'
 import { useI18n } from '../../i18n'
+import { tipProps, tipT } from '../../hoverTip'
 import { getWechatStatus, setWechatConnectedSession } from '../../services/backendService'
 import './sidebar2.css'
 
@@ -52,13 +54,10 @@ export interface SidebarPaneProps {
   onToast?: (text: string, error?: boolean) => void
   onAuthChange?: () => void
   showSpecial?: boolean
-  historianEnabled?: boolean
-  museEnabled?: boolean
   wechatEnabled?: boolean
   specialView?: 'wechat' | 'agents' | 'workspace' | null
   onOpenSpecial?: (v: 'wechat' | 'agents') => void
   onNewChat: () => void
-  onOpenAgentsSettings: () => void
   onOpenWorkspace: (wsKey: string) => void
   /** 共享「进入的工作区」key(与文件面板手风琴同步)。 */
   activeWorkspaceKey?: string | null
@@ -215,15 +214,37 @@ export const SidebarPane: React.FC<SidebarPaneProps> = (p) => {
     setWsRenaming(null)
   }
 
+  /** 工作区组头的前导槽:图标 ↔ hover 换箭头(与笔记树文件夹行同一套)。三个变体(重命名中/微信/普通)共用。
+   *  本地工作区用 Folder/FolderOpen 表达展开态 —— 箭头默认不显,总得有东西担起「展开了没」。 */
+  const wsLead = (ws: WorkspaceDescriptor, collapsed: boolean) => {
+    const Ic = ws.kind === 'wechat' ? Smartphone : ws.kind === 'cloud' ? Cloud : collapsed ? Folder : FolderOpen
+    return (
+      <span className="t2s-lead">
+        <Ic className="t2s-lead-icon" />
+        <span className={`t2s-chev t2s-lead-chev${collapsed ? '' : ' open'}`} onClick={(e) => { e.stopPropagation(); toggleGroup(ws.key) }}>
+          <ChevronRight size={12} />
+        </span>
+      </span>
+    )
+  }
+
   const renderItem = (s: SessionRecord) => (
     <button
       key={s.id}
       className={`t2s-srow${s.id === p.activeId ? ' active' : ''}`}
+      // 组内行缩进一级(组头 depth 0)—— 与笔记树「文件夹内的笔记」同档,见 treeIndent.ts。
+      style={{ paddingLeft: rowPadLeft(1) }}
       onClick={() => { p.onSelect(s.id); accordion(s.project_path || CLOUD_WORKSPACE_KEY) }}
       onContextMenu={(e) => openMenu(e, s)}
     >
-      {p.runningIds.has(s.id) && <span className="t2s-dot running" title={t('sidebar.running')} />}
-      {!p.runningIds.has(s.id) && p.unreadIds.has(s.id) && <span className="t2s-dot unread" title={t('sidebar.unread')} />}
+      {/* 前导槽:与笔记/文件 view 同构 → 三模式切换时图标不跳。状态点绝对定位贴在图标角上,
+          **不能内联排在标题前** —— 那样有状态的行会被推右 6px,会话行自己就先不齐了。 */}
+      <span className="t2s-lead">
+        <MessageSquare className="t2s-lead-icon t2s-dim" />
+        {p.runningIds.has(s.id)
+          ? <span className="t2s-dot running" title={t('sidebar.running')} />
+          : p.unreadIds.has(s.id) ? <span className="t2s-dot unread" title={t('sidebar.unread')} /> : null}
+      </span>
       {renaming === s.id ? (
         <input
           ref={renameRef}
@@ -259,10 +280,8 @@ export const SidebarPane: React.FC<SidebarPaneProps> = (p) => {
           <>
             {p.showSpecial && (
               <div className="t2s-special-group">
-                <SpecialRow icon={<SquarePen size={15} />} title={t('sidebar.newChat')} active={false} onClick={p.onNewChat} />
-                {(p.historianEnabled || p.museEnabled) && (
-                  <SpecialRow icon={<Sparkles size={15} />} title={t('sidebar.agents')} active={p.specialView === 'agents'} onClick={p.onOpenAgentsSettings} onExpand={() => p.onOpenSpecial?.('agents')} />
-                )}
+                {/* 尺寸由 .t2s-special-ic > svg 的 --t2s-icon 接管,故不传 size(传了也无效)。 */}
+                <SpecialRow icon={<SquarePen />} title={t('sidebar.newChat')} active={false} onClick={p.onNewChat} />
               </div>
             )}
 
@@ -273,6 +292,12 @@ export const SidebarPane: React.FC<SidebarPaneProps> = (p) => {
                 <React.Fragment key={ws.key}>
                   <div
                     className={`t2s-group${dragKey && dragOverKey === ws.key && dragKey !== ws.key ? ' drag-over' : ''}${dragKey === ws.key ? ' dragging' : ''}`}
+                    // 组头 = depth 0;减掉 toggle 自带内边距,槽才与组内会话行落在同一竖线(见 treeIndent.ts)。
+                    style={{ paddingLeft: folderPadLeft(0) }}
+                    {...tipProps(() => [
+                      ws.kind === 'wechat' ? t('sidebar.wechat.openHint') : ws.path || '',
+                      tipT('tip.sessions', { count: items.length }),
+                    ].filter(Boolean))}
                     draggable={wsRenaming !== ws.key}
                     onDragStart={(e) => {
                       // 用元素自身作拖影并按抓取点对齐光标(否则默认拖影/setState 重渲会让图标与光标错位)。
@@ -287,8 +312,8 @@ export const SidebarPane: React.FC<SidebarPaneProps> = (p) => {
                     onDragEnd={() => { setDragKey(null); setDragOverKey(null) }}
                   >
                     {wsRenaming === ws.key ? (
-                      <div className="t2s-group-toggle" style={{ cursor: 'default' }}>
-                        <span className="t2s-chev">{isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}</span>
+                      <div className="t2s-group-toggle t2s-folder-row" style={{ cursor: 'default' }}>
+                        {wsLead(ws, isCollapsed)}
                         <input
                           ref={wsRenameRef}
                           className="t2s-rename"
@@ -300,21 +325,24 @@ export const SidebarPane: React.FC<SidebarPaneProps> = (p) => {
                         />
                       </div>
                     ) : ws.kind === 'wechat' ? (
-                      <button className={`t2s-group-toggle${p.specialView === 'wechat' ? ' active' : ''}`} onClick={() => { p.onOpenSpecial?.('wechat'); isCollapsed ? accordion(ws.key) : toggleGroup(ws.key) }} title={t('sidebar.wechat.openHint')}>
-                        <span className="t2s-chev" onClick={(e) => { e.stopPropagation(); toggleGroup(ws.key) }}>{isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}</span>
-                        <span className="t2s-group-name"><Smartphone size={12} /><span className="t2s-group-label">{ws.name}</span><span className={`t2s-mini-dot${wechatConnected ? ' ok' : ''}`} /><span className="t2s-count">{items.length}</span></span>
+                      <button className={`t2s-group-toggle t2s-folder-row${p.specialView === 'wechat' ? ' active' : ''}`} onClick={() => { p.onOpenSpecial?.('wechat'); isCollapsed ? accordion(ws.key) : toggleGroup(ws.key) }}>
+                        {wsLead(ws, isCollapsed)}
+                        <span className="t2s-group-label">{ws.name}</span>
+                        <span className={`t2s-mini-dot${wechatConnected ? ' ok' : ''}`} />
                       </button>
                     ) : (
+                      // 点组头 = 纯展开/折叠,**不跳主区**(用户拍板;进工作区详情走「查看更多」或组菜单)。
                       // 已展开再点 = 折叠(toggleGroup 不动 activeWorkspaceKey,不会被联动 effect 弹回);收起时点 = 手风琴展开。
-                      <button className="t2s-group-toggle" onClick={() => { p.onOpenWorkspace(ws.key); isCollapsed ? accordion(ws.key) : toggleGroup(ws.key) }} title={ws.path || undefined}>
-                        <span className="t2s-chev" onClick={(e) => { e.stopPropagation(); toggleGroup(ws.key) }}>{isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}</span>
-                        <span className="t2s-group-name">{ws.kind === 'cloud' ? <Cloud size={12} /> : <Folder size={12} />}<span className="t2s-group-label">{ws.name}</span><span className="t2s-count">{items.length}</span></span>
+                      <button className="t2s-group-toggle t2s-folder-row" onClick={() => { isCollapsed ? accordion(ws.key) : toggleGroup(ws.key) }}>
+                        {wsLead(ws, isCollapsed)}
+                        <span className="t2s-group-label">{ws.name}</span>
                       </button>
                     )}
-                    <button className="t2s-group-add" title={t('sidebar.newChatIn', { name: ws.name })} onClick={() => p.onNewInWorkspace(ws)}><Plus size={14} /></button>
+                    {/* 行尾顺序:… 在左、+ 在右(同笔记树)。 */}
                     {!ws.system && (
                       <button className="t2s-group-add" title={t('sidebar.ws.menu')} onClick={(e) => openWsMenu(e, ws)}><MoreHorizontal size={14} /></button>
                     )}
+                    <button className="t2s-group-add" title={t('sidebar.newChatIn', { name: ws.name })} onClick={() => p.onNewInWorkspace(ws)}><Plus size={14} /></button>
                   </div>
                   <AnimatedCollapse open={!isCollapsed}>
                     <div className="t2s-group-sessions">

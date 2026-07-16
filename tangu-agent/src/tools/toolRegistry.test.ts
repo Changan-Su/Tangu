@@ -4,7 +4,8 @@
  * 一律不受名单影响(allow 模式不得饿死 Muse/inbox 系)。
  */
 import { describe, it, expect } from 'vitest';
-import { registerToolProvider, resolveTools, listLoadoutTools, type ToolDef, type ToolProvider } from './toolRegistry.js';
+import { registerToolProvider, resolveTools, listLoadoutTools, declaredApproval, type ToolDef, type ToolProvider } from './toolRegistry.js';
+import { toolNeedsApproval } from '../services/approvals.js';
 import type { ToolContext } from './toolTypes.js';
 import type { AppProfile } from '../seams/appProfile.js';
 
@@ -65,5 +66,35 @@ describe('listLoadoutTools', () => {
     const names = listLoadoutTools().map((t) => t.name);
     expect(names).toEqual(['plain_a', 'plain_b']);
     expect(listLoadoutTools()[0].description).toBe('plain_a desc');
+  });
+});
+
+// 插件工具审批:capabilities.approval:'command' 自声明并入 run_bash 档。门禁用 () => false 让 resolveTools
+// 滤掉这俩桩工具(不污染上面的全局可见性/目录断言);declaredApproval 不看门禁,仍能读到声明——这正是要点:
+// 工具当前是否可见与它声明的审批档无关(CU act_ui 是门禁工具带 approval 的真实形态)。
+registerToolProvider({
+  id: 'test:approval',
+  tools: () => [
+    mk('cmd_tool', { isEnabledFor: () => false, capabilities: { approval: 'command' } }),
+    mk('read_tool', { isEnabledFor: () => false }),
+  ],
+});
+
+describe('declaredApproval + toolNeedsApproval 联动', () => {
+  it('声明 approval:command 的工具被 declaredApproval 认出;未声明返回 undefined', () => {
+    expect(declaredApproval('cmd_tool')).toBe('command');
+    expect(declaredApproval('read_tool')).toBeUndefined();
+    expect(declaredApproval('plain_a')).toBeUndefined();
+    expect(declaredApproval('nonexistent')).toBeUndefined();
+  });
+
+  it('toolNeedsApproval 把声明工具并入命令档(readonly/auto-edit 需批,full-auto 放行)', () => {
+    expect(toolNeedsApproval('cmd_tool', 'readonly')).toBe(true);
+    expect(toolNeedsApproval('cmd_tool', 'auto-edit')).toBe(true);
+    expect(toolNeedsApproval('cmd_tool', 'full-auto')).toBe(false);
+    // 未声明的工具维持免审(存量行为零变化)
+    expect(toolNeedsApproval('read_tool', 'auto-edit')).toBe(false);
+    expect(toolNeedsApproval('read_tool', 'readonly')).toBe(false);
+    expect(toolNeedsApproval('plain_a', 'readonly')).toBe(false);
   });
 });

@@ -154,7 +154,7 @@ export function seedCalendarDb(): DbFile {
     columns: [
       { id: nameId, name: '名称', type: 'text' },
       { id: dateId, name: '日期', type: 'calendarDate' },
-      { id: doneId, name: '完成', type: 'todo' },
+      { id: doneId, name: '完成', type: 'checkbox' },
     ],
     rows: [
       { id: dbId(), cells: { [nameId]: '欢迎使用 Calendar Space', [dateId]: '2026-07-06T10:00/2026-07-06T11:00', [doneId]: true } },

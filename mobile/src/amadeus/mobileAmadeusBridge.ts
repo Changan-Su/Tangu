@@ -9,10 +9,12 @@
 import path from 'path-browserify'
 import { loadPage, newPage, pageFileName, savePage } from '@amadeus-shared/compiler'
 import type { PageManifest } from '@amadeus-shared/compiler'
-import { setFmExtraOnSource } from '@amadeus-shared/db/pageFrontmatter'
+import { parseFmObject, setFmExtraOnSource } from '@amadeus-shared/db/pageFrontmatter'
+import { extractFrontmatterExtra } from '@amadeus-shared/compiler/split'
 import { dbFileSchema, parseDb, serializeDb } from '@amadeus-shared/db/schema'
+import { rewriteDbRefs } from '@amadeus-shared/db/rewriteDbRefs'
 import type { DbFile } from '@amadeus-shared/db/schema'
-import type { AmadeusApi, DbReadResult, VaultInfo } from '@amadeus-shared/ipc'
+import type { AmadeusApi, DbReadResult, LinkMeta, PageProps, VaultInfo } from '@amadeus-shared/ipc'
 import { VaultManager } from './vaultManager'
 import { VaultIndex } from './vaultIndex'
 
@@ -22,7 +24,8 @@ const nowIso = (): string => new Date().toISOString()
 const rememberPage = (p: string): void => { try { localStorage.setItem(LAST_PAGE_KEY, p) } catch { /* ignore */ } }
 const lastPage = (): string | undefined => { try { return localStorage.getItem(LAST_PAGE_KEY) || undefined } catch { return undefined } }
 
-export function createMobileAmadeusBridge(): AmadeusApi {
+/** cfg 可选:提供后端基址与 token 时,fetchLinkMeta 走 server 代理(书签卡);缺省优雅降级 null。 */
+export function createMobileAmadeusBridge(cfg?: { apiBase?: () => string; getToken?: () => string }): AmadeusApi {
   const vault = new VaultManager()
   const index = new VaultIndex(vault)
   let built = false
@@ -193,6 +196,135 @@ export function createMobileAmadeusBridge(): AmadeusApi {
       await vault.writeTextFile(dbPath, serializeDb(parsed))
     },
 
+    // ---- 字节读写(PDF 阅读器 getDocument({data}) 等) ----
+    saveVaultBytes: async (p, bytes) => { await ensureVault(); await vault.writeVaultBytes(p, bytes) },
+    readVaultBytes: async (p) => { await ensureVault(); return vault.readVaultBytes(p) },
+
+    // ---- Excalidraw 画板(desktop ipc.ts drawingRead/drawingWrite 同款) ----
+    readDrawing: async (pagePath, ref) => {
+      await ensureVault()
+      // Obsidian 链接省略 .md:`![[Foo.excalidraw]]` 实指 `Foo.excalidraw.md` → 原样先试,落空再补 .md。
+      const abs =
+        (await vault.resolveAttachment(pagePath, ref)) ?? (await vault.resolveAttachment(pagePath, `${ref}.md`))
+      const root = vault.getRoot()
+      if (!abs || !root) return { status: 'missing' }
+      try {
+        return { status: 'ok', path: path.relative(root, abs), source: await vault.readTextAbs(abs) }
+      } catch {
+        return { status: 'missing' }
+      }
+    },
+    writeDrawing: async (drawingPath, source) => { await ensureVault(); await vault.writeTextFile(drawingPath, source) },
+
+    // ---- 回收站(.trash 语义在 vaultManager;desktop 同款 trash 后全量重建索引) ----
+    trashEntry: async (rel) => { await ensureVault(); await vault.trashEntry(rel); await index.build() },
+    listTrash: async () => { await ensureVault(); return vault.listTrash() },
+    restoreTrash: async (name) => {
+      await ensureVault()
+      const restored = await vault.restoreTrash(name)
+      await index.build()
+      return restored
+    },
+    deleteTrashEntry: async (name) => { await ensureVault(); await vault.deleteTrashEntry(name) },
+    emptyTrash: async () => { await ensureVault(); await vault.emptyTrash() },
+
+    // ---- 笔记视图(Bases)/页面图标(desktop ipc.ts listPageProps/pageIcons 同款) ----
+    listPageProps: async (folder) => {
+      await ensureVault()
+      const prefix = folder.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+      const inFolder = (await vault.listPages()).filter((p) => {
+        if (prefix === '') return !p.includes('/') // 整库:仅顶层笔记
+        if (!p.startsWith(`${prefix}/`)) return false
+        return !p.slice(prefix.length + 1).includes('/') // 仅直属子级,不递归子文件夹
+      })
+      const out: PageProps[] = []
+      for (const p of inFolder) {
+        let raw: string
+        try { raw = await vault.readTextAbs(vault.absPath(p)) } catch { continue }
+        out.push({ path: p, title: path.basename(p).replace(/\.md$/i, ''), fm: parseFmObject(extractFrontmatterExtra(raw)) })
+      }
+      return out
+    },
+    pageIcons: async () => { await ensureVault(); return index.pageIcons() },
+
+    // ---- 文件级改名(desktop ipc.ts renamePageFile/renameDbFile 同款) ----
+    renamePageFile: async (oldPath, newBaseName) => {
+      await ensureVault()
+      const dir = path.dirname(oldPath)
+      let base = newBaseName.trim().replace(/[\\/]/g, '')
+      if (!base) throw new Error('笔记名不能为空')
+      if (base.toLowerCase().endsWith('.md')) base = base.slice(0, -3)
+      const newPath = dir === '.' ? `${base}.md` : `${dir}/${base}.md`
+      if (newPath === oldPath) return oldPath
+      if (await vault.pathExists(newPath)) throw new Error('目标笔记已存在')
+      await vault.moveEntry(oldPath, newPath) // 纯移动:不落 v3,外来 .md 不被收编
+      index.remove(oldPath)
+      await index.update(newPath)
+      return newPath
+    },
+    renameDbFile: async (oldPath, newBaseName) => {
+      await ensureVault()
+      const norm = (s: string): string => s.replace(/\\/g, '/')
+      const oldRel = norm(oldPath)
+      let base = newBaseName.trim().replace(/[\\/]/g, '')
+      if (base.toLowerCase().endsWith('.db')) base = base.slice(0, -3)
+      if (!base) throw new Error('名称不能为空')
+      const dir = path.dirname(oldRel)
+      const newPath = dir === '.' ? `${base}.db` : `${dir}/${base}.db`
+      if (newPath === oldRel) return { newPath, rewrittenPages: [] }
+      if (await vault.pathExists(newPath)) throw new Error('目标文件已存在')
+      await vault.moveEntry(oldRel, newPath)
+      // title 同步:name = 新 basename。parseDb 失败(损坏文件)只移动不动内容。
+      try {
+        const parsed = parseDb(await vault.readTextAbs(vault.absPath(newPath)))
+        if (parsed.ok && parsed.data.name !== base) {
+          await vault.writeTextFile(newPath, serializeDb({ ...parsed.data, name: base }))
+        }
+      } catch { /* corrupt: 跳过 name 同步 */ }
+      // 引用重写(纯函数 rewriteDbRefs;desktop 同款朴素全库扫描,个人 vault 规模足够)
+      const rewrittenPages: string[] = []
+      for (const p of await vault.listPages()) {
+        const pRel = norm(p)
+        let raw: string
+        try { raw = await vault.readTextAbs(vault.absPath(p)) } catch { continue }
+        const next = rewriteDbRefs(raw, { oldRel, newBase: `${base}.db`, pageDir: path.dirname(pRel) })
+        if (next !== raw) {
+          await vault.writeTextFile(p, next)
+          await index.update(p)
+          rewrittenPages.push(p)
+        }
+      }
+      return { newPath, rewrittenPages }
+    },
+
+    // ---- 书签卡/封面搜索(server 代理 + Openverse 直连;web cloudBridge 同款) ----
+    fetchLinkMeta: async (url) => {
+      const base = cfg?.apiBase?.()
+      const token = cfg?.getToken?.()
+      if (!base || !token) return null
+      try {
+        const r = await fetch(`${base}/amadeus/link-meta?url=${encodeURIComponent(url)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!r.ok) return null
+        return (await r.json()) as LinkMeta | null
+      } catch {
+        return null
+      }
+    },
+    searchImages: async (query) => {
+      const q = query.trim()
+      if (!q) return []
+      const res = await fetch(`https://api.openverse.org/v1/images/?q=${encodeURIComponent(q)}&page_size=20`, {
+        headers: { accept: 'application/json' },
+      })
+      if (!res.ok) throw new Error(`openverse HTTP ${res.status}`)
+      const j = (await res.json()) as { results?: Array<{ thumbnail?: string; url?: string; creator?: string }> }
+      return (j.results ?? [])
+        .map((r) => ({ thumb: r.thumbnail ?? '', full: r.url ?? '', author: r.creator }))
+        .filter((x) => x.thumb && x.full)
+    },
+
     // OS 集成 / 事件 —— 移动端 no-op(渲染层已 `?.` 兜底)。图片经原生 amadeus-asset 拦截,不走这里。
     openAttachment: async () => { /* no-op(可后续接系统分享) */ },
     openVaultFile: async () => { /* no-op */ },
@@ -202,6 +334,7 @@ export function createMobileAmadeusBridge(): AmadeusApi {
     openPluginsFolder: async () => { /* no-op */ },
     scaffoldSamplePlugin: async () => { /* no-op */ },
     onExternalChange: () => () => { /* 无 watcher */ },
+    onDbExternalChange: () => () => { /* 无 watcher */ },
     onStructureChange: () => () => { /* 无 watcher */ },
   }
 }

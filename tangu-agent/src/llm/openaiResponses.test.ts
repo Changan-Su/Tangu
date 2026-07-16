@@ -23,6 +23,14 @@ describe('openaiToResponsesBody', () => {
     expect(body.tool_choice).toBe('auto');
     expect(body.store).toBe(false);
   });
+
+  it('reasoning_effort → body.reasoning(effort+summary),max_tokens → max_output_tokens(官方直连思考档)', () => {
+    const body = openaiToResponsesBody({ model: 'gpt-5.6-luna', messages: [], reasoning_effort: 'medium', max_tokens: 1200 });
+    expect(body.reasoning).toEqual({ effort: 'medium', summary: 'auto' });
+    expect(body.max_output_tokens).toBe(1200);
+    const plain = openaiToResponsesBody({ model: 'gpt-5-codex', messages: [] });
+    expect(plain.reasoning).toBeUndefined(); // Codex 订阅路径不带 → 逆向契约不动
+  });
 });
 
 describe('streamOpenAiResponses SSE parse', () => {
@@ -59,5 +67,26 @@ describe('streamOpenAiResponses SSE parse', () => {
     expect(res.toolCalls).toEqual([{ id: 'call_abc', type: 'function', function: { name: 'read_file', arguments: '{"path":"a.txt"}' } }]);
     expect(res.usage.prompt_tokens).toBe(10);
     expect(res.finishReason).toBe('tool_calls');
+  });
+
+  it('Codex 逆向头只在订阅路径(accountId)发;官方 BYOK 纯 Bearer——OpenAI-Beta 头会静默压掉 reasoning summary(实测 0 vs 160 条)', async () => {
+    const sse = 'data: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1}}}\n';
+    const seen: Array<Record<string, string>> = [];
+    vi.stubGlobal('fetch', (_url: any, init: any) => {
+      seen.push(init.headers);
+      return Promise.resolve({
+        ok: true,
+        body: new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(sse)); c.close(); } }),
+      });
+    });
+
+    await streamOpenAiResponses({ apiKey: 'x', baseUrl: 'https://api.openai.com/v1', payload: { model: 'gpt-5.6-luna', messages: [] } } as any);
+    await streamOpenAiResponses({ apiKey: 'x', baseUrl: 'https://chatgpt.com/backend-api/codex', payload: { model: 'gpt-5-codex', messages: [], [ACCOUNT_MARK]: 'acct_1' } } as any);
+
+    expect(seen[0]['OpenAI-Beta']).toBeUndefined();
+    expect(seen[0].originator).toBeUndefined();
+    expect(seen[0]['chatgpt-account-id']).toBeUndefined();
+    expect(seen[1]['OpenAI-Beta']).toBe('responses=experimental');
+    expect(seen[1]['chatgpt-account-id']).toBe('acct_1');
   });
 });

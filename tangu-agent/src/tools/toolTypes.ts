@@ -90,6 +90,9 @@ export interface ToolCapabilities {
   concurrencyKey?: string;
   /** 默认超时；executeTool 会把它并入 ctx.signal。 */
   defaultTimeoutMs?: number;
+  /** 审批档：'command' = 与 run_bash 同档(readonly/auto-edit 下需批准）。缺省=只读语义、不触发审批。
+   *  approvals.toolNeedsApproval 经 declaredApproval(name) 读此，插件工具无需核心硬编码工具名。 */
+  approval?: 'command';
 }
 
 export interface ToolImpl {

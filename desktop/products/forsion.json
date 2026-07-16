@@ -10,7 +10,8 @@
     "inbox",
     "amadeus",
     "calendar",
-    "coding"
+    "coding",
+    "automation"
   ],
   "agentBackend": true,
   "market": true

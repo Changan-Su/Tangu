@@ -83,6 +83,34 @@ export function buildOpenAiCompatPayload(opts: BuildPayloadOpts): any {
   return payload;
 }
 
+/**
+ * 官方 api.openai.com 直连的 reasoning 档位适配(2026-07 实测矩阵,gpt-5.6-luna):
+ *   - chat/completions + tools + 缺省档位 → 400「Function tools with reasoning_effort are not
+ *     supported … use /v1/responses or set reasoning_effort to 'none'」(gpt-5.x 默认档位≠none)
+ *   - 思考关 → 补 `reasoning_effort:'none'` 后 chat/completions 照常可用
+ *   - 思考开 → 只能走 /v1/responses(打 PROTOCOL_MARK 分发到 openaiResponses 客户端,effort 随传)
+ *   - gpt-4o 等旧模型发 reasoning_effort 会被拒「Unrecognized request argument」→ 必须按模型族门控
+ *   - temperature≠1 被拒(错误文案离谱:「insufficient permissions」);max_tokens 被拒(要
+ *     max_completion_tokens)—— 两者一并适配
+ * 仅官方域名 + ^gpt-5 生效:其他 OpenAI 兼容网关(Ollama/硅基流动/自建)多不认这些字段/端点,零打扰。
+ * ponytail: o 系(o1/o3…)维持原路(chat/completions 缺省档位可带 tools,且不认 'none');出问题再扩族。
+ */
+export function tuneOpenAiDirectPayload(payload: any, thinkingLevel: string | undefined, baseUrl: string | undefined): void {
+  if (!baseUrl || payload[PROTOCOL_MARK]) return; // 订阅登录(codex 等)已显式定协议,勿动
+  let host = '';
+  try { host = new URL(baseUrl).hostname; } catch { return; }
+  if (!/(^|\.)api\.openai\.com$/i.test(host)) return;
+  if (!/^gpt-5/i.test(String(payload.model || ''))) return;
+  const effort = thinkingLevel === 'low' || thinkingLevel === 'medium' || thinkingLevel === 'high' ? thinkingLevel : 'none';
+  payload.reasoning_effort = effort;
+  delete payload.temperature;
+  if (payload.max_tokens) {
+    payload.max_completion_tokens = payload.max_tokens;
+    delete payload.max_tokens;
+  }
+  if (effort !== 'none') payload[PROTOCOL_MARK] = 'openai-responses';
+}
+
 /** 从 providerRegistry 命中结果构造的 AgentModel 带此标记,buildProviderPayload 据此走直连。 */
 export function makeDirectModel(
   modelId: string,

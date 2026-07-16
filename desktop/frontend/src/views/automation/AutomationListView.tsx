@@ -1,0 +1,198 @@
+/**
+ * 自动化 Space 左栏:统一自动化列表——系统自动化(Muse 巡检/Historian)+盯任务规则(muse_watch)。
+ * 每项:触发摘要+执行者+启停 dot;点击 → 主区详情/右栏运行记录跟随(automationStore.sel)。
+ * 系统项启停走 saveSpecialConfig,规则启停走 saveMuseTrigger upsert(enabled 翻转,其余字段原样)。
+ */
+import React, { useEffect } from 'react'
+import { CalendarClock, History, Plus, Sparkles, Trash2, Zap } from 'lucide-react'
+import { useApp } from '../../stores/appStore'
+import { useAutomation, type AutomationSel } from '../../stores/automationStore'
+import { deleteMuseTrigger, saveAgentScheduleEntry, saveMuseTrigger, saveSpecialConfig } from '../../services/backendService'
+import { useI18n } from '../../i18n'
+import { condText, runnerName } from './lib'
+import type { AgentScheduleEntry, MuseTriggerInfo } from '../../types'
+import './automation.css'
+
+/** 规则 → upsert 全量入参(启停翻转时其余字段原样带回,upsert 语义要求全字段)。 */
+export function triggerToUpsert(t: MuseTriggerInfo): Parameters<typeof saveMuseTrigger>[1] {
+  return {
+    id: t.id,
+    desc: t.desc,
+    cond_type: t.cond.type,
+    path: t.cond.type === 'file_chars_gte' ? t.cond.path : undefined,
+    n: t.cond.type === 'file_chars_gte' ? t.cond.n : undefined,
+    match: t.cond.type === 'event_seen' ? t.cond.match : undefined,
+    time: t.cond.type === 'daily_at' ? t.cond.time : undefined,
+    prompt: t.prompt,
+    cooldown_hours: t.cooldownHours,
+    agent_slug: t.agentSlug,
+    enabled: t.enabled,
+  }
+}
+
+export const AutomationListView: React.FC = () => {
+  const { t } = useI18n()
+  const cfg = useApp((s) => s.cfg)
+  const agentDefs = useApp((s) => s.agentDefs)
+  const st = useAutomation()
+
+  useEffect(() => {
+    void useAutomation.getState().refresh(cfg)
+    const timer = setInterval(() => void useAutomation.getState().refresh(cfg), 8000)
+    return () => clearInterval(timer)
+  }, [cfg, st.refreshNonce])
+
+  const selIs = (sel: AutomationSel): boolean =>
+    JSON.stringify(st.sel) === JSON.stringify(sel)
+
+  const toggleSystem = async (which: 'muse' | 'historian', e: React.MouseEvent): Promise<void> => {
+    e.stopPropagation()
+    const sc = st.specialCfg
+    if (!sc) return
+    const next = { ...sc[which], enabled: !sc[which].enabled }
+    try {
+      await saveSpecialConfig(cfg, { [which]: next } as any)
+      st.bump()
+    } catch { /* 下轮轮询自愈 */ }
+  }
+
+  const toggleTrigger = async (tr: MuseTriggerInfo, e: React.MouseEvent): Promise<void> => {
+    e.stopPropagation()
+    try {
+      await saveMuseTrigger(cfg, { ...triggerToUpsert(tr), enabled: !tr.enabled })
+      st.bump()
+    } catch { /* 下轮轮询自愈 */ }
+  }
+
+  const removeTrigger = async (tr: MuseTriggerInfo, e: React.MouseEvent): Promise<void> => {
+    e.stopPropagation()
+    try {
+      await deleteMuseTrigger(cfg, tr.id)
+      st.bump()
+    } catch { /* 下轮轮询自愈 */ }
+  }
+
+  // 日程条目启停 = auto 翻转(upsert 全字段原样回传)。列表列「可自动化」条目(有 date+prompt),
+  // 关掉 auto 仍留在列表可再开;纯规划条目(无 prompt)只在 Calendar 显示,不进自动化列表。
+  const toggleSchedule = async (slug: string, en: AgentScheduleEntry, e: React.MouseEvent): Promise<void> => {
+    e.stopPropagation()
+    try {
+      await saveAgentScheduleEntry(cfg, slug, {
+        id: en.id, name: en.name, date: en.date, repeat: en.repeat,
+        auto: !en.auto, prompt: en.prompt, description: en.description, todo: en.todo,
+      })
+      st.bump()
+    } catch { /* 下轮轮询自愈 */ }
+  }
+
+  const muse = st.specialCfg?.muse
+  const historian = st.specialCfg?.historian
+
+  return (
+    <div className="auto-list">
+      <div className="auto-grouphead">{t('automation.group.system')}</div>
+      <div className={`auto-item ${selIs({ kind: 'muse' }) ? 'active' : ''}`} onClick={() => st.setSel({ kind: 'muse' })}>
+        <span className="auto-ic"><Sparkles size={15} /></span>
+        <div className="auto-item-main">
+          <div className="auto-item-title">{t('automation.muse.title')}</div>
+          <div className="auto-item-sub">
+            {muse ? t('automation.muse.trigger', { min: String(muse.supervisorPollMinutes) }) : '…'}
+          </div>
+        </div>
+        <span
+          className={`auto-dot ${st.museStatus?.running ? 'running' : muse?.enabled ? 'on' : 'off'}`}
+          title={muse?.enabled ? t('automation.enabled') : t('automation.disabled')}
+          onClick={(e) => void toggleSystem('muse', e)}
+          style={{ cursor: 'pointer' }}
+        />
+      </div>
+      <div className={`auto-item ${selIs({ kind: 'historian' }) ? 'active' : ''}`} onClick={() => st.setSel({ kind: 'historian' })}>
+        <span className="auto-ic"><History size={15} /></span>
+        <div className="auto-item-main">
+          <div className="auto-item-title">{t('automation.historian.title')}</div>
+          <div className="auto-item-sub">
+            {historian ? t('automation.historian.trigger', { n: String(historian.everyRounds) }) : '…'}
+          </div>
+        </div>
+        <span
+          className={`auto-dot ${historian?.enabled ? 'on' : 'off'}`}
+          title={historian?.enabled ? t('automation.enabled') : t('automation.disabled')}
+          onClick={(e) => void toggleSystem('historian', e)}
+          style={{ cursor: 'pointer' }}
+        />
+      </div>
+
+      <div className="auto-grouphead">{t('automation.group.watches')}</div>
+      {st.loaded && st.triggers.length === 0 && (
+        <div style={{ fontSize: 12, color: 'var(--text-faint)', padding: '4px 8px' }}>{t('automation.watches.empty')}</div>
+      )}
+      {st.triggers.map((tr) => (
+        <div
+          key={tr.id}
+          className={`auto-item ${selIs({ kind: 'trigger', triggerId: tr.id }) ? 'active' : ''}`}
+          onClick={() => st.setSel({ kind: 'trigger', triggerId: tr.id })}
+        >
+          <span className="auto-ic"><Zap size={15} /></span>
+          <div className="auto-item-main">
+            <div className="auto-item-title">{tr.desc}</div>
+            <div className="auto-item-sub">
+              {condText(t, tr.cond)} · {runnerName(agentDefs, tr.agentSlug)}
+            </div>
+          </div>
+          <button
+            className="icon-btn"
+            title={t('common.delete')}
+            style={{ opacity: 0.6 }}
+            onClick={(e) => void removeTrigger(tr, e)}
+          >
+            <Trash2 size={13} />
+          </button>
+          <span
+            className={`auto-dot ${tr.enabled ? 'on' : 'off'}`}
+            title={tr.enabled ? t('automation.enabled') : t('automation.disabled')}
+            onClick={(e) => void toggleTrigger(tr, e)}
+            style={{ cursor: 'pointer' }}
+          />
+        </div>
+      ))}
+
+      {(() => {
+        // Agent 日程组:各 agent SCHEDULE.db 里「可自动化」的条目(有 date+prompt;dot=auto 开关)。
+        const rows = st.schedules.flatMap((s) =>
+          s.entries.filter((e) => e.date && e.prompt).map((e) => ({ slug: s.slug, agentName: s.name, en: e })))
+        if (!rows.length) return null
+        return (
+          <>
+            <div className="auto-grouphead">{t('automation.group.schedules')}</div>
+            {rows.map(({ slug, agentName, en }) => (
+              <div
+                key={`${slug}:${en.id}`}
+                className={`auto-item ${selIs({ kind: 'schedule', slug, rowId: en.id }) ? 'active' : ''}`}
+                onClick={() => st.setSel({ kind: 'schedule', slug, rowId: en.id })}
+              >
+                <span className="auto-ic"><CalendarClock size={15} /></span>
+                <div className="auto-item-main">
+                  <div className="auto-item-title">{en.name}</div>
+                  <div className="auto-item-sub">
+                    {en.date.split('/')[0].replace('T', ' ')}
+                    {en.repeat ? ` · ${t('automation.schedule.every', { ivl: en.repeat })}` : ''} · {agentName}
+                  </div>
+                </div>
+                <span
+                  className={`auto-dot ${en.auto ? 'on' : 'off'}`}
+                  title={en.auto ? t('automation.enabled') : t('automation.disabled')}
+                  onClick={(e) => void toggleSchedule(slug, en, e)}
+                  style={{ cursor: 'pointer' }}
+                />
+              </div>
+            ))}
+          </>
+        )
+      })()}
+
+      <button className="auto-newbtn" onClick={() => st.openBuilder()}>
+        <Plus size={14} /> {t('automation.new')}
+      </button>
+    </div>
+  )
+}

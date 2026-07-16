@@ -140,6 +140,7 @@
   gap: 3px;
 }
 .ibx-l2 {
+  display: block; /* 裸 span 默认 inline,overflow/ellipsis 对 inline 盒无效 → 块级化后截断才生效(l1 靠 flex 白得) */
   font-size: 12px;
   color: var(--text-muted);
   overflow: hidden;

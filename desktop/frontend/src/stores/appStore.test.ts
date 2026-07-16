@@ -122,6 +122,17 @@ describe('appStore.reduceEvent', () => {
     expect(useApp.getState().runningBySession.s1).toBeUndefined()
   })
 
+  it('status/llm_retry 设置重试横幅,流恢复(下一个非 status 事件)即自清', () => {
+    const ref = { current: 'a1' }
+    useApp.getState().reduceEvent('s1', 'r1', ref, { seq: 1, type: 'status', payload: { phase: 'llm_retry', attempt: 2, max: 3, waitMs: 3000, error: 'fetch failed' } } as AgentRunEvent)
+    expect(useApp.getState().llmRetryBySession.s1).toMatchObject({ attempt: 2, max: 3, waitMs: 3000, error: 'fetch failed' })
+    // 其他 status(如 generating)不清横幅——重试等待期引擎不会发别的事件,防御性保持。
+    useApp.getState().reduceEvent('s1', 'r1', ref, { seq: 2, type: 'status', payload: { phase: 'generating' } } as AgentRunEvent)
+    expect(useApp.getState().llmRetryBySession.s1).toBeTruthy()
+    useApp.getState().reduceEvent('s1', 'r1', ref, { seq: 3, type: 'token', payload: { delta: 'hi' } } as AgentRunEvent)
+    expect(useApp.getState().llmRetryBySession.s1).toBeUndefined()
+  })
+
   it('turn_boundary 的 finalizedId 不匹配时回退到 assistantRef,不孤立气泡也不丢身份', () => {
     // 乐观气泡 a1 带 agent 身份;后端给了一个列表里没有的 finalizedAssistantId(模拟 id 不一致)。
     useApp.setState({ messagesBySession: { s1: [{ ...assistant(), agentId: 'qinche', agentName: '秦彻' }] } })

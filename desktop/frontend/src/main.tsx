@@ -10,6 +10,10 @@ import { LocaleProvider, resolveInitialLocale } from './i18n'
 import './i18n.generated' // 注册全量翻译字典(渲染前)
 import { installEngine } from './bootstrapEngine'
 import { ChatPreview } from './views/chat2/ChatPreview'
+import { windowKind } from './windowKind'
+import { DetachedRoot } from './DetachedRoot'
+import { MiniRoot } from './MiniRoot'
+import { installMultiWindow } from './multiWindow'
 
 // 全局错误兜底:ErrorBoundary 只接 React 渲染期异常,接不到事件回调/异步里的未捕获错误,
 // 也接不到渲染进程级崩溃。这里至少把它们记到 console(配合主进程崩溃自愈),便于诊断白屏。
@@ -18,6 +22,8 @@ window.addEventListener('unhandledrejection', (e) => { console.error('[tangu] un
 
 // 仅设计预览:#preview 用样例数据渲染新视觉(无后端即可截图评审),正常 app 不受影响。
 const isPreview = (() => { try { return location.hash === '#preview' } catch { return false } })()
+// 多窗口分流:主进程开卫星窗时经 ?window= 注入(detached=无 ribbon dockview / mini=悬浮卡片)。
+const kind = windowKind()
 
 // 首屏即按持久化 locale 设 <html lang>(同 FOUC 主题)。
 try { document.documentElement.lang = resolveInitialLocale() === 'zh' ? 'zh-CN' : 'en' } catch { /* ignore */ }
@@ -43,6 +49,8 @@ try {
   void useTheme.getState().initThemes(persistedLang)
   // 注册引擎贡献项(视图/命令/ribbon/状态项),须在 WorkspaceHost 挂载前。
   installEngine()
+  // 多窗接线:把引擎 detach 缝接到 window.tangu(桌面);web/移动 no-op。须在任何 WbTab 渲染前设好缝。
+  installMultiWindow()
 } catch (err) {
   console.error('[tangu] init failed, continue to mount:', err)
 }
@@ -51,7 +59,7 @@ try {
 createRoot(document.getElementById('root')!).render(
   <LocaleProvider>
     <ErrorBoundary>
-      {isPreview ? <ChatPreview /> : <Root />}
+      {isPreview ? <ChatPreview /> : kind === 'mini' ? <MiniRoot /> : kind === 'detached' ? <DetachedRoot /> : <Root />}
     </ErrorBoundary>
   </LocaleProvider>,
 )

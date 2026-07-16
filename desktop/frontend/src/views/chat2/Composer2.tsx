@@ -4,25 +4,46 @@
  * /skill chip / 引用 / 模型·Agent·引擎·思考·loop·计划·群聊 / 上下文占比·压缩 / 发送·停止。
  * props 与旧 MessageInput 完全一致 → ChatView 直接换组件即可。
  */
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUp, Square, Plus, Mic, ImagePlus, X, ClipboardList, Check, ChevronDown, FileText, Users, Sparkles,
+  Eye, PencilLine, Zap, MessageSquare, Loader2,
 } from 'lucide-react'
+import { useVoiceInput } from '../../hooks/useVoiceInput'
+import { VoiceRecordingBar } from './VoiceRecordingBar'
 import type { AgentConfig, Attachment, ModelInfo, NormalAgentDef, SkillInfo } from '../../types'
 import { ModelPill, type ModelPillGroup } from '../../components/ModelPill'
 import { useI18n } from '../../i18n'
 import { groupModelsByProvider } from '../../components/ModelGroupList'
 import { GroupChatSetup } from '../../components/GroupChatSetup'
 import { track } from '../../achievements/store'
+import { usePageStore } from '../../amadeus/store/pageStore'
+import { ensureAmadeusReady } from '../../amadeusPlugins'
+import { noteRefInsert } from '../../components/wikiChat'
 import './composer2.css'
 
 interface SlashItem { cmd: string; desc: string; run: () => void }
 type OpenMenu = 'add' | 'mode' | null
+/** [[ 引用候选:note=vault 笔记(p=vault 相对 .md 路径),否则工作区文件(p=cwd 相对路径)。 */
+type RefCand = { p: string; note?: true }
 
 const MAX_ATTACH_BYTES = 5 * 1024 * 1024
 const MAX_INPUT_CHARS = 150_000
 const MAX_WS_BYTES = 25 * 1024 * 1024
 const approvalLabelKey = { readonly: 'input.approval.readonly', 'auto-edit': 'input.approval.autoEdit', 'full-auto': 'input.approval.fullAuto' } as const
+
+/** 历史召回的纯索引算术:hist=旧→新,pos 0=草稿、1..N=第 N 条最近发送。
+ *  older=true(↑)由新到旧、false(↓)回到草稿。越界返回 null(不动)。 */
+export function pickRecall(hist: string[], pos: number, older: boolean, stash: string): { pos: number; val: string } | null {
+  if (older) {
+    if (pos >= hist.length) return null
+    const next = pos + 1
+    return { pos: next, val: hist[hist.length - next] }
+  }
+  if (pos === 0) return null
+  const next = pos - 1
+  return { pos: next, val: next === 0 ? stash : hist[hist.length - next] }
+}
 
 export const Composer2: React.FC<{
   disabled: boolean
@@ -65,6 +86,11 @@ export const Composer2: React.FC<{
   ctxTokens?: number
   sessionTokens?: number
   onCompact?: () => void
+  /** 外部预填草稿(反馈诊断/对话建 agent 等 via-chat 入口);非空时 mount/变更即写入输入框并回调清空。 */
+  seedText?: string | null
+  onSeedConsumed?: () => void
+  /** 本会话已发送的用户消息(旧→新);输入框空/首行按 ↑↓ 召回,类 shell / codex / claude code。 */
+  sentHistory?: string[]
 }> = ({
   disabled, running, execConfig,
   models, modelId, onModelChange, engines, engineId,
@@ -77,6 +103,7 @@ export const Composer2: React.FC<{
   onExecConfigChange, onSend, onStop,
   quotedText, onClearQuote,
   contextWindow, ctxTokens, sessionTokens, onCompact,
+  seedText, onSeedConsumed, sentHistory,
 }) => {
   const { t } = useI18n()
   const [draft, setDraft] = useState('')
@@ -99,8 +126,27 @@ export const Composer2: React.FC<{
   const [refFiles, setRefFiles] = useState<string[] | null>(null) // [[ 文件引用候选(工作区相对路径);null=未构建
   const refFilesFor = useRef('')
   const [dragOver, setDragOver] = useState(false)
+  const [histPos, setHistPos] = useState(0) // 历史召回位置:0=当前草稿;1..N=第 N 条最近发送
+  const histStash = useRef('') // 进入召回时暂存的草稿(↓ 回到 0 时原样取回)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // 桌面级共享语音输入 hook:转写文本追加进草稿(不绑聊天,Amadeus 等可复用同一 hook)。
+  const voice = useVoiceInput((text) => {
+    setDraft((d) => (d ? d.replace(/\s+$/, '') + ' ' + text : text))
+    setHistPos(0)
+    requestAnimationFrame(autoGrow)
+  })
+  const voiceActive = voice.recording || voice.busy
+  // 录音条上点 ↑:先停止转写(文字落草稿),转写结束后自动发送(用户选「转写并立即发送」)。
+  const sendAfterVoiceRef = useRef(false)
+  const voiceSend = () => { sendAfterVoiceRef.current = true; voice.toggle() }
+  useEffect(() => {
+    if (!sendAfterVoiceRef.current || voice.recording || voice.busy) return
+    sendAfterVoiceRef.current = false
+    if (draft.trim()) send()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice.recording, voice.busy])
 
   const isHost = execConfig.execMode === 'host'
   const approval = execConfig.approvalMode || 'auto-edit'
@@ -126,6 +172,33 @@ export const Composer2: React.FC<{
     ta.style.height = 'auto'
     ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`
   }
+
+  // 草稿变化后同步高度(含发送清空后回缩):useLayoutEffect 在 React 把新值提交到 DOM 之后、绘制之前跑,
+  // 量到的是当前文本;此前散落的 rAF(autoGrow) 会早于提交跑而量到旧文本 → 发送长文后输入框不回缩(本次修的 bug)。
+  useLayoutEffect(autoGrow, [draft]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 历史召回:older=true→↑ 取更旧、false→↓ 取更新;越过最新回到暂存草稿。光标置末尾。
+  const recallHistory = (older: boolean) => {
+    if (older && histPos === 0) histStash.current = draft // 首次进入:暂存当前草稿
+    const r = pickRecall(sentHistory || [], histPos, older, histStash.current)
+    if (!r) return
+    setHistPos(r.pos)
+    setDraft(r.val)
+    requestAnimationFrame(() => {
+      const ta = taRef.current
+      if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = r.val.length; setCursorPos(r.val.length) }
+      autoGrow()
+    })
+  }
+
+  // 外部 via-chat 入口预填草稿:seedText 非空 → 写入输入框(覆盖当前)+ 聚焦 + 回调清空,只消费一次。
+  useEffect(() => {
+    if (!seedText) return
+    setDraft(seedText)
+    onSeedConsumed?.()
+    requestAnimationFrame(() => { taRef.current?.focus(); autoGrow() })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedText])
 
   const slashItems = useMemo<SlashItem[]>(() => {
     const items: SlashItem[] = []
@@ -231,15 +304,16 @@ export const Composer2: React.FC<{
     })
   }
 
-  // ── [[ 文件引用:列当前工作区可引用文件,选中插入相对路径(与拖放/粘贴插路径同一契约,后端零改动)。
-  //    仅 host 会话(云端/沙箱读不到本机路径)。候选 = listDir 惰性 BFS,忽略巨目录/隐藏项,双上限封顶。
+  // ── [[ 引用:工作区文件(插入相对路径,与拖放/粘贴同契约)+ Amadeus 笔记(插入 [[绝对路径|名字]],
+  //    气泡显示名字、agent 读到路径)。仅 host 会话(云端/沙箱读不到本机路径)。文件候选 = listDir 惰性 BFS。
   const fileRefCtx = useMemo(() => {
-    if (disabled || slashActive || refDismissed || !isHost || !execConfig.cwd) return null
+    if (disabled || slashActive || refDismissed || !isHost) return null
     const m = /\[\[([^\]\n]*)$/.exec(draft.slice(0, cursorPos))
     return m ? { query: m[1], start: cursorPos - m[1].length - 2 } : null
-  }, [draft, cursorPos, disabled, slashActive, refDismissed, isHost, execConfig.cwd])
+  }, [draft, cursorPos, disabled, slashActive, refDismissed, isHost])
   useEffect(() => {
     if (!fileRefCtx) return
+    if (window.amadeus) ensureAmadeusReady() // 懒引导 vault(幂等):聊天先于 Amadeus 打开时,笔记候选也在
     const root = execConfig.cwd
     // 只认 refFilesFor(已发射标记):打字使 fileRefCtx 每键变化,若依赖 refFiles 是否就绪,
     // 首次 BFS 完成前每个字符都会重复发射一整轮 BFS(listDir 风暴)。
@@ -264,24 +338,34 @@ export const Composer2: React.FC<{
     }
     void run().then((list) => { if (refFilesFor.current === root) setRefFiles(list) }).catch(() => {})
   }, [fileRefCtx, execConfig.cwd])
-  const refMatches = useMemo<string[]>(() => {
-    if (!fileRefCtx || !refFiles) return []
+  const vaultPages = usePageStore((s) => s.pages)
+  const vaultRoot = usePageStore((s) => s.vaultRoot)
+  const pageIcons = usePageStore((s) => s.icons)
+  const refMatches = useMemo<RefCand[]>(() => {
+    if (!fileRefCtx) return []
     const q = fileRefCtx.query.toLowerCase()
-    const pool = q ? refFiles.filter((p) => p.toLowerCase().includes(q)) : refFiles
+    // 笔记在前(sort 稳定 → 同分保持此序),工作区文件在后;无 vault / 无 cwd 各自自然缺席。
+    const cands: RefCand[] = [
+      ...vaultPages.map((p) => ({ p, note: true as const })),
+      ...(refFiles ?? []).map((p) => ({ p })),
+    ]
+    const pool = q ? cands.filter((c) => c.p.toLowerCase().includes(q)) : cands
     // 文件名前缀命中 > 文件名包含 > 仅路径包含;同档路径短者先。
-    const score = (p: string): number => {
-      const base = p.split('/').pop()!.toLowerCase()
-      return (base.startsWith(q) ? 0 : base.includes(q) ? 1 : 2) * 10000 + p.length
+    const score = (c: RefCand): number => {
+      const base = (c.note ? c.p.replace(/\.md$/i, '') : c.p).split('/').pop()!.toLowerCase()
+      return (base.startsWith(q) ? 0 : base.includes(q) ? 1 : 2) * 10000 + c.p.length
     }
     return [...pool].sort((a, b) => score(a) - score(b)).slice(0, 10)
-  }, [fileRefCtx, refFiles])
+  }, [fileRefCtx, refFiles, vaultPages])
   const refActive = !!fileRefCtx && refMatches.length > 0
   useEffect(() => { setRefIndex(0) }, [fileRefCtx?.start, fileRefCtx?.query])
 
-  const pickRef = (p: string) => {
+  const pickRef = (c: RefCand) => {
     if (!fileRefCtx) return
     const before = draft.slice(0, fileRefCtx.start)
-    const insert = `${/\s/.test(p) ? `"${p}"` : p} ` // 含空格加引号,与粘贴本机路径一致
+    const insert = c.note && vaultRoot
+      ? noteRefInsert(vaultRoot, c.p) // [[绝对路径|名字]]:气泡渲染名字,agent 读到路径
+      : `${/\s/.test(c.p) ? `"${c.p}"` : c.p} ` // 含空格加引号,与粘贴本机路径一致
     const next = before + insert + draft.slice(cursorPos)
     setDraft(next)
     const caret = before.length + insert.length
@@ -330,6 +414,7 @@ export const Composer2: React.FC<{
     void onSend(outgoing, attachments, wsFiles, pinnedSkills.map((s) => s.id), mentions).then((accepted) => {
       if (!accepted) return
       setDraft('')
+      setHistPos(0)
       setAttachments([])
       setWsFiles([])
       setPinnedSkills([])
@@ -383,6 +468,11 @@ export const Composer2: React.FC<{
   const modeLabel = groupActive
     ? t('group.modeLabel', { n: groupAgents!.length })
     : planMode ? t('input.planMode') : (isHost ? t(approvalLabelKey[approval]) : t('input.normal'))
+  // 收窄时药丸只剩图标,故图标随当前模式变(群聊/计划/审批档位),窄屏也能一眼看出状态。
+  const ModeIcon = groupActive ? Users
+    : planMode ? ClipboardList
+    : isHost ? (approval === 'readonly' ? Eye : approval === 'full-auto' ? Zap : PencilLine)
+    : MessageSquare
   const showModeChip = !!onPlanModeChange || isHost || !!onGroupChange
   const currentEngine = (engines || []).find((e) => e.id === engineId)
   const engineLabel = currentEngine?.name || t('input.engineDefault')
@@ -492,6 +582,7 @@ export const Composer2: React.FC<{
               setSlashDismissed(false)
               setMentionDismissed(false)
               setRefDismissed(false)
+              if (histPos) setHistPos(0) // 用户实际打字 → 退出历史召回态
               if (!e.target.value.includes('@')) { setMentionedSlug(''); setMentionAgents([]) }
               autoGrow()
             }}
@@ -543,6 +634,15 @@ export const Composer2: React.FC<{
                 if ((e.key === 'Enter' || e.key === 'Tab') && !e.nativeEvent.isComposing) { e.preventDefault(); slashMatches[Math.min(slashIndex, slashMatches.length - 1)]?.run(); return }
                 if (e.key === 'Escape') { e.preventDefault(); setSlashDismissed(true); setSlashSubMenu(null); return }
               }
+              // 历史召回:走到这里说明无浮层消费方向键(菜单激活时已 return)。空/首行 ↑ 取更旧、末行 ↓ 取更新。
+              if (e.key === 'ArrowUp' && e.currentTarget.selectionStart === e.currentTarget.selectionEnd
+                && draft.slice(0, e.currentTarget.selectionStart).indexOf('\n') === -1 && sentHistory?.length) {
+                e.preventDefault(); recallHistory(true); return
+              }
+              if (e.key === 'ArrowDown' && histPos > 0 && e.currentTarget.selectionStart === e.currentTarget.selectionEnd
+                && draft.slice(e.currentTarget.selectionStart).indexOf('\n') === -1) {
+                e.preventDefault(); recallHistory(false); return
+              }
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send() }
             }}
           />
@@ -582,16 +682,20 @@ export const Composer2: React.FC<{
           {refActive && (
             <div className="t2c-menu">
               <div className="t2c-menu-sec">{t('input.fileref.note')}</div>
-              {refMatches.map((p, i) => (
+              {refMatches.map((c, i) => (
                 <button
-                  key={p}
+                  key={(c.note ? 'n:' : 'f:') + c.p}
                   className="t2c-menu-item"
                   data-active={i === Math.min(refIndex, refMatches.length - 1) || undefined}
                   onMouseEnter={() => setRefIndex(i)}
-                  onClick={() => pickRef(p)}
+                  onClick={() => pickRef(c)}
                 >
-                  <span className="t2c-menu-cmd">{p.split('/').pop()}</span>
-                  <span className="t2c-menu-desc">{p}</span>
+                  <span className="t2c-menu-cmd">
+                    {c.note
+                      ? `${pageIcons[c.p] ? `${pageIcons[c.p]} ` : ''}${c.p.split('/').pop()!.replace(/\.md$/i, '')}`
+                      : c.p.split('/').pop()}
+                  </span>
+                  <span className="t2c-menu-desc">{c.p}</span>
                 </button>
               ))}
             </div>
@@ -613,9 +717,13 @@ export const Composer2: React.FC<{
               )}
             </span>
             <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => { void pickFiles(e.target.files); e.target.value = '' }} />
+            {voiceActive ? (
+              <VoiceRecordingBar analyser={voice.analyser} recording={voice.recording} busy={voice.busy} onStop={voice.toggle} onSend={voiceSend} t={t} />
+            ) : (<>
             {showModeChip && (
               <span style={{ position: 'relative', display: 'inline-flex' }} data-cmenu>
                 <button className={`t2c-pill${planMode ? ' active' : ''}`} title={t('input.modeChipTitle')} onClick={() => setOpenMenu((m) => (m === 'mode' ? null : 'mode'))}>
+                  <ModeIcon size={13} />
                   <span className="t2c-pill-label">{modeLabel}</span>
                   <ChevronDown size={10} />
                 </button>
@@ -687,9 +795,17 @@ export const Composer2: React.FC<{
                 thinkingLevel={isEngine ? undefined : thinkingLevel}
                 onThinkingChange={isEngine ? undefined : onThinkingChange}
                 emptyLabel={isEngine ? t('input.engineModelDefault') : undefined}
+                footnote={!isEngine && !isHost ? t('input.cloudModelHint') : undefined}
               />
             )}
-            <button className="t2c-iconbtn" title={t('input.micComingSoon')} disabled><Mic size={14} /></button>
+            <button
+              className={`t2c-iconbtn${voice.recording ? ' recording' : ''}`}
+              title={voice.busy ? t('input.micBusy') : voice.recording ? t('input.micStop') : voice.error || t('input.micStart')}
+              disabled={disabled || voice.busy || !voice.supported}
+              onClick={voice.toggle}
+            >
+              {voice.busy ? <Loader2 size={14} className="spin" /> : <Mic size={14} />}
+            </button>
             {running ? (
               <>
                 {!!draft.trim() && (
@@ -700,7 +816,11 @@ export const Composer2: React.FC<{
             ) : (
               <button className="t2c-send" onClick={send} disabled={disabled || !draft.trim()} title={t('input.send')}><ArrowUp size={16} /></button>
             )}
+            </>)}
           </div>
+          {voice.error && !voice.recording && !voice.busy && (
+            <div className="t2c-hint" style={{ marginTop: 6, marginBottom: 0 }}>{voice.error}</div>
+          )}
         </div>
       </div>
     </div>

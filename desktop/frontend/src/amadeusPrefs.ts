@@ -5,9 +5,11 @@ import { usePageStore } from '@amadeus/store/pageStore'
 import { setRecentsProvider } from '@amadeus/lib/recents'
 
 export interface Collection { name: string; query: string }
-interface Prefs { starred: string[]; recents: string[]; collections: Collection[] }
+interface Prefs { starred: string[]; recents: string[]; collections: Collection[]; pins: string[] }
 interface PrefsState extends Prefs {
   toggleStar(path: string): void
+  /** 置顶(每 vault 一份,不进 frontmatter:fm 会随云同步跟文件走,导致本地/云端两侧共享置顶)。 */
+  togglePin(path: string): void
   pushRecent(path: string): void
   /** 集合 = 保存的全文搜索(同名覆盖)。 */
   saveCollection(name: string, query: string): void
@@ -30,10 +32,11 @@ const load = (): Prefs => {
         starred: Array.isArray(p.starred) ? p.starred : [],
         recents: Array.isArray(p.recents) ? p.recents : [],
         collections: Array.isArray(p.collections) ? p.collections : [],
+        pins: Array.isArray(p.pins) ? p.pins : [],
       }
     }
   } catch { /* ignore */ }
-  return { starred: [], recents: [], collections: [] }
+  return { starred: [], recents: [], collections: [], pins: [] }
 }
 const persist = (p: Prefs): void => {
   try {
@@ -42,16 +45,22 @@ const persist = (p: Prefs): void => {
   } catch { /* ignore */ }
 }
 
-const snapshot = (s: PrefsState): Prefs => ({ starred: s.starred, recents: s.recents, collections: s.collections })
+const snapshot = (s: PrefsState): Prefs => ({ starred: s.starred, recents: s.recents, collections: s.collections, pins: s.pins })
 
 export const useAmadeusPrefs = create<PrefsState>((set, get) => ({
   starred: [],
   recents: [],
   collections: [],
+  pins: [],
   toggleStar: (path) => {
     const starred = get().starred.includes(path) ? get().starred.filter((p) => p !== path) : [...get().starred, path]
     set({ starred })
     persist({ ...snapshot(get()), starred })
+  },
+  togglePin: (path) => {
+    const pins = get().pins.includes(path) ? get().pins.filter((p) => p !== path) : [...get().pins, path]
+    set({ pins })
+    persist({ ...snapshot(get()), pins })
   },
   pushRecent: (path) => {
     const recents = [path, ...get().recents.filter((p) => p !== path)].slice(0, RECENT_CAP)

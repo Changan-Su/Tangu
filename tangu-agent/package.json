@@ -1,6 +1,7 @@
 {
   "name": "@forsion/tangu-agent",
   "version": "1.0.0",
+  "license": "SEE LICENSE IN LICENSE",
   "description": "Tangu Agent — 与宿主无关的服务端 agent runtime;可作为 Forsion 微后端插件,也可独立运行(云端大脑客户端)。",
   "type": "module",
   "main": "./dist/index.js",
@@ -27,6 +28,7 @@
     "sync:plugin-api": "node scripts/sync-plugin-api.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
+    "e2e:direct": "node scripts/direct-offline.e2e.mjs",
     "tui": "node dist/tui/main.js",
     "worker": "node dist/tui/main.js worker",
     "server": "node dist/standalone/main.js",

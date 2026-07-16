@@ -6,9 +6,11 @@ import {
   MeasuringStrategy,
   PointerSensor,
   closestCorners,
+  pointerWithin,
   useDroppable,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
@@ -16,6 +18,7 @@ import {
 import { usePageStore, type Status } from '../store/pageStore'
 import { findTotal, useFindStore } from '../blocks/markdown/findInPage'
 import { BlockSelectionKeys } from '../store/blockSelection'
+import { edgeBlock } from '../lib/blockEdges'
 import { Row } from './Row'
 import { BacklinksPanel } from './BacklinksPanel'
 
@@ -85,6 +88,33 @@ function previewText(content?: string): string {
 function RowGap({ index }: { index: number }) {
   const { setNodeRef, isOver } = useDroppable({ id: `gap:${index}` })
   return <div ref={setNodeRef} className="row-gap" data-over={isOver || undefined} />
+}
+
+/** 标题栏 → 正文:光标进正文第一块(空正文则建首块)。本组件 header 与桌面壳的 NoteTitle 共用。
+ *  block id 跨改名稳定,focusRequest 会在块渲染时消费。 */
+export function focusBody(): void {
+  const st = usePageStore.getState()
+  const first = st.manifest ? edgeBlock(st.manifest.root, 'first') : null
+  if (first) st.requestFocus(first, 'start')
+  else st.insertBlockAfter(null) // 自带 requestFocus
+}
+
+/** 落点判定跟指针走(Notion/AFFiNE 语义:placement 是 point 的函数,与被拖块矩形无关,
+ *  见 AFFiNE calcDropTarget)。closestCorners 用「被拖块矩形」四角算距离 —— 全宽 text 块
+ *  的四角永远贴住目标块本体,18px 边缘条一辈子算不赢 → 左右分栏形同虚设(实报,
+ *  scripts/block-dnd.e2e.cjs 复现)。指针不在任何落点内(页边距/键盘拖拽无指针)才回退。 */
+const pointerFirst: CollisionDetection = (args) => {
+  const hits = pointerWithin(args)
+  return hits.length ? hits : closestCorners(args)
+}
+
+/** 点正文下方空白(.page-tail)= Notion 式在末尾续写;末块已空就聚焦它,别叠一摞空块。
+ *  块删完时这是唯一能点出块的地方(桌面 bare 模式没有 footer 的「＋ 新块」)。 */
+function appendAtEnd(): void {
+  const st = usePageStore.getState()
+  const last = st.manifest ? edgeBlock(st.manifest.root, 'last') : null
+  if (last && !st.blocks[last]?.content) st.requestFocus(last, 'end')
+  else st.insertBlockAfter(null)
 }
 
 export function PageView({ bare = false }: { bare?: boolean } = {}) {
@@ -232,9 +262,20 @@ export function PageView({ bare = false }: { bare?: boolean } = {}) {
             onChange={(e) => setTitleDraft(e.target.value)}
             onBlur={() => void commitTitle()}
             onKeyDown={(e) => {
+              // focusBody 必须在 commitTitle 之前:renamePage 同步快照 manifest 并在返回时回填,
+              // 顺序反了则空正文刚建的首块会被冲掉。
               if (e.key === 'Enter') {
                 e.preventDefault()
+                focusBody()
                 void commitTitle()
+              } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                // 仅当光标在标题末尾(无选区)才跳正文,否则放行原生移动。
+                const el = e.currentTarget
+                if (el.selectionStart === el.value.length && el.selectionEnd === el.value.length) {
+                  e.preventDefault()
+                  focusBody()
+                  void commitTitle()
+                }
               } else if (e.key === 'Escape') {
                 setEditingTitle(false)
               }
@@ -253,7 +294,7 @@ export function PageView({ bare = false }: { bare?: boolean } = {}) {
 
       <DndContext
         sensors={sensors}
-        collisionDetection={closestCorners}
+        collisionDetection={pointerFirst}
         // 桌面壳把 edge-zone 静止时压成零宽、拖拽中才浮现 → 必须拖拽期间持续重测 droppable 矩形。
         measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
         onDragStart={onDragStart}
@@ -294,6 +335,9 @@ export function PageView({ bare = false }: { bare?: boolean } = {}) {
           {activeId ? <div className="drag-overlay">{previewText(blocks[activeId]?.content)}</div> : null}
         </DragOverlay>
       </DndContext>
+
+      {/* 正文下方的续写区(点空白 = 末尾建块)。非 bare 有下面 footer 的「＋ 新块」,不需要。 */}
+      {bare && <div className="page-tail" onClick={appendAtEnd} />}
 
       {!bare && (
         <div className="page-footer">

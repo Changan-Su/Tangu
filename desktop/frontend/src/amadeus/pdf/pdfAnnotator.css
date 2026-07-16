@@ -1,0 +1,276 @@
+/* 可批注 PDF 阅读器布局 + 主题适配(对标 PDF Expert:左缩略图栏/顶部工具栏/底部悬浮胶囊)。
+   用 amadeus/lovable 真实 token(--text/--border/--accent/…),
+   页面样式由 pdfjs-dist/legacy/web/pdf_viewer.css 提供,这里覆写其配色变量对齐当前主题。 */
+
+/* 视图外壳(AmadeusPdfView 的 .amx-pdfview):撑满面板、不自带滚动(滚动交给 pdfa-container)。 */
+.amx-pdfview { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+
+.pdfa-root {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  color: var(--text);
+  font-family: var(--font-ui, inherit);
+  /* pdf.js 编辑器 UI(浮动「高亮」按钮/工具栏/对话框)默认是 pdf.js 蓝 → 对齐主题 accent。
+     未知/改名的变量被忽略(无害),已知会命中的对齐即可。 */
+  --editor-toolbar-bg: var(--bg-card, var(--surface));
+  --editor-toolbar-fg-color: var(--text);
+  --button-primary-bg-color: var(--accent);
+  --button-primary-hover-bg-color: var(--accent);
+  --button-primary-active-bg-color: var(--accent);
+  --dialog-bg-color: var(--bg-card, var(--surface));
+  --dialog-border-color: var(--border);
+}
+
+/* ---------- 顶部工具栏 ---------- */
+
+.pdfa-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card, var(--surface));
+  color: var(--text);
+  font-size: 13px;
+  user-select: none;
+}
+
+.pdfa-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  line-height: 1;
+  transition: background var(--duration-fast, 120ms) var(--ease-out, ease);
+}
+.pdfa-btn:hover:not(:disabled) { background: var(--bg-hover); }
+.pdfa-btn:disabled { opacity: 0.4; cursor: default; }
+.pdfa-copy { min-width: auto; }
+
+/* 工具按钮:无边框图标位,激活态描 accent。 */
+.pdfa-tool { border-color: transparent; padding: 0 6px; color: var(--text-muted); }
+.pdfa-tool:hover:not(:disabled) { color: var(--text); }
+.pdfa-tool.on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.pdfa-sep { width: 1px; height: 18px; background: var(--border); margin: 0 4px; flex: 0 0 auto; }
+.pdfa-flex { flex: 1 1 auto; }
+
+/* 形状选项(线宽/透明度)——只在形状工具激活时出现 */
+.pdfa-mini {
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.pdfa-mini option { background: var(--bg-card, var(--surface)); color: var(--text); }
+.pdfa-tool:disabled { opacity: 0.35; cursor: default; }
+
+.pdfa-swatches { display: inline-flex; gap: 5px; align-items: center; }
+.pdfa-swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.pdfa-swatch.on { border-color: var(--accent); }
+
+/* ---------- 主体:侧栏 + 视口 ---------- */
+
+.pdfa-body { flex: 1 1 auto; display: flex; min-height: 0; }
+
+.pdfa-side {
+  flex: 0 0 176px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-card, var(--surface));
+}
+.pdfa-sidetabs { display: flex; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.pdfa-sidetabs button {
+  flex: 1;
+  height: 24px;
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.pdfa-sidetabs button:hover { background: var(--bg-hover); }
+.pdfa-sidetabs button.on { background: var(--bg-hover); color: var(--text); }
+.pdfa-sidebody { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.pdfa-side-empty { padding: 18px 12px; color: var(--text-muted); font-size: 12px; text-align: center; line-height: 1.8; }
+
+.pdfa-thumbs { padding: 10px 12px; }
+.pdfa-thumb { margin-bottom: 10px; cursor: pointer; text-align: center; }
+.pdfa-thumb canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #fff;
+  border: 2px solid var(--border);
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+.pdfa-thumb.on canvas { border-color: var(--accent); }
+.pdfa-thumb .no { margin-top: 3px; font-size: 11px; color: var(--text-muted); }
+.pdfa-thumb.on .no { color: var(--accent); }
+
+.pdfa-outline { padding: 8px 6px; font-size: 13px; }
+.pdfa-outline button {
+  display: block;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pdfa-outline button:hover { background: var(--bg-hover); }
+
+/* ---------- 视口 ---------- */
+
+.pdfa-viewport { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; overflow: hidden; }
+/* PDFViewer 要求滚动容器绝对定位、可滚;gutter 背景对齐主题(暗色下不再是刺眼白)。
+   isolation:isolate = 必须:pdf.js 的 .annotationLayer 无 z-index(不成层叠上下文),其 section
+   带**递增的内联 z-index**、选中态编辑器更是 z-index:100000 —— 不隔离就会盖住底部胶囊吃掉点击。 */
+.pdfa-container {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  background: var(--overlay-light, var(--bg));
+  isolation: isolate;
+}
+
+/* ⚠️文本标记类注释的 section 纯装饰(无弹窗无交互),但 pdf.js 只在**高亮编辑模式**下才关掉注释层的
+   点击区(AnnotationEditorLayer.updateMode:NONE 分支 toggleAnnotationLayerPointerEvents(true))。
+   于是鼠标/下划线等模式下,这些区块盖在文字上吃掉 mousedown,textLayer 拿不到 .selecting →
+   已标注过的文字再也选不中。这里让它们永不挡选区;链接/便签(有弹窗要点)不动。
+   注意 pdf.js 的类名是 strikeoutAnnotation(小写 o),写成 strikeOut 会静默失效。 */
+.pdfa-container .annotationLayer section:is(
+  .highlightAnnotation, .underlineAnnotation, .squigglyAnnotation, .strikeoutAnnotation
+) { pointer-events: none; }
+
+/* 工具光标:标记类=文本选择,便签=放置,形状=十字。 */
+.pdfa-container[data-tool='underline'] .textLayer,
+.pdfa-container[data-tool='squiggly'] .textLayer,
+.pdfa-container[data-tool='strikeout'] .textLayer { cursor: text; }
+.pdfa-container[data-tool='note'] .page { cursor: copy; }
+.pdfa-container:is([data-tool='rect'], [data-tool='circle'], [data-tool='line'], [data-tool='arrow']) .page {
+  cursor: crosshair;
+}
+/* 形状拖拽时别让文字层抢走指针(否则拖出选区、预览抖动)。 */
+.pdfa-container:is([data-tool='rect'], [data-tool='circle'], [data-tool='line'], [data-tool='arrow']) :is(.textLayer, .annotationLayer section) {
+  pointer-events: none;
+}
+
+/* 拖拽预览:纯覆盖层,不吃事件。 */
+.pdfa-preview { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+
+/* pdf.js 原生注释弹窗(便签内容)硬编码淡黄底 rgb(255 255 153)+黑字,暗色下刺眼 → 对齐主题。 */
+.pdfa-container .annotationLayer .popup {
+  background-color: var(--bg-card, var(--surface));
+  color: var(--text);
+  outline: 1px solid var(--border);
+  box-shadow: 0 4px 14px var(--overlay, rgba(0, 0, 0, 0.18));
+}
+.pdfa-container .annotationLayer .popup :is(h1, span) { color: var(--text); }
+
+/* ---------- 底部悬浮胶囊(缩放/页码) ---------- */
+
+.pdfa-bottombar {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-card, var(--surface));
+  box-shadow: 0 6px 20px var(--overlay, rgba(0, 0, 0, 0.18));
+  z-index: 5;
+  font-size: 12px;
+}
+.pdfa-bottombar .pdfa-btn { border-color: transparent; }
+.pdfa-zoomsel {
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.pdfa-zoomsel option { background: var(--bg-card, var(--surface)); color: var(--text); }
+.pdfa-pageinput {
+  width: 38px;
+  height: 24px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.pdfa-pagetotal { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ---------- 状态层 ---------- */
+
+.pdfa-notice {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-card, var(--surface));
+  color: var(--text);
+  font-size: 12px;
+  box-shadow: 0 4px 14px var(--overlay, rgba(0, 0, 0, 0.15));
+  z-index: 6;
+}
+
+.pdfa-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+/* 错误态带「重试」按钮 → 必须可点(覆盖 .pdfa-state 的 pointer-events:none)。 */
+.pdfa-state-err { flex-direction: column; gap: 10px; pointer-events: auto; }

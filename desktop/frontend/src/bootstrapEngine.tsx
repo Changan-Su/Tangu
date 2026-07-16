@@ -1,6 +1,7 @@
 /** 真实引擎装配:注册视图(会话/对话)+ ribbon + 命令 + 默认布局。替代 demoBootstrap。 */
-import { MessageCircle, Folder, Plus, Command as CommandIcon, Moon, Languages, MessageSquare, FolderOpen, BookOpen, Bot, Smartphone, Store, Settings, FileText, ListTree, Link2, Search, Hash, Waypoints, Inbox, Mail, PanelLeft, CalendarDays, ListTodo, Code2, Database, Trophy } from 'lucide-react'
+import { MessageCircle, Folder, Plus, Command as CommandIcon, Moon, Languages, MessageSquare, FolderOpen, BookOpen, Bot, Smartphone, Store, Settings, FileText, ListTree, Link2, Search, Hash, Waypoints, Inbox, Mail, PanelLeft, CalendarDays, ListTodo, Code2, Database, PenTool, Trophy, Activity, Workflow } from 'lucide-react'
 import { registerView, addCommand, addRibbonIcon, openCommandPalette, useWorkspace, getActiveSpace, recordNav, useNav, activeMainPanel, setEngineI18n } from '@lcl/engine'
+import { useQuickFind } from './quickFind'
 import { useRecentViews } from './recentViews'
 import { registerSpaces } from './spaces'
 import { loadUserSpaces, saveCurrentAsSpace } from './userSpaces'
@@ -17,6 +18,8 @@ import { HomeEmptyView } from './views/HomeEmpty'
 import { WeChatSpecialView, AgentsDetailSpecialView, WorkspaceDetailSpecialView } from './views/SpecialViews'
 import { AmadeusEditorView, AmadeusBacklinksView } from './amadeusViews'
 import { AmadeusDbView } from './views/AmadeusDbView'
+import { AmadeusDrawingView } from './views/AmadeusDrawingView'
+import { AmadeusPdfView } from './views/AmadeusPdfView'
 import { AmadeusSearchView, AmadeusTagsView, AmadeusLocalGraphView } from './amadeusPanels'
 import { CalendarView } from './views/CalendarView'
 import { CalendarConfigView } from './views/CalendarConfigView'
@@ -26,6 +29,12 @@ import { InboxReaderView } from './views/inbox/InboxReaderView'
 import { WsFileView } from './views/WsFileView'
 import { CodeStudioView } from './views/CodeStudioView'
 import { ChangelogView } from './views/ChangelogView'
+import { setMobileUiCommand, MOBILE_UI_KEY } from './mobileUiCommand'
+import { setActivityViewCommand, ACTIVITY_VIEW_KEY } from './activityViewCommand'
+import { ActivityLogView } from './views/ActivityLogView'
+import { AutomationListView } from './views/automation/AutomationListView'
+import { AutomationDetailView } from './views/automation/AutomationDetailView'
+import { AutomationRunsView } from './views/automation/AutomationRunsView'
 
 const ws = () => useWorkspace.getState()
 const app = () => useApp.getState()
@@ -78,8 +87,16 @@ export function installEngine(): void {
   registerView({ type: 'wsfile', displayName: () => app().tr('view.wsfile'), icon: FileText, factory: (props) => <WsFileView {...props} /> })
   // Coding Space 主界面(Code | Preview 工作台);仅在产品档案点名 coding 时注册。
   if (PRODUCT.spaces.includes('coding')) registerView({ type: 'code-studio', displayName: () => app().tr('view.codeStudio'), icon: Code2, factory: (props) => <CodeStudioView {...props} />, singleton: true })
+  // Automation Space 三件套(左=列表/主=详情+构建器/右=触发记录);仅档案点名 automation 时注册。
+  if (PRODUCT.spaces.includes('automation')) {
+    registerView({ type: 'automation-list', displayName: () => app().tr('view.automationList'), icon: Workflow, factory: () => <AutomationListView />, singleton: true })
+    registerView({ type: 'automation-detail', displayName: () => app().tr('view.automationDetail'), icon: Workflow, factory: () => <AutomationDetailView />, singleton: true })
+    registerView({ type: 'automation-runs', displayName: () => app().tr('view.automationRuns'), icon: ListTree, factory: () => <AutomationRunsView />, singleton: true })
+  }
   // 「更新」标签页(更新日志 + 下载/安装):检测到新版自动弹出;任何产品变体都注册。
   registerView({ type: 'changelog', displayName: () => app().tr('view.changelog'), icon: FileText, factory: () => <ChangelogView />, singleton: true })
+  // 活动日志实时视图(开发者工具):恒注册,⌘K 入口由开发者选项开关控制(activityViewCommand)。
+  registerView({ type: 'activity-log', displayName: () => app().tr('view.activityLog'), icon: Activity, factory: () => <ActivityLogView />, singleton: true })
   // 空侧栏占位:侧栏关空/拖空后由 closeLeaf/dropView 自动补上,保住 group 作拖放靶(整组只剩它时 tab 条隐藏,见 engine.css)。
   registerView({ type: 'sidebar-empty', displayName: () => app().tr('sidebar.emptyTitle'), icon: PanelLeft, factory: () => <SidebarEmptyView />, closable: false })
   // 主区空态占位:关掉最后一个主区 tab 后 closeLeaf 就地把该 leaf 变成它(Forsion 品牌图 + 新建;tab 条隐藏机关同 sidebar-empty)。
@@ -95,6 +112,10 @@ export function installEngine(): void {
     registerView({ type: 'amadeus-editor', displayName: () => app().tr('amadeus.editor'), icon: FileText, factory: (props) => <AmadeusEditorView {...props} /> })
     // 独立 .db 数据库视图(多实例,params.dbPath 认领文件并随布局持久化;树上点 .db 打开,见 amadeusNav.openDb)。
     registerView({ type: 'amadeus-db', displayName: () => app().tr('view.db'), icon: Database, factory: (props) => <AmadeusDbView {...props} /> })
+    // 独立白板视图(多实例,params.drawingPath 认领文件;树上点 .excalidraw.md / 笔记里点 [[X.excalidraw]] 打开,见 amadeusNav.openDrawing)。
+    registerView({ type: 'amadeus-drawing', displayName: () => app().tr('view.drawing'), icon: PenTool, factory: (props) => <AmadeusDrawingView {...props} /> })
+    // 独立 PDF 视图(多实例,params.pdfPath 认领文件;树上点 .pdf / 笔记里点 [[x.pdf#page=N]] 打开,见 amadeusNav.openPdf)。
+    registerView({ type: 'amadeus-pdf', displayName: () => 'PDF', icon: FileText, factory: (props) => <AmadeusPdfView {...props} /> })
     registerView({ type: 'amadeus-backlinks', displayName: () => app().tr('amadeus.backlinks'), icon: Link2, factory: () => <AmadeusBacklinksView />, singleton: true })
     registerView({ type: 'amadeus-search', displayName: () => app().tr('amadeus.search'), icon: Search, factory: () => <AmadeusSearchView />, singleton: true })
     registerView({ type: 'amadeus-tags', displayName: () => app().tr('amadeus.tags'), icon: Hash, factory: () => <AmadeusTagsView />, singleton: true })
@@ -119,7 +140,7 @@ export function installEngine(): void {
   const activeSpace = getActiveSpace()
   if (activeSpace) {
     ws().setSidebarDefaults(activeSpace.sidebarDefaults)
-    ws().setSideProfile(activeSpace.id, activeSpace.resizableSides ?? {}) // 首启 Space 的可拖宽侧栏画像(须先于 onReady 的 pinSides)
+    ws().setSideProfile(activeSpace.id, activeSpace.resizableSides ?? {}, activeSpace.sideDefaultScale) // 首启 Space 的可拖宽侧栏画像(须先于 onReady 的 pinSides)
   }
   // 用户自定义 Space(L0 数据 Space):~/.tangu/spaces 异步装载(注册完成后 ribbon 自动出现);仅桌面。
   if (window.tangu?.spacesList) void loadUserSpaces()
@@ -133,9 +154,12 @@ export function installEngine(): void {
     if (!id || id === p.activeId) return
     queueMicrotask(() => {
       const leafId = ws().focusedChatLeafId
+      // 固定会话 leaf(followActive:false,新标签/分屏各自独立会话)不被「跟随」引擎回拽成主聊天。
+      const leaf = leafId ? ws().api?.getPanel(leafId) : null
+      const pinned = !!leaf && ((leaf.params ?? {}) as { followActive?: boolean }).followActive === false
       recordNav(leafId, `chat:${id}`, () => {
         app().setActiveId(id)
-        if (leafId) ws().navigateLeaf(leafId, 'chat', { followActive: true, reuseKey: 'primary' })
+        if (leafId && !pinned) ws().navigateLeaf(leafId, 'chat', { followActive: true, reuseKey: 'primary' })
       })
     })
     const title = s.sessions.find((x) => x.id === id)?.title
@@ -146,6 +170,7 @@ export function installEngine(): void {
   // 左右栏折叠钮在各自面板右缘(见 WorkspaceHost);ribbon 展开/折叠钮由 Ribbon 引擎自渲染在顶部。
   // 商店(装到 ~/.tangu)与反馈(submitFeedback)是 host 能力:Tangu Web 下 window.tangu 无对应方法 → 不注册。
   // 商店置于底部首位:注册序即上下序,故在 rb-mode 之前注册 → 落在底部组最上方。
+  addRibbonIcon({ id: 'rb-search', side: 'bottom', icon: Search, tooltip: () => '快速查找', onClick: () => useQuickFind.getState().openPalette() })
   if (window.tangu?.marketList) addRibbonIcon({ id: 'rb-market', side: 'bottom', icon: Store, tooltip: () => app().tr('market.title'), onClick: () => app().openMarket() })
   addRibbonIcon({ id: 'rb-achievements', side: 'bottom', icon: Trophy, tooltip: () => app().tr('achievements.title'), onClick: () => app().openAchievements() })
   addRibbonIcon({ id: 'rb-mode', side: 'bottom', icon: Moon, tooltip: () => app().tr('theme.changeMode'), onClick: () => useTheme.getState().toggleMode() })
@@ -170,6 +195,7 @@ export function installEngine(): void {
   // commands
   if (PRODUCT.spaces.includes('tangu')) addCommand({ id: 'new-chat', title: () => app().tr('sidebar.newChat'), keywords: 'new chat 新对话', hotkey: 'mod+n', run: blankNewChat })
   addCommand({ id: 'toggle-left', title: () => app().tr('command.toggleLeft'), keywords: 'sidebar 左栏', hotkey: 'mod+b', run: () => ws().toggleSidebar('left') })
+  addCommand({ id: 'quick-find', title: () => '快速查找', keywords: 'search find quick 搜索 查找 快速', hotkey: 'mod+p', run: () => useQuickFind.getState().openPalette() })
   addCommand({ id: 'toggle-right', title: () => app().tr('command.toggleRight'), keywords: 'sidebar 右栏', run: () => ws().toggleSidebar('right') })
   addCommand({ id: 'theme-mode', title: () => app().tr('theme.changeMode'), keywords: 'theme dark 明暗', run: () => useTheme.getState().toggleMode() })
   addCommand({ id: 'theme-skin', title: () => app().tr('theme.changeSkin'), keywords: 'theme skin 配色', run: () => useTheme.getState().cycleSkin() })
@@ -184,6 +210,8 @@ export function installEngine(): void {
   addCommand({ id: 'nav-back', title: () => app().tr('command.navBack'), keywords: 'back history 后退 历史', hotkey: 'mod+shift+[', run: () => navGo('back') })
   addCommand({ id: 'nav-forward', title: () => app().tr('command.navForward'), keywords: 'forward history 前进 历史', hotkey: 'mod+shift+]', run: () => navGo('forward') })
   addCommand({ id: 'reset-layout', title: () => app().tr('command.resetLayout'), keywords: 'layout reset default 布局 默认 黄金分割', run: () => ws().resetLayout() })
+  // Mini 悬浮卡片(全局快捷键 ⌘/Ctrl+⇧+M 亦可):仅桌面(openMini 存在)。
+  if (window.tangu?.openMini) addCommand({ id: 'open-mini', title: () => (document.documentElement.lang.startsWith('zh') ? '打开 Mini 卡片' : 'Open mini card'), keywords: 'mini card floating 悬浮 卡片 迷你 mini', run: () => window.tangu?.openMini?.() })
   // 另存为 Space:当前布局序列化成 ~/.tangu/spaces/<slug>/space.json 并注册(仅桌面)。
   if (window.tangu?.spacesSave) addCommand({ id: 'save-as-space', title: () => app().tr('command.saveAsSpace'), keywords: 'space 空间 另存 保存 custom', run: () => {
     const name = window.prompt(app().tr('spaces.namePrompt'))?.trim()
@@ -203,6 +231,10 @@ export function installEngine(): void {
   if (PRODUCT.spaces.includes('tangu')) addCommand({ id: 'compact', title: () => app().tr('command.compact'), keywords: 'compact 压缩', run: () => void app().compact() })
   if (PRODUCT.spaces.includes('tangu')) addCommand({ id: 'branch', title: () => app().tr('command.branch'), keywords: 'branch 分支', run: () => void app().branchFromMessage() })
   addCommand({ id: 'open-settings', title: () => app().tr('settings.title'), keywords: 'settings 设置 preferences', hotkey: 'mod+,', run: () => app().openSettings() })
+  // 开发者选项:移动端 UI 预览命令(开关持久化在 MOBILE_UI_KEY;已在移动模式则强制保留切回入口)。
+  try { setMobileUiCommand(localStorage.getItem(MOBILE_UI_KEY) === '1') } catch { /* ignore */ }
+  // 开发者选项:活动日志实时视图命令(同款模式)。
+  try { setActivityViewCommand(localStorage.getItem(ACTIVITY_VIEW_KEY) === '1') } catch { /* ignore */ }
 }
 
 /** 默认布局 = 当前活动 Space 的 build()(WorkspaceHost 无保存布局时调用,经 buildDefault prop)。 */

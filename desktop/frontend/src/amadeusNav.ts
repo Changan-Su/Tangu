@@ -2,12 +2,21 @@
 // 语义(类 Obsidian):已有认领该笔记的编辑器 tab → 激活它;newTab(⌘点击)→ 新开 tab;
 // 一个编辑器都没有(全被关掉)→ 带 notePath 新开;否则在当前(最近活动)编辑器里加载。
 import { usePageStore } from '@amadeus/store/pageStore'
-import { useWorkspace } from '@lcl/engine'
-import { actThrottled } from './activity/log'
+import { useWorkspace, activeMainPanel } from '@lcl/engine'
+import { amadeus } from '@amadeus/api'
+import { askString } from '@amadeus/components/askString'
+import { BLANK_SCENE_JSON, blankDrawing, isDrawingPath } from '@amadeus-shared/excalidraw/format'
+import { act, actThrottled } from './activity/log'
+import { track } from './achievements/store'
 
 interface PanelLike { id: string; params?: Record<string, unknown> }
 
 export async function openNote(path: string, opts?: { newTab?: boolean }): Promise<void> {
+  // 画板文件绝不进笔记编辑器(compiler 会把插件载荷改写成块 = 在 Obsidian 那边毁档)→ 一律改道白板视图。
+  if (isDrawingPath(path)) {
+    openDrawing(path)
+    return
+  }
   actThrottled('view.open', { f: path }, `view.open|${path}`)
   const ws = useWorkspace.getState()
   const api = (ws as unknown as { api?: { panels: PanelLike[] } }).api
@@ -24,7 +33,13 @@ export async function openNote(path: string, opts?: { newTab?: boolean }): Promi
     await waitForActive(path)
     return
   }
+  // 焦点在非编辑器主 leaf(空白新标签等)→ 先把它就地切成编辑器,笔记才落进「聚焦的 tab」而非旧编辑器。
+  const focused = ws.api ? activeMainPanel(ws.api) : null
+  if (focused && ((focused.params ?? {}) as { __type?: string }).__type !== 'amadeus-editor') {
+    ws.navigateLeaf(focused.id, 'amadeus-editor', { notePath: path })
+  }
   await usePageStore.getState().loadPage(path)
+  await waitForActive(path)
 }
 
 /** 打开独立 .db 数据库视图:已有认领该文件的 tab → 激活;否则主区打开(语义同 openNote 的简版)。 */
@@ -38,6 +53,61 @@ export function openDb(dbPath: string): void {
     return
   }
   ws.openView('amadeus-db', { dbPath }, 'main')
+}
+
+/** 打开独立 PDF 视图(可批注):已有认领该文件的 tab → 激活(带页号则广播跳页);否则主区打开。page = 1-based。 */
+export function openPdf(pdfPath: string, page?: number): void {
+  actThrottled('view.open', { f: pdfPath }, `view.open|${pdfPath}`)
+  const ws = useWorkspace.getState()
+  const api = (ws as unknown as { api?: { panels: PanelLike[] } }).api
+  const hit = api?.panels.find((p) => p.params?.__type === 'amadeus-pdf' && p.params?.pdfPath === pdfPath)
+  if (hit) {
+    ws.activateLeaf(hit.id)
+    // 已开着 → 广播跳页(PdfAnnotator 听 amadeus:pdf-goto,避免 navigateLeaf remount 重下 PDF)。
+    if (page && page >= 1) window.dispatchEvent(new CustomEvent('amadeus:pdf-goto', { detail: { pdfPath, page } }))
+    return
+  }
+  ws.openView('amadeus-pdf', page ? { pdfPath, page } : { pdfPath }, 'main')
+}
+
+/** 打开独立白板视图(.excalidraw.md 画布,兼容 Obsidian Excalidraw 插件):已有认领该文件的 tab → 激活;否则主区打开。 */
+export function openDrawing(drawingPath: string): void {
+  actThrottled('view.open', { f: drawingPath }, `view.open|${drawingPath}`)
+  const ws = useWorkspace.getState()
+  const api = (ws as unknown as { api?: { panels: PanelLike[] } }).api
+  const hit = api?.panels.find((p) => p.params?.__type === 'amadeus-drawing' && p.params?.drawingPath === drawingPath)
+  if (hit) {
+    ws.activateLeaf(hit.id)
+    return
+  }
+  ws.openView('amadeus-drawing', { drawingPath }, 'main')
+}
+
+/** 新建白板(.excalidraw.md),建成即打开;返回 vault 相对路径(取消/失败 null)。
+ *  同 newBase:出生即命名 + 先挡重名 —— saveAttachment 撞名把 -N 插在最后一个扩展名前,
+ *  `x.excalidraw.md` 会变成 `x.excalidraw-1.md`,后缀一破就掉出白板判定、混回笔记树。 */
+export async function createDrawing(parent: string): Promise<string | null> {
+  const dir = parent.replace(/\\/g, '/').replace(/\/+$/, '')
+  const name = (await askString(dir ? `在「${dir.split('/').pop()}」中新建白板` : '新建白板', '未命名白板'))
+    ?.trim().replace(/[\\/]/g, '').replace(/\.excalidraw(\.md)?$/i, '')
+  if (!name) return null
+  const rel = dir ? `${dir}/${name}.excalidraw.md` : `${name}.excalidraw.md`
+  if (usePageStore.getState().files.some((f) => f.replace(/\\/g, '/') === rel)) {
+    window.alert(`「${name}.excalidraw.md」已存在`)
+    return null
+  }
+  try {
+    const bytes = new TextEncoder().encode(blankDrawing(BLANK_SCENE_JSON))
+    await amadeus.saveAttachment('', `${name}.excalidraw.md`, bytes, { mode: 'vault', folder: dir })
+    track('drawing.create')
+    act('drawing.create', { f: rel })
+    await usePageStore.getState().refreshStructure()
+    openDrawing(rel)
+    return rel
+  } catch (e) {
+    window.alert(`新建白板失败:${e instanceof Error ? e.message : String(e)}`)
+    return null
+  }
 }
 
 /** 打开全文搜索视图(singleton:已开即激活)。 */

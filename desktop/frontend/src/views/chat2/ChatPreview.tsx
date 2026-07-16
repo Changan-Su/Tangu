@@ -64,7 +64,7 @@ export function ChatPreview() {
           workspaces={WORKSPACES} onSelect={() => {}} onNewInWorkspace={() => {}} onAddWorkspace={() => {}}
           onRenameWorkspace={() => {}} onRemoveWorkspace={() => {}} onRename={() => {}} onArchive={() => {}} onDelete={() => {}}
           onOpenSettings={() => {}} showSpecial onNewChat={() => setEmpty(true)}
-          onOpenAgentsSettings={() => {}} onOpenWorkspace={() => {}}
+          onOpenWorkspace={() => {}}
         />
       </div>
       <div className="t2-preview-main t2-chat-view">

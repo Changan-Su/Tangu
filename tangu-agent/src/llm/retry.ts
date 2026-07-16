@@ -14,5 +14,5 @@ export function isRetryableLlmError(err: unknown): boolean {
   return true;
 }
 
-export const MODEL_MAX_RETRIES = 2; // 首次 + 至多 2 次重试 = 3 次尝试
-export const MODEL_RETRY_BASE_MS = 400; // 线性退避 400 / 800ms
+export const MODEL_MAX_RETRIES = 3; // 首次 + 至多 3 次重试 = 4 次尝试
+export const MODEL_RETRY_BASE_MS = 1500; // 线性退避 1.5/3/4.5s:扛 Wi-Fi 切换级别的网络抖动(旧 400ms 兜不住真实断网)

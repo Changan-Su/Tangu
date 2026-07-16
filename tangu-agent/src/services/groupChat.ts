@@ -27,6 +27,7 @@ import { getAgent, resolveMemorySlug, type NormalAgentDef } from '../agents/agen
 import { enterRunContext } from '../seams/runContext.js';
 import { runCostCeiling, isOverRunCost } from './runBudget.js';
 import { capToolResult } from './contextBudget.js';
+import { compactSession, getLatestSummary } from './compaction.js';
 
 const MAX_GROUP_ROUNDS = 30;
 const DEFAULT_ROUNDS = 7; // 中等
@@ -37,7 +38,7 @@ const SPEECH_CAP = 16_000;
 
 export const HOST_SLUG = '__host__';
 const USER_SLUG = '__user__';
-/** 播种的「此前对话」上下文条目(groupSeedHistory):不属于任何发言人,formatDelta 原样呈现。 */
+/** 播种的「此前对话」上下文条目(默认播种,groupSeedHistory:false 显式关):不属于任何发言人,formatDelta 原样呈现。 */
 export const CONTEXT_SLUG = '__context__';
 
 export interface GroupChatParams {
@@ -91,10 +92,13 @@ export async function runGroupChat(p: GroupChatParams): Promise<void> {
       if (idx > 0) participants.unshift(participants.splice(idx, 1)[0]);
     }
 
-    // ①.5 播种既有会话历史(groupSeedHistory):把本会话已有消息(分支复制来的/先前的)作为一条
-    // 上下文条目进 transcript → 每个参与者首轮 delta 自然看到。必须在 ② 落库开场白**之前**读,
-    // 否则开场白会在上下文块里重复出现。历史为空 → 无条目,与不开旗标行为一致。
-    const seedEntry = p.agentConfig.groupSeedHistory ? await buildHistorySeed(sessionId).catch(() => null) : null;
+    // ①.5 播种既有会话历史(**默认开**,groupSeedHistory:false 显式关):聊到一半开群聊/群聊里发后续
+    // 消息,参与者要看得到此前对话。先经 compactSession 压缩再注入(用户口径「先 Compact 再注入」),
+    // 摘要作为一条上下文条目进 transcript → 每个参与者首轮 delta 自然看到。必须在 ② 落库开场白
+    // **之前**读,否则开场白会在上下文块里重复出现。历史为空 → 无条目,与旧行为一致。
+    const seedEntry = p.agentConfig.groupSeedHistory !== false
+      ? await buildHistorySeed(sessionId, modelId, p.appId).catch(() => null)
+      : null;
 
     // ② 用户消息落库(group 分支早于 runLoop 的 insertUserMessage 点,故此处补上)
     if (p.userMessageId && p.message) {
@@ -261,7 +265,7 @@ async function runGroupTurn(ctx: ChatMessage[], agent: NormalAgentDef, p: GroupC
     const payload = await llm.buildProviderPayload({
       model, apiModelId, messages: ctx, projectSource: appId,
       temperature: 0.7, tools: lastIter ? undefined : toolDefs, toolChoice: lastIter ? undefined : 'auto',
-      attachments: [], thinkingLevel: agent.thinkingLevel || 'off', stream: true,
+      attachments: [], thinkingLevel: agent.thinkingLevel || 'medium', stream: true, // 参与者发言默认思考·中(与会话默认一致);投票/主持收尾仍 off
       cacheKey: `${sessionId}:grp:${agent.slug}`,
     });
     const res = await llm.streamProviderCompletion({
@@ -443,13 +447,24 @@ export function formatDelta(delta: TranscriptEntry[], selfName: string): string 
 }
 
 /**
- * 把本会话已有消息(user/assistant 文本)拼成一条 CONTEXT transcript 条目(单条 cap 2000、总量尾部 8000,
- * 对齐 localHistorian.recentTranscript 的量级)。无有效历史 → null。
+ * 把本会话已有历史拼成一条 CONTEXT transcript 条目。先压缩再注入:复用 /compact 通道
+ * (compactSession:增量、检查点落 session_summaries、绝不抛)→ 摘要即种子;压缩不可用
+ * (历史太短 <2 条 / 模型失败 / 云端 worker 无本地库)→ 退回原始尾窗(单条 cap 2000、
+ * 总量尾部 8000,对齐 localHistorian.recentTranscript 量级),已有检查点则摘要拼在尾窗前。
+ * 无有效历史 → null。
  */
-async function buildHistorySeed(sessionId: string): Promise<TranscriptEntry | null> {
+export async function buildHistorySeed(sessionId: string, modelId: string, appId: string): Promise<TranscriptEntry | null> {
   const state = deps().state;
   const n = await state.countSessionMessages(sessionId);
   if (!n) return null;
+  const wrap = (body: string): TranscriptEntry => ({
+    round: 0,
+    slug: CONTEXT_SLUG,
+    name: 'Context',
+    text: `[Context — the conversation so far in this session]\n\n${body}\n\n[End of context]`,
+  });
+  const c = await compactSession(sessionId, modelId, appId).catch(() => null);
+  if (c?.ok && c.summary) return wrap(c.summary);
   const take = Math.min(n, 30);
   const rows = await state.listSessionMessagesWindow(sessionId, take, n - take);
   const lines: string[] = [];
@@ -460,15 +475,13 @@ async function buildHistorySeed(sessionId: string): Promise<TranscriptEntry | nu
     if (!content) continue;
     lines.push(`${role === 'user' ? '[User]' : '[Assistant]'} ${content.slice(0, 2000)}`);
   }
-  if (!lines.length) return null;
+  // 兜底也别丢已压缩掉的早期上下文:有历史检查点(如用户手动 /compact 过)就把摘要拼在尾窗前。
+  const prev = await getLatestSummary(sessionId).catch(() => null);
+  if (!lines.length && !prev?.summary) return null;
   let block = lines.join('\n\n');
   if (block.length > 8000) block = block.slice(-8000);
-  return {
-    round: 0,
-    slug: CONTEXT_SLUG,
-    name: 'Context',
-    text: `[Context — the conversation so far in this session]\n\n${block}\n\n[End of context]`,
-  };
+  const body = prev?.summary ? `[Summary of earlier conversation]\n${prev.summary}${block ? '\n\n' + block : ''}` : block;
+  return wrap(body);
 }
 
 const VOTE_PROMPT =

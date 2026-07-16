@@ -128,6 +128,12 @@ export interface ModelsBrain {
    */
   listDirectProviders?(): Array<{ providerId: string; baseUrl?: string; modelIds?: string[]; imageModelIds?: string[]; ttsModelIds?: string[] }>;
   /**
+   * modelId 是否命中本地直连 provider(`<providerId>/<模型>` 或 modelIds 精确匹配)。
+   * 可选:仅 standalone 的 multiBrain 实现。agentLoop 据此在云端不可达(未登录 Forsion)时
+   * 对 BYOK/订阅模型降级放行(用户探针/计费本就 no-op),云端部署无此方法 → 行为不变。
+   */
+  hasDirectModel?(modelId: string): boolean;
+  /**
    * 按应用过滤的模型列表(遵守 Forsion admin「应用模型配置」project_model_configs)。
    * 可选:旧版云端/brain 未实现 → 调用方回退 listGlobalModels。
    * 语义:project 无配置行 → 等价全局列表(优雅降级);有配置行 → 严格遵守。

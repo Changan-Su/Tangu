@@ -344,6 +344,18 @@ export const DEFAULT_AGENTS: Array<Pick<NormalAgentDef, 'slug' | 'name' | 'descr
   },
 ];
 
+/** 内置预设的完整 def(纯内存,不落盘):云端虚拟条目(cloudAgentStore 列表合成)与 run 侧
+ *  水合兜底(agentActivation)共用。非预设 slug → null。 */
+export function builtinAgentDef(slug: string): NormalAgentDef | null {
+  const a = DEFAULT_AGENTS.find((x) => x.slug === slug);
+  if (!a) return null;
+  return buildAgentDef(a.slug, null, {
+    slug: a.slug, name: a.name, description: a.description, model: a.model, tools: a.tools,
+    thinkingLevel: a.thinkingLevel, maxIterations: a.maxIterations, approvalMode: a.approvalMode,
+    systemPrompt: a.systemPrompt, soul: a.soul, createdBy: a.createdBy || 'user',
+  });
+}
+
 /** 写一个默认 agent 的骨架(目录 + Library/ + 缺失的 config.toml / SOUL.md);幂等,不覆盖已有文件。
  *  不建 MEMORY.md / LOG/(由记忆层按需建——提前建空 MEMORY.md 会让 migrateGlobalMemoryToXyra 误判已迁移)。 */
 async function writeAgentScaffold(a: (typeof DEFAULT_AGENTS)[number]): Promise<void> {
@@ -653,12 +665,11 @@ export interface SaveAgentInput {
   toolsList?: string[] | null;
 }
 
-/** 新建/更新一个 agent(落盘 <slug>/config.toml + SOUL.md)。保留已有 createdAt/createdBy/libraryOrder,绝不动 MEMORY/LOG/Library。 */
-export async function saveAgent(input: SaveAgentInput): Promise<NormalAgentDef> {
-  const slug = input.slug && isValidSlug(input.slug) ? input.slug : slugify(input.name);
+/** existing + input → 完整 def 的合并语义(校验/裁剪/缺省保留已有字段)。纯函数:本地 saveAgent 与
+ *  云端 cloudAgentStore 共用同一份,防两处合并规则漂移。 */
+export function buildAgentDef(slug: string, existing: NormalAgentDef | null, input: SaveAgentInput): NormalAgentDef {
   if (!isValidSlug(slug)) throw new Error('invalid slug');
   if (!input.name?.trim()) throw new Error('name required');
-  const existing = await getAgent(slug);
   // systemPrompt 仅**新建**必填;更新已有 agent(含上传头像 saveAgentAvatar 走的就是这条)允许空/省略 → 保留原值。
   // 否则 systemPrompt 恰为空(或配置损坏读成空)的 agent 会被彻底锁死,连头像都改不了。
   if (!existing && !input.systemPrompt?.trim()) throw new Error('systemPrompt required');
@@ -693,6 +704,14 @@ export async function saveAgent(input: SaveAgentInput): Promise<NormalAgentDef> 
         : undefined)
       : existing?.toolsList,
   };
+  return def;
+}
+
+/** 新建/更新一个 agent(落盘 <slug>/config.toml + SOUL.md)。保留已有 createdAt/createdBy/libraryOrder,绝不动 MEMORY/LOG/Library。 */
+export async function saveAgent(input: SaveAgentInput): Promise<NormalAgentDef> {
+  const slug = input.slug && isValidSlug(input.slug) ? input.slug : slugify(input.name);
+  const existing = await getAgent(slug);
+  const def = buildAgentDef(slug, existing, input);
   const adir = path.join(agentsDir(), slug);
   mkdirSync(adir, { recursive: true });
   await fs.writeFile(path.join(adir, 'config.toml'), serializeAgentConfig(def), 'utf-8');
@@ -718,14 +737,14 @@ export async function deleteAgent(slug: string): Promise<boolean> {
   }
 }
 
-// ── 头像(存进该 agent 的 Library/,config.avatar 引用;≤1MB)──
-const AVATAR_MIME_EXT: Record<string, string> = {
+// ── 头像(存进该 agent 的 Library/,config.avatar 引用;≤1MB)。常量导出供云端 cloudAgentStore 共用。──
+export const AVATAR_MIME_EXT: Record<string, string> = {
   'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp',
 };
-const AVATAR_EXT_MIME: Record<string, string> = {
+export const AVATAR_EXT_MIME: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
 };
-const AVATAR_MAX_BYTES = 1_048_576; // 1MB
+export const AVATAR_MAX_BYTES = 1_048_576; // 1MB
 
 /** 写头像进 <slug>/Library/avatar.<ext> 并更新 config.avatar;校验类型/大小;返回文件名。base64 容许带 data: 前缀。 */
 export async function saveAgentAvatar(slug: string, base64: string, mimeType: string): Promise<string> {

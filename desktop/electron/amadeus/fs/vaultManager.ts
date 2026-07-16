@@ -5,6 +5,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { dialog } from 'electron'
 import type { CompilerIO } from '@amadeus-shared/compiler'
+import { isDrawingPath } from '@amadeus-shared/excalidraw/format'
 import { attachmentPaths } from './attachmentPaths'
 
 export class VaultManager {
@@ -86,14 +87,17 @@ export class VaultManager {
     return out.sort()
   }
 
-  /** All page (.md) files, vault-relative. */
+  /** All page (.md) files, vault-relative.
+   *  `*.excalidraw.md`(Excalidraw 画板)磁盘上虽是 .md,却绝不是笔记:放进来就会被笔记树收录、被
+   *  compiler 当页面解析,一存就把插件的载荷改写成 `<!-- a id -->` 块 + amadeus_* frontmatter
+   *  —— 对 Obsidian 侧即毁档。页面侧的消费方(树/索引/搜索/反链/tags)全从这一个口取,挡这里就够。 */
   async listPages(): Promise<string[]> {
-    return this.collectFiles((n) => n.endsWith('.md'))
+    return this.collectFiles((n) => n.endsWith('.md') && !isDrawingPath(n))
   }
 
-  /** All non-page files (attachments/.db/…), vault-relative — for the vault tree. */
+  /** All non-page files (attachments/.db/画板/…), vault-relative — for the vault tree. */
   async listFiles(): Promise<string[]> {
-    return this.collectFiles((n) => !n.endsWith('.md'))
+    return this.collectFiles((n) => !n.endsWith('.md') || isDrawingPath(n))
   }
 
   /** True if `content` matches what we last wrote to `abs` (i.e. not an external edit). */
@@ -117,6 +121,23 @@ export class VaultManager {
   /** Write a UTF-8 text file at a vault-relative path (clamped + atomic;供 .db 等非页面文件写回)。 */
   async writeTextFile(rel: string, text: string): Promise<void> {
     await this.atomicWrite(this.resolveInVault(rel), text)
+  }
+
+  /** Overwrite a binary file in place at a vault-relative path (clamped + atomic;供 PDF 批注写回等)。
+   *  与 writeAsset 不同:不重命名、不落 .amadeus/,原地覆盖既有文件;emit mutate 让同步/watcher 重传。 */
+  async writeVaultBytes(rel: string, bytes: Uint8Array): Promise<void> {
+    const abs = this.resolveInVault(rel) // 越界即抛
+    await fs.mkdir(path.dirname(abs), { recursive: true })
+    const tmp = `${abs}.tmp-${process.pid}-${Date.now()}-${this.counter++}`
+    await fs.writeFile(tmp, bytes)
+    await fs.rename(tmp, abs)
+    this.emitMutate(abs, 'write')
+  }
+
+  /** Read a vault file's raw bytes by vault-relative path (clamped;供 PDF 阅读器 getDocument({data}))。 */
+  async readVaultBytes(rel: string): Promise<Uint8Array> {
+    const abs = this.resolveInVault(rel) // 越界即抛
+    return fs.readFile(abs)
   }
 
   /** Write a binary asset under the page's .amadeus/ folder; returns its page-relative path. */

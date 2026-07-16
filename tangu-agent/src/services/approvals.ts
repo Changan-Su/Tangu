@@ -17,6 +17,7 @@ import { isOutsideWorkspace } from '../tools/fsPolicy.js';
 import type { ToolCall } from '../core/types.js';
 import { runHooks } from '../hooks/index.js';
 import { currentAgentSlug } from '../seams/runContext.js';
+import { declaredApproval } from '../tools/toolRegistry.js';
 import type { AppProfile } from '../seams/appProfile.js';
 
 export type ApprovalMode = 'readonly' | 'auto-edit' | 'full-auto';
@@ -55,7 +56,9 @@ export function toolNeedsApproval(name: string, mode: ApprovalMode | undefined):
   // browser_task = 自主 agent 以用户身份操作已登录网站(点按/提交),危险性同档。
   const runsCommands =
     name === 'run_bash' || name === 'kill_process' || name === 'run_background' ||
-    name === 'write_process_input' || name === 'browser_task' || name.startsWith('mcp__');
+    name === 'write_process_input' || name === 'browser_task' || name.startsWith('mcp__') ||
+    // 插件工具经 capabilities.approval:'command' 自声明并入本档(核心不硬编码插件工具名;如 computer-use 的 act_ui)。
+    declaredApproval(name) === 'command';
   if (mode === 'readonly') return writesFiles || runsCommands;
   if (mode === 'auto-edit') return runsCommands;
   return false;

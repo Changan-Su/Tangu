@@ -4,7 +4,7 @@
  * 绝对路径,把引擎里 3 个 Dockview 耦合模块换成移动版单列实现,views/注册表零改。
  */
 import { resolve } from 'path'
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 
 const DESKTOP_SRC = resolve(__dirname, '../desktop/frontend/src')
@@ -14,7 +14,7 @@ const HERE = resolve(__dirname, 'src')
 // 且不碰 desktop 源)。workspaceStore → 单列 store;Shell/WorkspaceHost → 空 stub(移动端用 MobileShell)。
 function engineSwap(): Plugin {
   const MAP: Array<[string, string]> = [
-    ['/engine/workspaceStore.ts', resolve(HERE, 'engine/mobileWorkspaceStore.ts')],
+    ['/engine/workspaceStore.ts', resolve(__dirname, '../lcl/engine/singleColumnStore.ts')],
     ['/engine/Shell.tsx', resolve(HERE, 'engine/emptyHost.tsx')],
     ['/engine/WorkspaceHost.tsx', resolve(HERE, 'engine/emptyHost.tsx')],
   ]
@@ -32,16 +32,30 @@ function engineSwap(): Plugin {
   }
 }
 
-const DEV_PROXY = process.env.TANGU_DEV_PROXY || 'http://localhost:3001'
 const PROXY_PATHS = ['/api', '/auth', '/account', '/shared', '/oauth', '/shop', '/pay', '/legal']
 
-export default defineConfig({
+// 前端环境变量约定:PORT/BACKEND_URL 经 loadEnv 读(config 阶段 process.env 读不到 .env)。
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, __dirname, '')
+  const DEV_PORT = Number(env.PORT) || 5274
+  const DEV_PROXY = env.BACKEND_URL || env.TANGU_DEV_PROXY || 'http://localhost:3001'
+  return {
   plugins: [engineSwap(), react()],
+  // Vite 默认递归扫描 root 下的所有 HTML；Capacitor sync 生成的 android/.../public/index.html
+  // 也会因此被当成 dev 入口，继而扫描旧 bundle/可选 peer dependency。dev 只认正典入口。
+  optimizeDeps: {
+    entries: ['index.html'],
+  },
+  // 静态资产借 desktop 的 public(postinstall copy-excalidraw-assets 生成的自托管 excalidraw 字体 +
+  // pdfjs-annot):CSP 同源、离线 APK 可用;否则 excalidraw 回落 esm.sh CDN 被 font-src 拒。
+  publicDir: resolve(__dirname, '../desktop/frontend/public'),
   resolve: {
     alias: {
       '@lcl': resolve(__dirname, '../lcl'),
       '@amadeus-shared': resolve(__dirname, '../desktop/shared/amadeus'),
       '@amadeus': resolve(DESKTOP_SRC, 'amadeus'),
+      // 云端 vault 桥复用 web 的实现(零外部依赖,纯 @amadeus-shared+相对导入;alias 先例=上面的 desktop 渲染层)。
+      '@webamadeus': resolve(__dirname, '../web/src/amadeus'),
       '@': DESKTOP_SRC,
       '@mobile': HERE,
     },
@@ -49,11 +63,12 @@ export default defineConfig({
     dedupe: ['react', 'react-dom'],
   },
   server: {
-    port: 5274,
+    port: DEV_PORT,
     strictPort: true,
     fs: { allow: [resolve(__dirname, '..')] },
     proxy: Object.fromEntries(PROXY_PATHS.map((p) => [p, { target: DEV_PROXY, changeOrigin: true }])),
   },
   // Capacitor 从 file:// 载入资源 → 相对 base。
   base: './',
+  }
 })

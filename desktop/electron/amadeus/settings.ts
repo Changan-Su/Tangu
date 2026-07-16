@@ -22,6 +22,8 @@ export interface AmadeusConfig {
   localVault?: string
   lastPage?: string
   cloudSync?: AmadeusCloudSyncConfig
+  /** 按条目云同步注册表(每个本地 vault 一条:云名 + 已勾选条目)。 */
+  entrySync?: import('./sync/entryRegistry').EntrySyncVault[]
 }
 
 let cache: AmadeusConfig | null = null

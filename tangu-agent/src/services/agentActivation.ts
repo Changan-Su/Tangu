@@ -6,7 +6,7 @@
  * agentConfig(就地修改,会话值优先),返回记忆/日志作用域 slug。无 agentSlug / 两路都未命中 / 出错 → 默认。
  */
 import { DEFAULT_AGENT_SLUG } from '../core/tanguHome.js';
-import { resolveActiveSlug, resolveMemorySlug, type NormalAgentDef } from '../agents/agentRegistry.js';
+import { builtinAgentDef, resolveActiveSlug, resolveMemorySlug, type NormalAgentDef } from '../agents/agentRegistry.js';
 
 export interface AgentActivation {
   /** 人格 slug(start_discussion 分身、prompt section、Library 取用据此)。 */
@@ -37,6 +37,10 @@ export async function applyAgentActivation(
     // 云端运行水合:worker 的 ~/.tangu/agents 是空的 → 从云端读人格。软失败 → null,回落默认行为。
     if (!def && agentsBrain) {
       def = await agentsBrain.getAgent(userId, String(agentConfig.agentSlug)).catch(() => null);
+      // 内置预设兜底(与 cloudAgentStore 列表的虚拟条目同源):web Picker 选的预设不落库,
+      // 云端 tangu_agent_files 里没有它 → 用内置定义注入人格。仅云端形态(有 agentsBrain)兜底,
+      // 本地删过的 agent 保持今天的降级行为。
+      if (!def) def = builtinAgentDef(String(agentConfig.agentSlug));
     }
     if (def) {
       activeAgentSlug = resolveActiveSlug(agentConfig.agentSlug);

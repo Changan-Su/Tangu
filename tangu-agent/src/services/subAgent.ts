@@ -56,7 +56,7 @@ export async function runSubAgent(p: SubAgentParams): Promise<string> {
     : (p.instructions ? String(p.instructions).trim() : '');
   const sysPrompt = persona ? `${persona}\n\n---\n${SUB_SYSTEM_PROMPT}` : SUB_SYSTEM_PROMPT;
   const effModelId = def?.model || p.modelId;
-  const thinking = (def?.thinkingLevel as any) || 'off';
+  const thinking = (def?.thinkingLevel as any) || 'medium'; // 子代理默认思考·中(与会话默认一致);agent 显式档位优先
   const memSlug = def ? resolveMemorySlug(def) : ''; // 具名子代理:remember/log_event 落它自己(或共用默认)
 
   // 具名 agent 用它自己的工具集:按 def.tools 白名单重载 custom 工具(空=不限→继承父)。

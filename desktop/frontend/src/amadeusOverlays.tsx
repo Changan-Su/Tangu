@@ -7,11 +7,12 @@ import { useUiStore } from '@amadeus/store/uiStore'
 import { ConfirmDialog } from '@amadeus/components/Dialogs'
 import { WikiHoverPreview } from '@amadeus/components/WikiHoverPreview'
 import { AskStringHost } from '@amadeus/components/askString'
+import { CloudSyncDialogHost } from './components/CloudSyncDialog'
 import { fdDirOf } from '@amadeus/lib/fd'
 import { useUiOverlay, type TemplateCtx } from './amadeusOverlayStore'
 import { pageKey } from '@amadeus-shared/links'
 import { fuzzyRank } from '@lcl/engine/fuzzy'
-import { openDb, openNote } from './amadeusNav'
+import { openDb, openDrawing, openNote, openPdf } from './amadeusNav'
 import { insertTemplate, listTemplates } from './amadeusTemplates'
 
 const baseName = (p: string): string => (p.split(/[\\/]/).pop() ?? p).replace(/\.md$/i, '')
@@ -38,6 +39,24 @@ export function AmadeusOverlays() {
     window.addEventListener('amadeus:open-db', onOpenDb)
     return () => window.removeEventListener('amadeus:open-db', onOpenDb)
   }, [])
+  // [[xxx.pdf#page=N]] 点击应用内开可批注 PDF tab(pageStore 发事件解耦,同 open-db 模式)。
+  useEffect(() => {
+    const onOpenPdf = (e: Event): void => {
+      const d = (e as CustomEvent<{ path?: string; page?: number }>).detail
+      if (typeof d?.path === 'string' && d.path) openPdf(d.path, d.page)
+    }
+    window.addEventListener('amadeus:open-pdf', onOpenPdf)
+    return () => window.removeEventListener('amadeus:open-pdf', onOpenPdf)
+  }, [])
+  // [[X.excalidraw]] 点击应用内开白板 tab(pageStore 发事件解耦,同 open-db 模式)。
+  useEffect(() => {
+    const onOpenDrawing = (e: Event): void => {
+      const p = (e as CustomEvent<{ path?: string }>).detail?.path
+      if (typeof p === 'string' && p) openDrawing(p)
+    }
+    window.addEventListener('amadeus:open-drawing', onOpenDrawing)
+    return () => window.removeEventListener('amadeus:open-drawing', onOpenDrawing)
+  }, [])
   return (
     <>
       {overlay === 'switcher' && <QuickSwitcher />}
@@ -45,13 +64,15 @@ export function AmadeusOverlays() {
       <WikiCreateConfirm />
       <WikiHoverPreview />
       <AskStringHost />
+      <CloudSyncDialogHost />
       {toast && <div className="amx-toast">{toast}</div>}
     </>
   )
 }
 
 /** 未解析 [[链接]] 点击后的创建确认(pendingWikiCreate 驱动):裸名落源笔记 .fd,
- *  带路径按链接原路径,无源落 vault 根。.dialog-* 样式挂在 .am-app 下 → display:contents 载体。 */
+ *  带路径按链接原路径,无源落 vault 根。.dialog-* 样式挂在 .am-app 下 → display:contents 载体;
+ *  .tangu-lovable = 取色桥,少了它弹窗吃到 html 上钉死的 Origin 色(理由见 askString Host 注释)。 */
 function WikiCreateConfirm() {
   const pending = usePageStore((s) => s.pendingWikiCreate)
   if (!pending) return null
@@ -61,7 +82,7 @@ function WikiCreateConfirm() {
       ? `${fdDirOf(pending.sourcePath)}/${pending.name}.md`
       : `${pending.name}.md`
   return (
-    <div className="am-app" style={{ display: 'contents' }}>
+    <div className="am-app tangu-lovable" style={{ display: 'contents' }}>
       <ConfirmDialog
         title="创建新笔记"
         message={`“${pending.name}” 尚不存在。要在 ${dest} 创建吗？`}

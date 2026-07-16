@@ -9,6 +9,14 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  resolve: { alias: { '@': resolve(__dirname, 'src') } },
-  server: { port: 5173, strictPort: true },
+  resolve: {
+    // 与根 electron.vite.config.ts renderer 的 alias 保持一致(浏览器冒烟/harness 也要能解析)。
+    alias: {
+      '@lcl': resolve(__dirname, '../../lcl'),
+      '@': resolve(__dirname, 'src'),
+      '@amadeus': resolve(__dirname, 'src/amadeus'),
+      '@amadeus-shared': resolve(__dirname, '../shared/amadeus'),
+    },
+  },
+  server: { port: 5173, strictPort: true, fs: { allow: [resolve(__dirname, '..'), resolve(__dirname, '../../lcl')] } },
 })

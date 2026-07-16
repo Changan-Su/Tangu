@@ -1,7 +1,9 @@
 /** 反馈弹窗:写问题/建议 → 自动附带本次会话日志(设置·高级那份)→ 提交 Forsion 反馈中心。 */
 import React, { useState } from 'react'
-import { X, MessageSquare, Loader2 } from 'lucide-react'
+import { X, MessageSquare, Loader2, MessagesSquare } from 'lucide-react'
+import { useWorkspace } from '@lcl/engine'
 import { useI18n } from '../i18n'
+import { useApp } from '../stores/appStore'
 import { buildSessionLogPayload, sessionLogFilename } from '../services/sessionLog'
 import type { SessionRecord, TanguDesktopConfig } from '../types'
 
@@ -44,6 +46,16 @@ export const FeedbackModal: React.FC<{
     }
   }
 
+  // 「让 Tangu 帮我诊断」:把问题描述预填进当前会话聊天框,交给内嵌 agent 就地排查(很多「bug」其实是配置/用法困惑)。
+  const diagnoseViaChat = (): void => {
+    const description = text.trim()
+    if (!description) return
+    const prompt = `我在使用 Tangu 时遇到一个问题，想请你帮我诊断：\n\n${description}\n\n请结合当前会话的上下文分析可能的原因，并给出排查步骤。`
+    useApp.getState().setPendingDraft(prompt)
+    useWorkspace.getState().openView('chat', { followActive: true, reuseKey: 'primary' }, 'main')
+    onClose()
+  }
+
   return (
     <div className="memv-modal" onClick={onClose}>
       <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
@@ -71,7 +83,12 @@ export const FeedbackModal: React.FC<{
           {msg ? (
             <div style={{ fontSize: 12, marginTop: 8, color: done ? 'var(--accent-ink)' : 'var(--danger)' }}>{msg}</div>
           ) : null}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14 }}>
+            <button className="btn ghost" onClick={diagnoseViaChat} disabled={busy || done || !text.trim()} title={t('feedback.diagnoseViaChatHint')}>
+              <MessagesSquare size={14} style={{ marginRight: 6 }} />
+              {t('feedback.diagnoseViaChat')}
+            </button>
+            <span style={{ flex: 1 }} />
             <button className="btn" onClick={onClose} disabled={busy}>{t('settings.btn.cancel')}</button>
             <button className="btn primary" onClick={() => void submit()} disabled={busy || done || !text.trim()}>
               {busy ? <Loader2 size={14} className="spin" style={{ marginRight: 6 }} /> : null}

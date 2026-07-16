@@ -1,7 +1,7 @@
 /** 具体的 Space 定义 + 注册入口。Space = 取代「App」的功能组合(见 engine/types.SpaceDefinition)。
  *  每个 Space 贡献一个 ribbon 顶部图标(可拖动改序,默认排在折叠钮之下、商店之上),点击切换。
  *  Tangu Space = 现有助手界面(会话/对话/文件/目录/记忆/子聊天)。Amadeus Space 见 Milestone 2。 */
-import { Bot, Inbox, NotebookText, CalendarDays, Code2 } from 'lucide-react'
+import { Bot, Inbox, NotebookText, CalendarDays, Code2, Workflow } from 'lucide-react'
 import { registerSpace, addRibbonIcon, useSpaceStore, setActiveSpace, useWorkspace, deleteNamedLayout, clearLayout, label } from '@lcl/engine'
 import type { SpaceDefinition, PersistedPanel } from '@lcl/engine'
 import { useApp } from './stores/appStore'
@@ -107,6 +107,8 @@ const amadeusSpace: SpaceDefinition = {
   sidebarDefaults: AMADEUS_SIDE_VIEWS,
   // 左栏(笔记/搜索/标签)= 可自由拖宽 + 记住宽度(否则每次钉回黄金分割默认,折叠再开也丢用户调节的宽度)。
   resizableSides: { left: true },
+  // 主区没有硬规则时(启动器/搜索/图谱/日历…)左栏回笔记树,而不是全局默认的会话。
+  autoWorkspaceMode: 'notes',
   // 不定义 newPage:＋ 与「关掉最后一个主区 view」统一落到 launcher 启动器(与 Tangu Space 一致),
   // 启动器按当前 Space 列出可用视图 + 最近使用;「新建笔记」成为启动器里的一项。
   /** 编辑器(主)→ 左栏(笔记 + 搜索/标签 同组 tab)→ 右栏(大纲 + 反链 同组 tab)。
@@ -160,12 +162,35 @@ const codingSpace: SpaceDefinition = {
   sidebarDefaults: CODING_SIDE_VIEWS,
   // 左栏 = 对话(Prompt),当宽 IDE 侧栏用:可自由拖宽 + 记住宽度(默认比常规宽 20%)。
   resizableSides: { left: true },
+  // 对话栏起手比黄金分割宽 20%(IDE 观感);其余 Space 不设 → 与钉宽档同宽。
+  sideDefaultScale: { left: 1.2 },
   build() {
     ws().setSidebarDefaults(CODING_SIDE_VIEWS)
     app().selectNewChatAgent?.('coding') // 新会话默认 Coding agent
     ws().openView('code-studio', {}, 'main')
     ws().openView('chat', { followActive: true, reuseKey: 'primary' }, 'left')
     ws().openView('workspace', {}, 'right')
+  },
+}
+
+/** Automation Space:左=自动化列表(Muse 巡检/Historian/盯任务规则);主=选中项详情/构建器;
+ *  右=触发记录(历次运行)。跨栏通道=stores/automationStore(照 calendarNavStore 先例)。 */
+const AUTOMATION_SIDE_VIEWS: Record<'left' | 'right', PersistedPanel[]> = {
+  left: [{ type: 'automation-list', params: {} }],
+  right: [{ type: 'automation-runs', params: {} }],
+}
+
+const automationSpace: SpaceDefinition = {
+  id: 'automation',
+  name: () => app().tr('space.automation'),
+  icon: Workflow,
+  sidebarDefaults: AUTOMATION_SIDE_VIEWS,
+  resizableSides: { left: true, right: true },
+  build() {
+    ws().setSidebarDefaults(AUTOMATION_SIDE_VIEWS)
+    ws().openView('automation-detail', {}, 'main')
+    ws().openView('automation-list', {}, 'left')
+    ws().openView('automation-runs', {}, 'right')
   },
 }
 
@@ -184,6 +209,8 @@ const SPACES: SpaceDefinition[] = [
   ...(PRODUCT.spaces.includes('calendar') && window.amadeus && AMADEUS_ENABLED ? [calendarSpace] : []),
   // Coding 依赖 host 文件桥 + 本地静态预览服务器(仅桌面 electron;Tangu Web 无 codePreviewServe → 不注册)。
   ...(PRODUCT.spaces.includes('coding') && window.tangu?.codePreviewServe ? [codingSpace] : []),
+  // Automation 依赖本地 tangu 后端(triggers/automation 端点都是本地特性;Tangu Web 无 backendStatus → 不注册)。
+  ...(PRODUCT.spaces.includes('automation') && window.tangu?.backendStatus ? [automationSpace] : []),
 ]
 
 export function registerSpaces(): void {

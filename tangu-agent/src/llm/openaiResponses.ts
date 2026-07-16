@@ -65,6 +65,11 @@ export function openaiToResponsesBody(payload: any): any {
     stream: true,
     store: false,
   };
+  // 官方 OpenAI 直连按思考档改道到此(tuneOpenAiDirectPayload 随 payload 带 effort);
+  // summary:'auto' 让思考过程以 reasoning delta 流回(否则 UI 只见沉默)。Codex 订阅路径不带此字段,不受影响。
+  if (payload.reasoning_effort) body.reasoning = { effort: payload.reasoning_effort, summary: 'auto' };
+  const cap = payload.max_completion_tokens ?? payload.max_tokens;
+  if (cap) body.max_output_tokens = cap;
   const instructions = sysTexts.join('\n\n');
   if (instructions) body.instructions = instructions;
   if (Array.isArray(payload.tools) && payload.tools.length) {
@@ -95,11 +100,16 @@ async function runOpenAiResponsesStream(opts: StreamOpts, guard: StreamIdleGuard
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${apiKey}`,
-    'OpenAI-Beta': BETA_HEADER,
-    originator: ORIGINATOR,
-    session_id: randomUUID(),
   };
-  if (accountId) headers['chatgpt-account-id'] = String(accountId);
+  // Codex 逆向头只在订阅路径(accountId 存在)发:官方 api.openai.com 带 OpenAI-Beta:
+  // responses=experimental 会**静默压掉 reasoning summary**(A/B 实测同 body 0 vs 160 条 delta),
+  // 表现为「开了思考却看不到思考过程」。官方 BYOK 走纯 Bearer。
+  if (accountId) {
+    headers['OpenAI-Beta'] = BETA_HEADER;
+    headers.originator = ORIGINATOR;
+    headers.session_id = randomUUID();
+    headers['chatgpt-account-id'] = String(accountId);
+  }
 
   const response = await fetch(`${baseUrl}/responses`, {
     method: 'POST',

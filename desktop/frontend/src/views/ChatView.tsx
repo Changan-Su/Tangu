@@ -42,6 +42,7 @@ export function ChatView({ leaf, params }: ViewProps) {
     execConfig: (activeId && state.configBySession[activeId]) || EMPTY_CONFIG,
     activeUsage: (activeId && state.usageBySession[activeId]) || EMPTY_USAGE,
     isGroupVoting: !!(activeId && state.groupVoting[activeId]),
+    llmRetry: (activeId && state.llmRetryBySession[activeId]) || null,
     cfg: state.cfg,
     authInfo: state.authInfo,
     desktopConfig: state.desktopConfig,
@@ -49,6 +50,8 @@ export function ChatView({ leaf, params }: ViewProps) {
     newChatWs: state.newChatWs,
     newChatCfg: state.newChatCfg,
     newChatModel: state.newChatModel,
+    pendingDraft: state.pendingDraft,
+    setPendingDraft: state.setPendingDraft,
     engines: state.engines,
     engineCaps: state.engineCaps,
     agentDefs: state.agentDefs,
@@ -126,6 +129,8 @@ export function ChatView({ leaf, params }: ViewProps) {
   const availableEngines = s.engines.filter((e) => e.available)
   const curEngineId = activeId ? execConfig.engineId : s.newChatCfg.engineId
   const streamingId = useMemo(() => activeMessages.find((m) => m.status === 'streaming')?.id ?? null, [activeMessages])
+  // composer ↑↓ 历史召回:本会话已发送的用户消息(旧→新)。
+  const sentHistory = useMemo(() => activeMessages.filter((m) => m.role === 'user').map((m) => m.content), [activeMessages])
 
   const chatAgentSlug = mvCfg.agentSlug || s.defaultAgentSlug
   const chatAgentAvatar = chatAgentSlug ? s.agentAvatars[chatAgentSlug] : undefined
@@ -326,6 +331,12 @@ export function ChatView({ leaf, params }: ViewProps) {
               })
             )}
             {running && activeId && s.isGroupVoting && <div className="t2-sys"><span className="t2-dot" /> {t('group.voting.inProgress')}</div>}
+            {running && activeId && s.llmRetry && (
+              <div className="t2-sys t2-retry" title={s.llmRetry.error}>
+                ⟳ {t('chat.llmRetrying', { s: (s.llmRetry.waitMs / 1000).toFixed(1), n: s.llmRetry.attempt, max: s.llmRetry.max || '?' })}
+                {s.llmRetry.error ? <span className="t2-retry-err">{s.llmRetry.error}</span> : null}
+              </div>
+            )}
             </div>
           </div>
           {showJump && <button className="jump-bottom t2-jump" title={t('chat.jumpToBottom')} onClick={() => scrollToBottom(true)}><ArrowDown size={16} /></button>}
@@ -346,9 +357,10 @@ export function ChatView({ leaf, params }: ViewProps) {
         </div>
       </ErrorBoundary>
 
-      {!hasMessages && mvCfg.execMode === 'host' && !mvCfg.groupChat && (
+      {/* Agent 选择不 gate execMode:云会话(sandbox,web/桌面云端)同样有 agent;引擎=本地 ACP 子进程,仍 host-only。 */}
+      {!hasMessages && !mvCfg.groupChat && (
         <div className="newchat-pickers">
-          {availableEngines.length > 0 && (
+          {mvCfg.execMode === 'host' && availableEngines.length > 0 && (
             <EnginePicker
               engines={availableEngines}
               selectedId={mvCfg.engineId || ''}
@@ -428,6 +440,9 @@ export function ChatView({ leaf, params }: ViewProps) {
           ctxTokens={activeUsage.ctx}
           sessionTokens={activeUsage.base + activeUsage.live}
           onCompact={() => void s.compact(activeId)}
+          seedText={s.pendingDraft}
+          onSeedConsumed={() => s.setPendingDraft(null)}
+          sentHistory={sentHistory}
         />
       </div>
     </div>

@@ -25,6 +25,24 @@ export function VaultSideSwitch(): React.ReactElement | null {
     return api.onStatus(setSync)
   }, [initSide])
 
+  // 移动端(无同步引擎;本地/云端 = 两个独立 bridge,reload 制切换):window.amadeusVaultMode 解闸。
+  // 登录已由 mobileShim 前置(未登录不挂载),无需 needLogin 分支。
+  const mobileMode = (window as unknown as {
+    amadeusVaultMode?: { side: 'local' | 'cloud'; switch(next: 'local' | 'cloud'): void }
+  }).amadeusVaultMode
+  if (!window.amadeusSync && mobileMode) {
+    return (
+      <div className="t2s-vaultseg" role="tablist" aria-label="vault side">
+        <div className="t2s-vaultseg-thumb" data-side={mobileMode.side} />
+        <button role="tab" aria-selected={mobileMode.side === 'local'} className={mobileMode.side === 'local' ? 'on' : ''} onClick={() => mobileMode.switch('local')}>
+          {t('notes.cloud.local')}
+        </button>
+        <button role="tab" aria-selected={mobileMode.side === 'cloud'} className={mobileMode.side === 'cloud' ? 'on' : ''} onClick={() => mobileMode.switch('cloud')}>
+          {t('notes.cloud.cloud')}
+        </button>
+      </div>
+    )
+  }
   if (!window.amadeusSync) return null
 
   const pick = (next: 'local' | 'cloud'): void => {

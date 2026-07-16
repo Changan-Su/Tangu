@@ -24,7 +24,7 @@ export function parseTuiConfig(argv: string[]): TuiConfig {
     cwd: process.cwd(),
     execMode: 'host', // TUI 默认本地直连（codex/hermes 形）；--sandbox-exec 切回云沙箱
     approvalMode: 'auto-edit',
-    thinkingLevel: 'off',
+    thinkingLevel: 'medium', // 默认思考·中(与 agentLoop 会话默认一致);--thinking off 可关
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];

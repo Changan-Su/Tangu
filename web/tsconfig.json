@@ -15,7 +15,10 @@
       "@/*": ["../desktop/frontend/src/*"],
       "@amadeus/*": ["../desktop/frontend/src/amadeus/*"],
       "@amadeus-shared/*": ["../desktop/shared/amadeus/*"],
-      "@web/*": ["./src/*"]
+      "@lcl/*": ["../lcl/*"],
+      "@web/*": ["./src/*"],
+      "react": ["./node_modules/@types/react"],
+      "react-dom": ["./node_modules/@types/react-dom"]
     },
     "noEmit": true
   },

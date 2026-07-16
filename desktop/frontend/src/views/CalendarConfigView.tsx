@@ -1,16 +1,23 @@
 /** Calendar 右栏 = mini 月历(上) + 日历配置(下),竖向分屏。
  *  mini:主题色标今天;当主区 focus 的是 Calendar View 时,额外用淡色条标出其当前可见日期区间
  *  (实时跟随滚动),点某日则请求主区丝滑跳转。非 Calendar 主视图时这些效果关闭。
- *  配置:列出全部含「日历日期」列的多维表,每库可设颜色/显隐/默认库(按 vault 存 localStorage)。 */
+ *  配置:列出日历成员库(显式成员制,calendarMembers),每库可设颜色/显隐,并经 ⋯ 菜单
+ *  重命名/设默认/新标签打开/改列映射/移出日历;底部「+ 添加 Forsion database」搜库入历。 */
 import { useEffect, useMemo, useState } from 'react'
 import { useWorkspace, activeMainPanel } from '@lcl/engine'
-import { Button } from '@astryxdesign/core/Button'
+import { Plus, Search, Database } from 'lucide-react'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { AstryxScope } from '../theme/astryxBridge'
+import { askString } from '@amadeus/components/askString'
 import { usePageStore } from '../amadeus/store/pageStore'
-import { useAggregatedDatabases } from '../amadeus/store/dbAggregateStore'
-import { useCalendarConfig, colorForDb, isHidden, defaultDbPath } from '../amadeus/store/calendarConfigStore'
+import { useDbStore } from '../amadeus/store/dbStore'
+import { useCalendarMembers } from '../amadeus/store/calendarMembers'
+import { useAllDatabases, isDateCol, type AggDb } from '../amadeus/store/dbAggregateStore'
+import { useAgentCalDbs } from '../stores/agentScheduleStore'
+import { useCalendarConfig, colorForDb, isHidden, defaultDbPath, memberOf } from '../amadeus/store/calendarConfigStore'
 import { useCalendarNav } from '../amadeus/store/calendarNavStore'
+import { openDb } from '../amadeusNav'
+import { MemberColPicker } from './calendar/MemberColPicker'
 import { WEEKDAYS, addDays, diffDays, fmtStamp, monthGridDays, monthLabel, startOfDay, toLocalDate } from './calendar/dateUtils'
 
 export function CalendarConfigView() {
@@ -95,19 +102,40 @@ function MiniCalendar() {
 
 function ConfigList() {
   const vault = usePageStore((s) => s.vaultRoot) ?? ''
-  const dbs = useAggregatedDatabases('calendarDate')
+  const members = useCalendarMembers()
+  const agentDbs = useAgentCalDbs() // agent 日程只读源:进图例(调色/显隐可用,无 ★/⋯)
   const byVault = useCalendarConfig((s) => s.byVault)
   const setColor = useCalendarConfig((s) => s.setColor)
   const toggleHidden = useCalendarConfig((s) => s.toggleHidden)
   const setDefault = useCalendarConfig((s) => s.setDefault)
+  const addMember = useCalendarConfig((s) => s.addMember)
+  const removeMember = useCalendarConfig((s) => s.removeMember)
 
+  const [showAdd, setShowAdd] = useState(false)
+  const [menu, setMenu] = useState<{ db: AggDb; x: number; y: number } | null>(null)
+  const [editing, setEditing] = useState<AggDb | null>(null) // 「Calendar 设置」改列映射
+
+  const memberPaths = useMemo(() => new Set(members.map((m) => m.db.path)), [members])
+  const dbs: Array<{ db: AggDb; readonly?: boolean }> = [
+    ...members.map((m) => ({ db: m.db })),
+    ...agentDbs.map((db) => ({ db, readonly: true })),
+  ]
   const def = defaultDbPath(vault, byVault)
+
+  const rename = (db: AggDb): void => {
+    setMenu(null)
+    void askString('重命名日历', db.name).then((n) => {
+      const name = n?.trim()
+      if (name && name !== db.name) useDbStore.getState().mutate(db.path, (d) => ({ ...d, name }))
+    })
+  }
+
   return (
     <div className="amx-calcfg">
       <div className="amx-calcfg-head">日历</div>
-      {dbs.length === 0 && <div className="amx-calcfg-empty">没有含「日历日期」列的多维表。</div>}
+      {dbs.length === 0 && <div className="amx-calcfg-empty">还没有加入日历的多维表。</div>}
       <div className="amx-calcfg-list">
-        {dbs.map((db, di) => {
+        {dbs.map(({ db, readonly }, di) => {
           const color = colorForDb(vault, byVault, db.path, di)
           const visible = !isHidden(vault, byVault, db.path)
           const isDefault = def ? def === db.path : di === 0 // 未显式设默认时,首个隐式为默认
@@ -116,16 +144,7 @@ function ConfigList() {
               <span className="amx-calcfg-swatch" style={{ background: visible ? color : 'transparent', borderColor: color }}>
                 <input type="color" value={color} onChange={(e) => setColor(vault, db.path, e.target.value)} title="事件颜色" />
               </span>
-              <span className={`amx-calcfg-name${visible ? '' : ' off'}`} title={db.name}>{db.name}</span>
-              <Button
-                size="sm"
-                variant={isDefault ? 'primary' : 'ghost'}
-                isIconOnly
-                icon={<span>★</span>}
-                label="设为新建事件的默认多维表"
-                tooltip="设为新建事件的默认多维表"
-                onClick={() => setDefault(vault, db.path)}
-              />
+              <span className={`amx-calcfg-name${visible ? '' : ' off'}`} title={db.name}>{readonly ? `⚙ ${db.name}` : db.name}{!readonly && isDefault && ' ★'}</span>
               <CheckboxInput
                 label="在日历中显示"
                 isLabelHidden
@@ -133,11 +152,103 @@ function ConfigList() {
                 value={visible}
                 onChange={() => toggleHidden(vault, db.path)}
               />
+              {!readonly && (
+                <button
+                  className="amx-calcfg-more"
+                  title="更多"
+                  onClick={(e) => {
+                    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                    setMenu({ db, x: Math.min(r.left, window.innerWidth - 180), y: r.bottom + 4 })
+                  }}
+                >
+                  ⋯
+                </button>
+              )}
             </div>
           )
         })}
       </div>
-      {dbs.length > 0 && <div className="amx-calcfg-hint">★=新建默认库 · 勾选=是否显示 · 点色块改颜色</div>}
+      <button className="amx-calcfg-add" onClick={() => setShowAdd(true)}>
+        <Plus size={14} /> 添加 Forsion database
+      </button>
+      {dbs.length > 0 && <div className="amx-calcfg-hint">★=新建默认库 · 勾选=是否显示 · 点色块改颜色 · ⋯ 更多</div>}
+
+      {menu && (
+        <div className="amx-db-popwrap" onMouseDown={() => setMenu(null)}>
+          <div className="amx-db-pop amx-calcfg-menu" style={{ left: menu.x, top: menu.y }} onMouseDown={(e) => e.stopPropagation()}>
+            <button className="amx-db-opt" onClick={() => rename(menu.db)}>重命名</button>
+            <button className="amx-db-opt" onClick={() => { setDefault(vault, menu.db.path); setMenu(null) }}>设为默认库</button>
+            <button className="amx-db-opt" onClick={() => { openDb(menu.db.path); setMenu(null) }}>在新标签打开</button>
+            <button className="amx-db-opt" onClick={() => { setEditing(menu.db); setMenu(null) }}>Calendar 设置(改列映射)</button>
+            <button className="amx-db-opt amx-db-opt-danger" onClick={() => { removeMember(vault, menu.db.path); setMenu(null) }}>从日历移除</button>
+          </div>
+        </div>
+      )}
+
+      {showAdd && (
+        <AddDbPopup
+          memberPaths={memberPaths}
+          onClose={() => setShowAdd(false)}
+          onAdd={(db, dateCol, checkboxCol) => { addMember(vault, db.path, dateCol, checkboxCol); setShowAdd(false) }}
+        />
+      )}
+      {editing && (
+        <div className="amx-db-popwrap" onMouseDown={() => setEditing(null)}>
+          <div className="amx-db-pop amx-calpick-pop" onMouseDown={(e) => e.stopPropagation()}>
+            <MemberColPicker
+              dbName={editing.name}
+              columns={editing.columns}
+              initial={memberOf(vault, byVault, editing.path)}
+              onCancel={() => setEditing(null)}
+              onConfirm={(dateCol, checkboxCol) => { addMember(vault, editing.path, dateCol, checkboxCol); setEditing(null) }}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 搜索全库「含日期属性 + 尚未加入」的数据库(对齐 Notion「有日期属性才出现」),选中后配列映射。 */
+function AddDbPopup({ memberPaths, onClose, onAdd }: {
+  memberPaths: Set<string>
+  onClose: () => void
+  onAdd: (db: AggDb, dateCol: string, checkboxCol?: string) => void
+}) {
+  const all = useAllDatabases()
+  const [q, setQ] = useState('')
+  const [picking, setPicking] = useState<AggDb | null>(null)
+  const candidates = useMemo(
+    () => all.filter((db) => !memberPaths.has(db.path) && db.columns.some(isDateCol)),
+    [all, memberPaths],
+  )
+  const shown = q ? candidates.filter((db) => db.name.toLowerCase().includes(q.toLowerCase())) : candidates
+  // 居中悬浮(复用 quick-find 面板 chrome);选中库后第二步用同款居中小卡配列映射。
+  return (
+    <div className="amx-qf-scrim" onMouseDown={onClose}>
+      {picking ? (
+        <div className="amx-qf-card" onMouseDown={(e) => e.stopPropagation()}>
+          <MemberColPicker dbName={picking.name} columns={picking.columns} onCancel={() => setPicking(null)} onConfirm={(d, c) => onAdd(picking, d, c)} />
+        </div>
+      ) : (
+        <div className="amx-qf" onMouseDown={(e) => e.stopPropagation()}>
+          <div className="amx-qf-head">
+            <Search size={16} className="amx-qf-searchicon" />
+            <input autoFocus className="amx-qf-input" placeholder="搜索要加入日历的数据库…" value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+          <div className="amx-qf-list">
+            {shown.map((db) => (
+              <button key={db.path} className="amx-qf-row" onClick={() => setPicking(db)}>
+                <span className="amx-qf-icon"><Database size={15} /></span>
+                <span className="amx-qf-title">{db.name || db.path}</span>
+                <span className="amx-qf-sub">{db.path.replace(/\\/g, '/').split('/').slice(0, -1).join('/') || '/'}</span>
+              </button>
+            ))}
+            {shown.length === 0 && <div className="amx-qf-empty">没有含日期属性的可添加数据库</div>}
+          </div>
+          <div className="amx-qf-foot">只有含「日期」属性的数据库会出现在这里</div>
+        </div>
+      )}
     </div>
   )
 }

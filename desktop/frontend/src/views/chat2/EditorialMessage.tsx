@@ -5,9 +5,11 @@
  */
 import { useState, type Ref } from 'react'
 import { Copy, RotateCcw, GitBranch, Pencil, ChevronRight, ChevronDown, Volume2, Square, Loader2 } from 'lucide-react'
-import type { UiMessage, TanguDesktopConfig, AgentConfig, StoredDesktopConfig } from '../../types'
+import type { UiMessage, TanguDesktopConfig, AgentConfig, StoredDesktopConfig, ToolEvent } from '../../types'
 import type { PreviewTarget } from '../../components/WorkspaceFilePreview'
+import { AnimatedCollapse } from '../../components/AnimatedUI'
 import { Markdown } from '../../components/Markdown'
+import { WikiText } from '../../components/ChatWikiLink'
 import { VoiceBubble } from '../../components/VoiceBubble'
 import { InlineFiles } from '../../components/InlineFiles'
 import { SystemPromptBlock } from '../../components/SystemPromptBlock'
@@ -21,6 +23,22 @@ import './chat2.css'
 function firstChar(s?: string): string {
   const t = (s || '').trim()
   return t ? Array.from(t)[0].toUpperCase() : '?'
+}
+
+/** 运行错误人话化:undici 的 "fetch failed"/"terminated" 这类短语对用户零信息量,
+ *  按特征映射成可行动的说明,原文保留在括号里供排查。未命中的原样透出。 */
+const ERR_RULES: Array<[RegExp, string]> = [
+  [/fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN/i, 'chat.err.network'],
+  [/terminated|ECONNRESET|socket hang up|premature close/i, 'chat.err.dropped'],
+  [/ETIMEDOUT|timed? ?out/i, 'chat.err.timeout'],
+  [/(^|\D)(401|403)(\D|$)|unauthorized|invalid[ _-]?api[ _-]?key/i, 'chat.err.auth'],
+  [/(^|\D)429(\D|$)|rate[ _-]?limit|insufficient[ _-]?quota/i, 'chat.err.rate'],
+  [/(^|\D)5\d\d(\D|$)|bad gateway|overloaded/i, 'chat.err.server'],
+]
+export function humanizeRunError(raw: string | undefined, t: (k: string, v?: Record<string, unknown>) => string): string {
+  if (!raw) return t('chat.error')
+  const hit = ERR_RULES.find(([re]) => re.test(raw))
+  return hit ? `${t(hit[1])}(${raw})` : raw
 }
 
 /** 内联文件渲染所需上下文(displayFiles 用)。 */
@@ -40,7 +58,7 @@ export function Thinking2({ reasoning }: { reasoning: string }) {
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />} ✦ {t('thinking.process')}{' '}
         <span className="t2-dim">· {t('thinking.charCount', { count: reasoning.length })}</span>
       </button>
-      {open && <div className="t2-think-body">{reasoning}</div>}
+      <AnimatedCollapse open={open}><div className="t2-think-body">{reasoning}</div></AnimatedCollapse>
     </div>
   )
 }
@@ -87,7 +105,7 @@ export function EditorialMessage({ msg, avatarUrl, agentNameFallback, userName, 
                   : <span key={`${a.name}-${i}`} className="msg-attach-file" title={a.name}>📎 {a.name}</span>)}
               </div>
             )}
-            {msg.content}
+            <WikiText text={msg.content} />
           </div>
         </div>
         <div className="t2-avatar t2-user-avatar" style={!userAvatar ? { background: 'color-mix(in srgb, var(--text-muted) 22%, transparent)' } : undefined}>
@@ -104,21 +122,41 @@ export function EditorialMessage({ msg, avatarUrl, agentNameFallback, userName, 
         <div className="t2-name" style={msg.agentColor ? { color: msg.agentColor } : undefined}>{(msg.agentName || agentNameFallback || 'Tangu').toUpperCase()}{msg.status === 'streaming' && <span className="t2-dot" />}</div>
         {msg.systemPrompt && <SystemPromptBlock content={msg.systemPrompt} />}
         {msg.reasoning && <Thinking2 reasoning={msg.reasoning} />}
-        {!!msg.toolEvents?.length && <ToolGroup events={msg.toolEvents} running={msg.status === 'streaming'} />}
+        {(() => {
+          const voiceMode = !!voice?.on && (msg.status === 'done' || msg.status === 'stopped')
+          // 直播穿插:有顺序段(segments)则按发生顺序渲染文字段/工具段(连续工具已在归约期并块);
+          // 无段(历史重载 / 语音整条朗读)→ 回退老序:所有工具一块 + 全文。
+          if (msg.segments?.length && !voiceMode) {
+            return msg.segments.map((seg, i) => {
+              if (seg.t === 'text') {
+                return seg.text
+                  ? <div key={i} className={`t2-content${msg.status === 'streaming' ? ' streaming-caret' : ''}`}><Markdown content={seg.text} anchorPrefix={`toc-${msg.id}`} /></div>
+                  : null
+              }
+              const evs = seg.ids.map((id) => msg.toolEvents?.find((e) => e.id === id)).filter(Boolean) as ToolEvent[]
+              return evs.length ? <ToolGroup key={i} events={evs} running={msg.status === 'streaming'} /> : null
+            })
+          }
+          return (
+            <>
+              {!!msg.toolEvents?.length && <ToolGroup events={msg.toolEvents} running={msg.status === 'streaming'} />}
+              {msg.content && (
+                voiceMode
+                  ? <VoiceBubble text={msg.content} cfg={voice!.cfg} stored={voice!.stored} anchorPrefix={`toc-${msg.id}`} />
+                  : <div className={`t2-content${msg.status === 'streaming' ? ' streaming-caret' : ''}`}><Markdown content={msg.content} anchorPrefix={`toc-${msg.id}`} /></div>
+              )}
+            </>
+          )
+        })()}
         {msg.planProposal && <PlanCard plan={msg.planProposal} />}
         {!!msg.todos?.length && <TodoList todos={msg.todos} />}
-        {msg.content && (
-          voice?.on && (msg.status === 'done' || msg.status === 'stopped')
-            ? <VoiceBubble text={msg.content} cfg={voice.cfg} stored={voice.stored} anchorPrefix={`toc-${msg.id}`} />
-            : <div className={`t2-content${msg.status === 'streaming' ? ' streaming-caret' : ''}`}><Markdown content={msg.content} anchorPrefix={`toc-${msg.id}`} /></div>
-        )}
         {!msg.content && msg.status === 'streaming' && !msg.toolEvents?.length && !msg.reasoning && <div className="t2-dim streaming-caret">{t('chat.thinking')}</div>}
         {!!msg.displayFiles?.length && fileCtx && (
           <InlineFiles files={msg.displayFiles} cfg={fileCtx.cfg} sessionId={fileCtx.sessionId} execMode={fileCtx.execMode} onOpenPreview={fileCtx.onOpenPreview} />
         )}
         {msg.approvals?.map((a) => <ApprovalCard key={a.approvalId} req={a} onDecide={(act, args) => handlers?.onApproval?.(a.approvalId, act, args)} />)}
         {msg.inquiries?.map((q) => <InquiryCard key={q.inquiryId} req={q} onAnswer={(ans) => handlers?.onInquiry?.(q.inquiryId, ans)} />)}
-        {msg.status === 'error' && <div className="t2-tool err"><span className="t2-status-err">✕ {msg.error || t('chat.error')}</span></div>}
+        {msg.status === 'error' && <div className="t2-tool err"><span className="t2-status-err">✕ {humanizeRunError(msg.error, t)}</span></div>}
         {msg.status === 'stopped' && <div className="t2-dim">⏹ {t('chat.aborted')}</div>}
         {(msg.status === 'done' || msg.status === 'stopped') && (
           <div className="t2-actions">

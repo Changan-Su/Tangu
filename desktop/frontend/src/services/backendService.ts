@@ -3,7 +3,7 @@
  * 统一 Bearer + JSON 错误,错误信息抛 Error(detail)。
  */
 import type {
-  AgentConfig, AgentsMeta, HistorianActivityItem, MessageRecord, ModelsResponse, MuseStatusInfo, MuseTodo, MuseTriggerInfo,
+  AgentConfig, AgentScheduleEntry, AgentScheduleEntryUpsert, AgentScheduleInfo, AgentsMeta, AutomationRunInfo, AutomationSessionInfo, HistorianActivityItem, MessageRecord, ModelsResponse, MuseStatusInfo, MuseTodo, MuseTriggerInfo, MuseTriggerUpsert,
   NormalAgentDef, SessionRecord, SkillInfo, SpecialAgentsConfig,
   TanguDesktopConfig, ToolsResponse, WorkspaceFileMeta,
 } from '../types'
@@ -152,7 +152,7 @@ export const listModels = (cfg: TanguDesktopConfig) => request<ModelsResponse>(c
 
 /** host 端外部 agent 引擎清单(含 available 检测 + 每引擎默认模型;云端/非 host → 抛或空 → 调用方回退 [])。 */
 export const listEngines = (cfg: TanguDesktopConfig) =>
-  request<{ engines: Array<{ id: string; name: string; available?: boolean; defaultModel?: string }> }>(cfg, '/agent/engines').then((r) => r.engines || [])
+  request<{ engines: Array<{ id: string; name: string; available?: boolean; status?: 'available' | 'needs-signin' | 'not-installed'; defaultModel?: string }> }>(cfg, '/agent/engines').then((r) => r.engines || [])
 
 /** 设某引擎默认模型(设置页「Agent CLIs」;空串=清除)。 */
 export const setEngineDefaultModel = (cfg: TanguDesktopConfig, engineId: string, defaultModel: string) =>
@@ -396,6 +396,10 @@ export const listPlugins = (cfg: TanguDesktopConfig) =>
 /** 运行期重扫:市场装新插件后即生效(无需重启)。addedIds=新激活的;needsRestart=贡献路由的插件需重启。 */
 export const rescanPlugins = (cfg: TanguDesktopConfig) =>
   request<{ ok: boolean; addedIds: string[]; needsRestart: boolean; plugins: PluginInfo[] }>(cfg, '/agent/plugins/rescan', { method: 'POST' })
+// npm 一条命令装引擎插件(仅 npm: 源)。confirm:true 由本函数代表 UI 已弹确认框;装后后端内联 rescan,返回最新列表。
+export const installPluginFromNpm = (cfg: TanguDesktopConfig, spec: string, preferMirror?: boolean) =>
+  request<{ ok: boolean; id: string; version: string; addedIds: string[]; needsRestart: boolean; plugins: PluginInfo[] }>(
+    cfg, '/agent/plugins/install', { method: 'POST', body: JSON.stringify({ spec, preferMirror, confirm: true }) })
 export const setPluginEnabled = (cfg: TanguDesktopConfig, id: string, enabled: boolean) =>
   request<{ ok: boolean; enabled: boolean }>(cfg, `/agent/plugins/${encodeURIComponent(id)}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled }) })
 /** 卸载数据清理(注销 meta + 清设置/blob);文件夹删除与重启由桌面侧 IPC 负责。 */
@@ -441,6 +445,38 @@ export const getMuseTriggers = (cfg: TanguDesktopConfig) =>
 
 export const deleteMuseTrigger = (cfg: TanguDesktopConfig, id: string) =>
   request<{ ok: boolean }>(cfg, `/agent/special/muse/triggers/${encodeURIComponent(id)}`, { method: 'DELETE' })
+
+// ── 自动化(watch 规则 upsert + agent 自动化会话/运行历史;「自动化」Space 数据面)──
+export const saveMuseTrigger = (cfg: TanguDesktopConfig, input: MuseTriggerUpsert) =>
+  request<{ trigger: MuseTriggerInfo; created: boolean }>(cfg, '/agent/special/muse/triggers', {
+    method: 'POST', body: JSON.stringify(input),
+  }).then((r) => r.trigger)
+
+export const getAutomationSessions = (cfg: TanguDesktopConfig, triggerId?: string) =>
+  request<{ sessions: AutomationSessionInfo[] }>(
+    cfg, `/agent/special/automation/sessions${triggerId ? `?triggerId=${encodeURIComponent(triggerId)}` : ''}`,
+  ).then((r) => r.sessions)
+
+export const getAutomationRuns = (cfg: TanguDesktopConfig, sessionId: string, limit = 50) =>
+  request<{ runs: AutomationRunInfo[] }>(
+    cfg, `/agent/special/automation/runs?sessionId=${encodeURIComponent(sessionId)}&limit=${limit}`,
+  ).then((r) => r.runs)
+
+// ── Agent 日程(agents/<slug>/SCHEDULE.db;Calendar 只读源 + 自动化 Space「Agent 日程」组)──
+export const getAgentSchedules = (cfg: TanguDesktopConfig) =>
+  request<{ schedules: AgentScheduleInfo[] }>(cfg, '/agent/special/schedule').then((r) => r.schedules)
+
+export const saveAgentScheduleEntry = (cfg: TanguDesktopConfig, slug: string, input: AgentScheduleEntryUpsert) =>
+  request<{ entry: AgentScheduleEntry; created: boolean }>(
+    cfg, `/agent/special/schedule/${encodeURIComponent(slug)}/entries`,
+    { method: 'POST', body: JSON.stringify(input) },
+  ).then((r) => r.entry)
+
+export const deleteAgentScheduleEntry = (cfg: TanguDesktopConfig, slug: string, id: string) =>
+  request<{ ok: boolean }>(
+    cfg, `/agent/special/schedule/${encodeURIComponent(slug)}/entries/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
+  )
 
 // ── Lifecycle Hooks（本地后端；host-only shell 回调）──
 export type HookDiscovered = {

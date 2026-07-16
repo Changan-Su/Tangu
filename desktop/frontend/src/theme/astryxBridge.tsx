@@ -15,6 +15,9 @@ export const lclTheme = defineTheme({
   name: 'forsion-lcl',
   tokens: {
     '--color-accent': 'var(--accent, #6c5ce7)',
+    // 前景(勾选框对勾/主按钮文字):必须桥到 LCL 的 --on-accent(随主题走,浅色 accent 主题里是深色),
+    // 否则 astryx 用自带默认白 → 浅色/奶白 accent 主题下 对勾白底白字看不清。
+    '--color-on-accent': 'var(--on-accent, #fff)',
     '--color-background-body': 'var(--bg)',
     '--color-background-surface': 'var(--bg-card, var(--bg))',
     '--color-text-primary': 'var(--text)',

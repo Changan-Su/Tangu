@@ -3,7 +3,7 @@
  * 在 Desktop 主界面内替换 Chat/Inspector 区域，而不是覆盖式弹窗。
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { X, ArrowLeft, Loader2, RefreshCw, Sun, Moon, RotateCcw, LogIn, LogOut, ExternalLink, KeyRound, Plus, Trash2, Plug, Search, Download, Sparkles, Wrench, Check, Globe2, QrCode, Smartphone, FolderOpen, Play, Trophy } from 'lucide-react'
+import { X, ArrowLeft, Loader2, RefreshCw, Sun, Moon, RotateCcw, LogIn, LogOut, ExternalLink, KeyRound, Plus, Trash2, Plug, Search, Download, Sparkles, Wrench, Check, Globe2, QrCode, Smartphone, FolderOpen, Play, Trophy, FileDown, Settings2, NotebookPen, Puzzle, LayoutGrid, Palette, Keyboard, Bug, Info, Brain, Bot, Webhook, MessageCircle, Blocks } from 'lucide-react'
 import { ThemeCard } from './ThemeCard'
 import { listLanguages, listSkins } from '../theme/registry'
 import { applyTheme } from '../theme/loader'
@@ -29,6 +29,7 @@ import { Markdown } from './Markdown'
 import { UpdateActions } from './UpdateActions'
 import { openChangelogTab } from '../views/ChangelogView'
 import { ModelGroupList } from './ModelGroupList'
+import { AsrModelChoice } from './AsrModelChoice'
 import { AgentsSettings } from './AgentsSettings'
 import { TtsVoiceStudio } from './TtsVoiceStudio'
 import { previewTts } from '../services/ttsService'
@@ -43,12 +44,35 @@ import { QrImage } from './QrImage'
 import { likelyMainlandChina } from './OnboardingWizard'
 import { debugFireToast } from '../achievements/store'
 import { useTheme } from '../stores/themeStore'
+import { setMobileUiCommand, MOBILE_UI_KEY } from '../mobileUiCommand'
+import { setActivityViewCommand, ACTIVITY_VIEW_KEY } from '../activityViewCommand'
 
 type StaticTab = 'general' | 'connection' | 'forsion' | 'model' | 'mcp' | 'hooks' | 'skills' | 'agents' | 'plugins' | 'amadeus-plugins' | 'agent-clis' | 'browser' | 'wechat' | 'notes' | 'spaces' | 'theme' | 'shortcuts' | 'advanced' | 'developer' | 'about'
 // 动态插件设置页用 `plugin:<id>`(Obsidian 式一级入口)。
 export type Tab = StaticTab | `plugin:${string}`
 
 const DEV_MODE_KEY = 'forsion_tangu_dev_mode'
+
+// 侧栏项图标(固定 tab 全配;外置 agent 插件的动态 plugin:<id> 项刻意无图标)。
+const TAB_ICONS: Partial<Record<Tab, React.ReactNode>> = {
+  general: <Settings2 size={14} />,
+  spaces: <LayoutGrid size={14} />,
+  theme: <Palette size={14} />,
+  shortcuts: <Keyboard size={14} />,
+  notes: <NotebookPen size={14} />,
+  'amadeus-plugins': <Puzzle size={14} />,
+  advanced: <Wrench size={14} />,
+  developer: <Bug size={14} />,
+  about: <Info size={14} />,
+  model: <Brain size={14} />,
+  agents: <Bot size={14} />,
+  skills: <Sparkles size={14} />,
+  mcp: <Plug size={14} />,
+  hooks: <Webhook size={14} />,
+  wechat: <MessageCircle size={14} />,
+  browser: <Globe2 size={14} />,
+  plugins: <Blocks size={14} />,
+}
 
 // 系统音色候选(datalist 可输可选;百炼无音色列表 API,静态维护常用项;全量见百炼「Qwen-TTS 音色列表」文档)。
 const TTS_VOICE_SUGGESTIONS: Array<[string, string]> = [
@@ -130,6 +154,14 @@ export const SettingsModal: React.FC<{
   const [showSysPrompt, setShowSysPrompt] = useState<boolean>(() => {
     try { return localStorage.getItem(SHOW_SYSTEM_PROMPT_KEY) === '1' } catch { return false }
   })
+  // 开发者「移动端 UI 预览命令」开关(localStorage;bootstrapEngine 启动时据此注册 switch-ui-mode 命令)。
+  const [mobileUiCmd, setMobileUiCmd] = useState<boolean>(() => {
+    try { return localStorage.getItem(MOBILE_UI_KEY) === '1' } catch { return false }
+  })
+  // 开发者「活动日志实时视图命令」开关(同款模式;bootstrapEngine 据此注册 open-activity-log 命令)。
+  const [activityViewCmd, setActivityViewCmd] = useState<boolean>(() => {
+    try { return localStorage.getItem(ACTIVITY_VIEW_KEY) === '1' } catch { return false }
+  })
   const [draft, setDraft] = useState(p.cfg)
   const [themesReloading, setThemesReloading] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -151,7 +183,7 @@ export const SettingsModal: React.FC<{
   const [providerBusy, setProviderBusy] = useState<string | null>(null)
   // 直连 provider 配置(~/.tangu/providers.json)
   const [customProviders, setCustomProviders] = useState<DirectProviderConfig[]>([])
-  const [editProvider, setEditProvider] = useState<(DirectProviderConfig & { modelsCsv: string; imageModelsCsv: string; ttsModelsCsv: string }) | null>(null)
+  const [editProvider, setEditProvider] = useState<(DirectProviderConfig & { modelsCsv: string; imageModelsCsv: string; ttsModelsCsv: string; asrModelsCsv: string }) | null>(null)
   // 语速输入的编辑态缓冲(null=未在编辑,显示已存值):清空/打半截时不反弹,blur 时非法则恢复旧值。
   const [ttsSpeedText, setTtsSpeedText] = useState<string | null>(null)
   const [ttsTesting, setTtsTesting] = useState(false)
@@ -633,19 +665,27 @@ export const SettingsModal: React.FC<{
     ['theme', t('settings.tab.theme')],
     ['shortcuts', t('settings.tab.shortcuts')],
     ['advanced', t('settings.tab.advanced')],
-    ...(isDesktop && devMode ? ([['developer', t('settings.tab.developer')]] as Array<[Tab, string]>) : []),
+    ...((isDesktop || cloudWeb) && devMode ? ([['developer', t('settings.tab.developer')]] as Array<[Tab, string]>) : []),
     ['about', t('settings.tab.about')],
   ] as Array<[Tab, string]>
   const activeTabLabel = tab.startsWith('plugin:')
     ? (pluginNavItems.find(([id]) => id === tab)?.[1] || t('settings.tab.plugins'))
     : (tabItems.find(([id]) => id === tab)?.[1] || t('settings.title'))
 
-  // 分类导航(4 大类):选项 / AI / 核心插件 / 社区插件。每类只渲染 tabItems 里实际存在的项(沿用 desktop/devMode 过滤)。
-  const navGroups: Array<{ key: string; label: string; tabs: Tab[] }> = [
-    { key: 'options', label: t('settings.group.options'), tabs: ['general', 'spaces', 'theme', 'shortcuts', 'advanced', 'developer', 'about'] },
-    { key: 'ai', label: t('settings.group.ai'), tabs: ['model', 'agents', 'skills', 'mcp', 'hooks'] },
-    { key: 'core', label: t('settings.group.corePlugins'), tabs: ['wechat', 'browser', 'notes'] },
-    { key: 'community', label: t('settings.group.communityPlugins'), tabs: ['plugins', 'amadeus-plugins'] },
+  // 分类导航(两域两级,与数据目录两层布局同构):大类=Forsion(桌面壳,含笔记等内置 views)/Tangu(引擎),
+  // 组内再分小类。品牌名作大类名,不进 i18n。只渲染 tabItems 里实际存在的项(沿用 desktop/devMode 过滤)。
+  // Amadeus 不设组——它只是一个 Space(views 组合),笔记设置归「选项」,插件只有 Forsion/Tangu 两种。
+  const navSections: Array<{ key: string; label: string; groups: Array<{ key: string; label: string; tabs: Tab[] }> }> = [
+    { key: 'forsion', label: 'Forsion', groups: [
+      { key: 'options', label: t('settings.group.options'), tabs: ['general', 'spaces', 'theme', 'shortcuts', 'notes'] },
+      { key: 'fplugins', label: t('settings.group.communityPlugins'), tabs: ['amadeus-plugins'] },
+      { key: 'system', label: t('settings.group.system'), tabs: ['advanced', 'developer', 'about'] },
+    ] },
+    { key: 'tangu', label: 'Tangu', groups: [
+      { key: 'ai', label: t('settings.group.ai'), tabs: ['model', 'agents', 'skills', 'mcp', 'hooks'] },
+      { key: 'tools', label: t('settings.group.tools'), tabs: ['wechat', 'browser'] },
+      { key: 'community', label: t('settings.group.communityPlugins'), tabs: ['plugins'] },
+    ] },
   ]
 
   if (!p.open) return null
@@ -669,25 +709,36 @@ export const SettingsModal: React.FC<{
           </div>
         </div>
         <div className="settings-nav-list">
-          {navGroups.map((grp) => {
-            const base = grp.tabs
-              .map((id) => tabItems.find(([tid]) => tid === id))
-              .filter((x): x is [Tab, string] => !!x)
-            // 「社区插件」组末尾追加已启用且有设置的外置插件,各成一级项。
-            const all = grp.key === 'community' ? [...base, ...pluginNavItems] : base
-            // 搜索:按项名 / 分组名过滤(命中分组名则保留整组)。
+          {navSections.map((sec) => {
+            // 搜索:命中大类名保留整大类,命中小类名保留整组,否则按项名过滤。
             const ql = navQuery.trim().toLowerCase()
-            const items = !ql || grp.label.toLowerCase().includes(ql)
-              ? all
-              : all.filter(([, label]) => label.toLowerCase().includes(ql))
-            if (items.length === 0) return null
+            const secHit = !ql || sec.label.toLowerCase().includes(ql)
+            const groups = sec.groups
+              .map((grp) => {
+                const base = grp.tabs
+                  .map((id) => tabItems.find(([tid]) => tid === id))
+                  .filter((x): x is [Tab, string] => !!x)
+                // 「社区插件」组末尾追加已启用且有设置的外置 agent 插件,各成一级项(动态项无图标)。
+                const all = grp.key === 'community' ? [...base, ...pluginNavItems] : base
+                const items = secHit || grp.label.toLowerCase().includes(ql)
+                  ? all
+                  : all.filter(([, label]) => label.toLowerCase().includes(ql))
+                return { key: grp.key, label: grp.label, items }
+              })
+              .filter((g) => g.items.length > 0)
+            if (groups.length === 0) return null
             return (
-              <div key={grp.key} className="settings-nav-group">
-                <div className="settings-nav-grouphead">{grp.label}</div>
-                {items.map(([id, label]) => (
-                  <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>
-                    {label}
-                  </button>
+              <div key={sec.key} className="settings-nav-section">
+                <div className="settings-nav-sectionhead">{sec.label}</div>
+                {groups.map((grp) => (
+                  <div key={grp.key} className="settings-nav-group">
+                    <div className="settings-nav-grouphead">{grp.label}</div>
+                    {grp.items.map(([id, label]) => (
+                      <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>
+                        {TAB_ICONS[id]}{label}
+                      </button>
+                    ))}
+                  </div>
                 ))}
               </div>
             )
@@ -1219,6 +1270,8 @@ export const SettingsModal: React.FC<{
                       </div>
                     </div>
 
+                    {isDesktop && <AsrModelChoice models={models} />}
+
                     {isDesktop && providers && providers.length > 0 && (
                       <div className="field">
                         <label>{t('settings.provider.loginLabel')}</label>
@@ -1270,7 +1323,7 @@ export const SettingsModal: React.FC<{
                                 className="icon-btn"
                                 title={t('settings.btn.edit')}
                                 onClick={() => {
-                                  setEditProvider({ ...cp, modelsCsv: (cp.modelIds || []).join(', '), imageModelsCsv: (cp.imageModelIds || []).join(', '), ttsModelsCsv: (cp.ttsModelIds || []).join(', ') })
+                                  setEditProvider({ ...cp, modelsCsv: (cp.modelIds || []).join(', '), imageModelsCsv: (cp.imageModelIds || []).join(', '), ttsModelsCsv: (cp.ttsModelIds || []).join(', '), asrModelsCsv: (cp.asrModelIds || []).join(', ') })
                                   setProviderTestMsg('')
                                   setProviderSaveMsg('')
                                   setFetchedModels(null); setModelSearch(''); setFetchModelsMsg('')
@@ -1299,7 +1352,7 @@ export const SettingsModal: React.FC<{
                         <button
                           className="btn ghost sm"
                           onClick={() => {
-                            setEditProvider({ providerId: '', baseUrl: '', apiKey: '', modelIds: [], modelsCsv: '', imageModelsCsv: '', ttsModelsCsv: '' })
+                            setEditProvider({ providerId: '', baseUrl: '', apiKey: '', modelIds: [], modelsCsv: '', imageModelsCsv: '', ttsModelsCsv: '', asrModelsCsv: '' })
                             setProviderTestMsg('')
                             setProviderSaveMsg('')
                             setFetchedModels(null); setModelSearch(''); setFetchModelsMsg('')
@@ -1372,6 +1425,15 @@ export const SettingsModal: React.FC<{
                               placeholder={t('settings.customProvider.ttsModelsPlaceholder')}
                             />
                           </div>
+                          <div className="field">
+                            <label>{t('settings.customProvider.asrModelsLabel')}</label>
+                            <input
+                              type="text"
+                              value={editProvider.asrModelsCsv}
+                              onChange={(e) => setEditProvider({ ...editProvider, asrModelsCsv: e.target.value })}
+                              placeholder={t('settings.customProvider.asrModelsPlaceholder')}
+                            />
+                          </div>
                         </div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                           <button
@@ -1428,6 +1490,7 @@ export const SettingsModal: React.FC<{
                               const modelIds = editProvider.modelsCsv.split(',').map((s) => s.trim()).filter(Boolean)
                               const imageModelIds = editProvider.imageModelsCsv.split(',').map((s) => s.trim()).filter(Boolean)
                               const ttsModelIds = editProvider.ttsModelsCsv.split(',').map((s) => s.trim()).filter(Boolean)
+                              const asrModelIds = editProvider.asrModelsCsv.split(',').map((s) => s.trim()).filter(Boolean)
                               void window.tangu!.saveProvider!({
                                 providerId: editProvider.providerId,
                                 baseUrl: editProvider.baseUrl.replace(/\/+$/, ''),
@@ -1435,6 +1498,7 @@ export const SettingsModal: React.FC<{
                                 modelIds: modelIds.length ? modelIds : undefined,
                                 imageModelIds: imageModelIds.length ? imageModelIds : undefined,
                                 ttsModelIds: ttsModelIds.length ? ttsModelIds : undefined,
+                                asrModelIds: asrModelIds.length ? asrModelIds : undefined,
                               }).then((list) => {
                                 setCustomProviders(list)
                                 setEditProvider(null)
@@ -2381,6 +2445,22 @@ export const SettingsModal: React.FC<{
                       <div className="hint">{t('settings.developer.showSystemPromptHint')}</div>
                     </div>
                     <div className="field">
+                      <label className="inline-check">
+                        <input
+                          type="checkbox"
+                          checked={mobileUiCmd}
+                          onChange={(e) => {
+                            const on = e.target.checked
+                            setMobileUiCmd(on)
+                            try { localStorage.setItem(MOBILE_UI_KEY, on ? '1' : '0') } catch { /* ignore */ }
+                            setMobileUiCommand(on)
+                          }}
+                        />
+                        {t('settings.developer.mobileUiPreview')}
+                      </label>
+                      <div className="hint">{t('settings.developer.mobileUiPreviewHint')}</div>
+                    </div>
+                    <div className="field">
                       <label>{t('settings.developer.testUpdateLabel')}</label>
                       <div>
                         <button className="btn ghost sm" onClick={() => { openChangelogTab(); p.onClose() }}>
@@ -2399,6 +2479,47 @@ export const SettingsModal: React.FC<{
                       <div className="hint">{t('settings.developer.achToastHint')}</div>
                     </div>
                     <div className="field">
+                      <label>{t('settings.developer.activityLabel')}</label>
+                      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <button
+                          className="btn ghost sm"
+                          onClick={() => {
+                            void (async () => {
+                              const text = (await window.tangu?.exportActivity?.(7).catch(() => '')) || ''
+                              await window.tangu?.saveTextFile?.(`forsion-activity-${new Date().toISOString().slice(0, 10)}.log`, text || '(empty)')
+                            })()
+                          }}
+                        >
+                          <FileDown size={12} /> {t('settings.developer.activityExport')}
+                        </button>
+                        <label className="inline-check" style={{ margin: 0 }}>
+                          <input
+                            type="checkbox"
+                            checked={stored?.activityLogEnabled !== false}
+                            onChange={(e) => void window.tangu!.setConfig({ activityLogEnabled: e.target.checked }).then(setStored)}
+                          />
+                          {t('settings.developer.activityEnable')}
+                        </label>
+                      </div>
+                      <div className="hint">{t('settings.developer.activityHint')}</div>
+                    </div>
+                    <div className="field">
+                      <label className="inline-check">
+                        <input
+                          type="checkbox"
+                          checked={activityViewCmd}
+                          onChange={(e) => {
+                            const on = e.target.checked
+                            setActivityViewCmd(on)
+                            try { localStorage.setItem(ACTIVITY_VIEW_KEY, on ? '1' : '0') } catch { /* ignore */ }
+                            setActivityViewCommand(on)
+                          }}
+                        />
+                        {t('settings.developer.activityViewCmd')}
+                      </label>
+                      <div className="hint">{t('settings.developer.activityViewCmdHint')}</div>
+                    </div>
+                    <div className="field">
                       <button
                         className="btn ghost sm"
                         onClick={() => {
@@ -2406,6 +2527,14 @@ export const SettingsModal: React.FC<{
                           // 关开发者模式顺手清掉「显示 system prompt」,免得关了 tab 还在聊天里冒调试块。
                           try { localStorage.removeItem(SHOW_SYSTEM_PROMPT_KEY) } catch { /* ignore */ }
                           setShowSysPrompt(false)
+                          // 一并关掉移动端 UI 预览命令(若正处于移动模式,命令自身保留切回入口)。
+                          try { localStorage.removeItem(MOBILE_UI_KEY) } catch { /* ignore */ }
+                          setMobileUiCmd(false)
+                          setMobileUiCommand(false)
+                          // 一并撤掉活动日志实时视图命令。
+                          try { localStorage.removeItem(ACTIVITY_VIEW_KEY) } catch { /* ignore */ }
+                          setActivityViewCmd(false)
+                          setActivityViewCommand(false)
                           setDevMode(false)
                           setDevClicks(0)
                           setTab('about')

@@ -6,6 +6,7 @@ import { $prose } from '@milkdown/kit/utils'
 import { Plugin, PluginKey, type EditorState } from '@milkdown/kit/prose/state'
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view'
 import { WIKILINK_RE, linkTarget } from '@amadeus-shared/links'
+import { isPdfLinkInner } from '@amadeus-shared/pdfLink'
 import { buildBlockString } from './mathLivePreview'
 
 const wikiKey = new PluginKey<{ focus: boolean }>('amadeus-wikilink-live')
@@ -21,6 +22,7 @@ function buildDecorations(
   state: EditorState,
   onOpen: (name: string) => void,
   isResolved: (name: string) => boolean,
+  iconOf?: (name: string) => string | undefined,
 ): DecorationSet {
   const focus = wikiKey.getState(state)?.focus ?? false
   const decos: Decoration[] = []
@@ -54,6 +56,9 @@ function buildDecorations(
       const target = linkTarget(m[1])
       const label = displayLabel(m[1])
       const ok = isResolved(target)
+      const emoji = ok ? iconOf?.(target) : undefined // 目标笔记的 emoji 图标,渲染在链接文字前
+      // PDF 链接点击要保留 #page= 子路径(openWikiLink 据此跳页);m 是循环变量,须逐条捕获(勿在闭包里读 m)。
+      const openArg = isPdfLinkInner(m[1]) ? m[1] : target
       decos.push(Decoration.inline(from, to, { class: 'wikilink-src-hidden' }))
       decos.push(
         Decoration.widget(
@@ -62,15 +67,20 @@ function buildDecorations(
             const el = document.createElement('span')
             el.className = ok ? 'wikilink' : 'wikilink wikilink-unresolved' // 未解析 → 黯淡虚线,点击询问创建
             el.setAttribute('data-wiki', target)
-            el.textContent = label
+            if (emoji) {
+              const ic = document.createElement('span')
+              ic.className = 'wikilink-emoji' // inline-block 逃逸下划线传播(text-decoration 子元素关不掉)
+              ic.textContent = emoji
+              el.append(ic, label)
+            } else el.textContent = label
             el.addEventListener('mousedown', (e) => {
               e.preventDefault() // 不落光标、不进编辑态 → 直接跳转
-              onOpen(target)
+              onOpen(openArg)
             })
             return el
           },
-          // key 带解析态:同 key 的 widget DOM 会被 ProseMirror 复用,解析态翻转必须换 key 才会重建。
-          { side: -1, ignoreSelection: true, key: `w${from}:${m[0]}:${ok ? 1 : 0}` },
+          // key 带解析态与 emoji:同 key 的 widget DOM 会被 ProseMirror 复用,状态翻转必须换 key 才会重建。
+          { side: -1, ignoreSelection: true, key: `w${from}:${m[0]}:${ok ? 1 : 0}:${emoji ?? ''}` },
         ),
       )
     }
@@ -79,7 +89,11 @@ function buildDecorations(
   return decos.length ? DecorationSet.create(state.doc, decos) : DecorationSet.empty
 }
 
-export function wikilinkPlugin(onOpen: (name: string) => void, isResolved: (name: string) => boolean = () => true) {
+export function wikilinkPlugin(
+  onOpen: (name: string) => void,
+  isResolved: (name: string) => boolean = () => true,
+  iconOf?: (name: string) => string | undefined,
+) {
   return $prose(
     () =>
       new Plugin<{ focus: boolean }>({
@@ -97,7 +111,7 @@ export function wikilinkPlugin(onOpen: (name: string) => void, isResolved: (name
             focus: (view) => { if (!wikiKey.getState(view.state)?.focus) view.dispatch(view.state.tr.setMeta(wikiKey, { focus: true })); return false },
             blur: (view) => { if (wikiKey.getState(view.state)?.focus) view.dispatch(view.state.tr.setMeta(wikiKey, { focus: false })); return false },
           },
-          decorations: (state) => buildDecorations(state, onOpen, isResolved),
+          decorations: (state) => buildDecorations(state, onOpen, isResolved, iconOf),
         },
       }),
   )

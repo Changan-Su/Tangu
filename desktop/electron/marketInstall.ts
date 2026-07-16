@@ -13,7 +13,7 @@ export const MARKET_SUBDIR: Record<string, string> = {
   plugin: 'tangu/plugins',
   space: 'spaces',
   theme: 'themes',
-  'amadeus-plugin': 'amadeus/plugins', // Amadeus 全局插件目录
+  'amadeus-plugin': 'plugins', // Forsion(UI)插件目录(类别 id 保留 amadeus-plugin 兼容市场后端)
 }
 
 /** type → manifest 文件名(用于 manifest 感知重定根,见 computeStripPrefix)。 */

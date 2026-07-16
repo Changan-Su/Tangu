@@ -12,7 +12,8 @@ import { pullInbox } from '@/services/backendService'
 import { SettingsModal } from '@/components/SettingsModal'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useShallow } from 'zustand/react/shallow'
-import { MobileShell } from './engine/MobileShell'
+import { SingleColumnHost } from '@lcl/engine'
+import { buildDefaultLayout } from '@/bootstrapEngine'
 
 /** 移动端本地 inbox 内容来自云端广播,但无服务端 inboxPull 调度器 → 客户端定时静默拉(绕开 inboxStore.pull 的 toast)。 */
 function useInboxAutoPull(): void {
@@ -53,7 +54,7 @@ export function MobileRoot() {
   return (
     <>
       <div className="shell-host">
-        <MobileShell dark={theme.mode === 'dark'} />
+        <SingleColumnHost dark={theme.mode === 'dark'} buildDefault={buildDefaultLayout} />
       </div>
 
       <AnimatePresence>

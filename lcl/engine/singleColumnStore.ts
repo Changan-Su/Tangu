@@ -1,7 +1,8 @@
 /**
- * 移动端 workspace store：桌面 engine/workspaceStore.ts(Dockview 驱动)的**单列替身**。
- * vite resolveId 插件把 desktop 的 `engine/workspaceStore` 解析到本文件 → 复用的 views / spaceRegistry
- * 拿到的 `useWorkspace` 就是这个单列实现,desktop 源零改。
+ * 单列 workspace store：桌面 Dockview store(./dockviewStore)的**单列替身**,住在引擎里。
+ * 两条路都用它:① mobile 构建 vite engineSwap 把 `engine/workspaceStore` 换成本文件;
+ * ② desktop/web 的 workspaceStore 选择器在 UI_MODE==='mobile' 时指向本文件。views/spaceRegistry
+ * 经 barrel 拿到的 `useWorkspace` 即本单列实现,上层源零改。
  *
  * 模型:三桶 leaf(main / left / right) + 各自 activeId;主区一次显示一个 active leaf(全屏),
  * 左右侧栏 = 侧滑抽屉(visible 控制)。`navigateLeaf` = 原地换视图(一屏换一屏),`splitActive` = 开新主 leaf。
@@ -9,10 +10,10 @@
  * 布局序列化 / 命名布局 / Dockview api 在移动端退化为 no-op / 空(见各方法注释)。
  */
 import { create } from 'zustand'
-import type { Leaf, ViewLocation } from '@lcl/engine/types'
-import { label } from '@lcl/engine/types'
-import { getView } from '@lcl/engine/viewRegistry'
-import type { PersistedPanel } from '@lcl/engine/layoutPersist'
+import type { Leaf, ViewLocation } from './types'
+import { label } from './types'
+import { getView } from './viewRegistry'
+import type { PersistedPanel } from './layoutPersist'
 
 /** 主区 leaf 快照(供顶栏/读者)。字段与桌面同名以兼容读者。 */
 export interface MainTab { id: string; type: string; title: string; active: boolean; closable: boolean; sessionId?: string; followActive: boolean }
@@ -63,6 +64,7 @@ interface WS {
   setApi(api: unknown): void
   setDefaultBuilder(fn: () => void): void
   setSidebarDefaults(d: Record<'left' | 'right', PersistedPanel[]>): void
+  setSideProfile(key: string, free: { left?: boolean; right?: boolean }, scale?: { left?: number; right?: number }): void
   initializeSidebar(side: 'left' | 'right', visible: boolean): void
   registerChatSurface(id: string, el: HTMLDivElement | null): void
   syncPanelState(): void
@@ -99,6 +101,9 @@ export const useWorkspace = create<WS>((set, get) => {
       const cur = find(rec.id)
       if (!cur || cur.title === t) return
       set((s) => ({ [bucketOf(rec.loc)]: s[bucketOf(rec.loc)].map((r) => r.id === rec.id ? { ...r, title: t } : r) } as Partial<WS>))
+      // 让 mainTabs 标题跟随(主视图 tab 条按 mainTabs 渲染)。仅真变更时到这(上面幂等守卫已 return),
+      // 且 refreshTabs 只重渲订阅 mainTabs 的 MainTabs、不碰 LeafHost/视图,故不会回激 setTitle 循环。
+      get().refreshTabs()
     },
     setParams: (p: Record<string, unknown>) => {
       const cur = find(rec.id)
@@ -144,6 +149,8 @@ export const useWorkspace = create<WS>((set, get) => {
     setApi: () => { /* 移动端无 Dockview api，恒 null */ },
     setDefaultBuilder: (fn) => set({ defaultBuilder: fn }),
     setSidebarDefaults: (d) => set({ sidebarDefaults: d }),
+    // Dockview「可拖宽侧栏画像」;单列无侧栏宽度概念 → no-op(补齐 store 契约,否则 spaceRegistry/bootstrap 调用即崩)。
+    setSideProfile: () => { /* no-op */ },
     initializeSidebar: (side, visible) => set({ [side === 'left' ? 'leftVisible' : 'rightVisible']: visible } as Partial<WS>),
     registerChatSurface: (id, el) => set((s) => {
       const next = { ...s.chatSurfaces }

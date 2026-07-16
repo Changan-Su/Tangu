@@ -16,6 +16,7 @@ import { listLanguages, listSkins } from '../theme/registry'
 import { applyTheme } from '../theme/loader'
 import { ThemeCard } from './ThemeCard'
 import { BrandLogo } from './BrandLogo'
+import { AsrModelChoice } from './AsrModelChoice'
 import { Markdown } from './Markdown'
 import { CHANGELOG } from '../changelog'
 import { track } from '../achievements/store'
@@ -34,9 +35,9 @@ export const ONBOARDING_DISMISS_KEY = 'forsion_tangu_onboarding_done'
 /** 上次完成引导时的应用版本号;与当前版本不同 → 版本更新后再进一次引导(展示 What's New)。 */
 export const ONBOARDING_VERSION_KEY = 'forsion_tangu_onboarding_version'
 
-type Step = 'welcome' | 'connect' | 'theme' | 'model' | 'agents' | 'workspace' | 'env' | 'done'
+type Step = 'welcome' | 'connect' | 'theme' | 'model' | 'speech' | 'agents' | 'workspace' | 'env' | 'done'
 const STEP_ORDER: Step[] = PRODUCT.agentBackend
-  ? ['welcome', 'connect', 'theme', 'model', 'agents', 'workspace', 'env', 'done']
+  ? ['welcome', 'connect', 'theme', 'model', 'speech', 'agents', 'workspace', 'env', 'done']
   : ['welcome', 'theme', 'done'] // 无 agent 后端的单品变体:只留通用步(connect/model/agents/workspace/env 均属 agent)
 
 /** 订阅 provider 的友好名(id 见 src/llm/providerOAuth.ts OAUTH_PROVIDERS);未知 id 回退原值。 */
@@ -585,6 +586,14 @@ export const OnboardingWizard: React.FC<{
                 )}
               </div>
             </>
+          )}
+
+          {step === 'speech' && (
+            <div className="field">
+              <label>{t('onboarding.speech.stepLabel')}</label>
+              <div className="hint" style={{ marginBottom: 10 }}>{t('onboarding.speech.intro')}</div>
+              <AsrModelChoice models={models} />
+            </div>
           )}
 
           {step === 'agents' && (

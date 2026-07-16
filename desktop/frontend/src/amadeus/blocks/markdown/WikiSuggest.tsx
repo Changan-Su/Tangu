@@ -10,6 +10,7 @@ import { fuzzyScore } from '../../lib/fuzzy'
 import { isFileRef } from '../../lib/vaultFiles'
 import { pageKey } from '@amadeus-shared/links'
 import { AttachmentIcon, DatabaseTableViewIcon } from '../../components/icons'
+import { usePageStore } from '../../store/pageStore'
 
 interface Props {
   query: string
@@ -51,6 +52,7 @@ const candKey = (c: Cand): string => (c.file ? c.base.toLowerCase() : pageKey(c.
 
 export function WikiSuggest({ query, left, top, getPageNames, getFiles, onPick, onClose, allowCreate = true }: Props) {
   const [active, setActive] = useState(0)
+  const icons = usePageStore((s) => s.icons) // 页面 emoji(path 键);非 vault 候选池查不到 → 无图标,天然兼容
 
   const cands: Cand[] = [
     ...getPageNames().map((p) => ({ path: p, base: baseName(p), file: false })),
@@ -135,10 +137,16 @@ export function WikiSuggest({ query, left, top, getPageNames, getFiles, onPick, 
           role="menuitem"
         >
           <span className="wiki-item-name">
-            {c.file && (
+            {c.file ? (
               <span className="wiki-item-ficon" aria-hidden>
                 {/\.db$/i.test(c.base) ? <DatabaseTableViewIcon /> : <AttachmentIcon />}
               </span>
+            ) : (
+              icons[c.path] && (
+                <span className="wiki-item-ficon" aria-hidden>
+                  {icons[c.path]}
+                </span>
+              )
             )}
             {c.base}
           </span>

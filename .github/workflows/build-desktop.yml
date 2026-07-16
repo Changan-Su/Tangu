@@ -99,10 +99,70 @@ jobs:
             desktop/dist/*.blockmap
           if-no-files-found: ignore
 
-  # 仅在打 v* tag 时:收集三平台产物 → 创建/更新对应 Release 并附件。
+  # Android APK(Capacitor):随桌面 release 顺便出包。
+  # 签名:配了 ANDROID_KEYSTORE_B64/_PASSWORD/_ALIAS/_KEY_PASSWORD 四个 secrets → 正式签名 release 包;
+  # 未配 → debug 签名包(文件名带 -debug,可直接安装)。versionCode=run_number(升级安装恒递增),
+  # versionName=tag 去 v 前缀。
+  build-android:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # mobile 经 vite alias 复用 desktop 渲染层/lcl/web 云模块 → 必须先装 desktop 依赖
+      # (其 postinstall 顺带 link-lcl + 自托管 excalidraw 字体);web 云模块零外部依赖,无需装 web。
+      - name: Install desktop deps (aliased renderer)
+        working-directory: desktop
+        run: npm install --no-audit --no-fund
+
+      - name: Build web bundle + cap sync
+        working-directory: mobile
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          npx cap sync android
+
+      - name: Build APK
+        working-directory: mobile/android
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_VERSION_CODE: ${{ github.run_number }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then VN="${GITHUB_REF_NAME#v}"; else VN="0.0.0-ci.${GITHUB_RUN_NUMBER}"; fi
+          export ANDROID_VERSION_NAME="$VN"
+          chmod +x gradlew
+          if [ -n "$ANDROID_KEYSTORE_B64" ]; then
+            printf '%s' "$ANDROID_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release.keystore"
+            ./gradlew assembleRelease --no-daemon
+            cp app/build/outputs/apk/release/app-release.apk "Forsion-Tangu-${VN}-android.apk"
+          else
+            echo "::notice::未配置 ANDROID_KEYSTORE_B64,产出 debug 签名 APK(可安装;配齐四个 secrets 后自动改出正式签名包)"
+            ./gradlew assembleDebug --no-daemon
+            cp app/build/outputs/apk/debug/app-debug.apk "Forsion-Tangu-${VN}-android-debug.apk"
+          fi
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: forsion-android
+          path: mobile/android/Forsion-Tangu-*.apk
+
+  # 仅在打 v* tag 时:收集三平台产物(+APK)→ 创建/更新对应 Release 并附件。
+  # APK 是「顺便」:build-android 失败不挡桌面发版(always + 只硬依赖 build 成功)。
   release:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, build-android]
+    if: always() && startsWith(github.ref, 'refs/tags/v') && needs.build.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Download all installers

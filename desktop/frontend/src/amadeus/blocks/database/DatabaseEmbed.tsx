@@ -26,6 +26,11 @@ import { renameDb } from '../../lib/dbFileOps'
 import { useNoteViewStore } from '../../store/noteViewStore'
 import { usePageStore } from '../../store/pageStore'
 import { amadeus } from '../../api'
+import { Settings2, ExternalLink, Plus } from 'lucide-react'
+import { openDb } from '../../../amadeusNav'
+import { useCalendarConfig, memberOf } from '../../store/calendarConfigStore'
+import { MemberColPicker } from '../../../views/calendar/MemberColPicker'
+import { act, actDebounced, shortVal } from '../../../activity/log'
 import {
   CheckBoxCheckLinearIcon, DatabaseKanbanViewIcon, DatabaseListViewIcon, DatabaseTableViewIcon,
   DateTimeIcon, FilterIcon, FolderIcon, ImageIcon, LinkIcon, MultiSelectIcon, NumberIcon, PageIcon,
@@ -76,7 +81,7 @@ const chipClass = (label: string): string => {
 const clampW = (w: number): number => Math.min(800, Math.max(100, w))
 
 interface Pop {
-  kind: 'options' | 'colmenu' | 'folder' | 'viewmenu' | 'addview' | 'row' | 'filters' | 'stat'
+  kind: 'options' | 'colmenu' | 'folder' | 'viewmenu' | 'addview' | 'row' | 'filters' | 'stat' | 'calendar'
   colId?: string
   rowId?: string
   viewId?: string
@@ -132,6 +137,7 @@ function DbTable({ dbRef, db, pagePath, initialView, onViewChange }: {
   onViewChange?: (viewName: string | null) => void
 }) {
   const [pop, setPop] = useState<Pop | null>(null)
+  const [q, setQ] = useState('') // 工具栏搜索:按行标题过滤
   // 拖拽改宽的过程态:pointermove 只写这里驱动 gridTemplateColumns 即时反馈,pointerup 才落进 column。
   const [liveWidths, setLiveWidths] = useState<Record<string, number>>({})
   usePropertyTypesVersion() // 三方插件注册/卸载属性类型 → 列菜单与单元格分发即时刷新
@@ -147,6 +153,10 @@ function DbTable({ dbRef, db, pagePath, initialView, onViewChange }: {
   }, [isNoteView, noteFolder])
 
   const m = (fn: (d: DbFile) => DbFile): void => useDbStore.getState().mutate(dbRef, fn)
+  const dbPath = useDbStore((s) => s.entries[dbRef]?.path) ?? dbRef // 规范文件路径(= 日历成员键 / openDb 用)
+  const vault = usePageStore((s) => s.vaultRoot) ?? ''
+  const calByVault = useCalendarConfig((s) => s.byVault)
+  const addMember = useCalendarConfig((s) => s.addMember)
 
   const identityId = db.columns[0]?.id
   const isIdentity = (colId: string): boolean => colId === identityId
@@ -197,6 +207,14 @@ function DbTable({ dbRef, db, pagePath, initialView, onViewChange }: {
   }, [isNoteView, db.rows, db.columns, nvProps])
 
   const setCell = (rowId: string, colId: string, v: CellValue | undefined): void => {
+    // 活动日志:行属性变更(通用,任何列类型)——row.edit db+p=列名+v=新值+行标题,同格 10s 防抖取末态。
+    // 身份列变更 text=新标题;其余列行名从合成 baseRows 取(笔记视图 db.rows 不是显示行)。
+    const actCol = db.columns.find((c) => c.id === colId)
+    if (actCol) {
+      const idColId = db.columns[0]?.id ?? ''
+      const name = colId === idColId ? shortVal(v) : shortVal(baseRows.find((r) => r.id === rowId)?.cells[idColId])
+      actDebounced('row.edit', { db: dbRef, p: actCol.name, v: shortVal(v), text: name }, `${dbRef}|${rowId}|${colId}`)
+    }
     if (isNoteView) {
       const col = db.columns.find((c) => c.id === colId)
       if (col?.type === 'page') {
@@ -220,6 +238,8 @@ function DbTable({ dbRef, db, pagePath, initialView, onViewChange }: {
   }
   /** 新行,可带初值(看板加卡入组/日历日格加行);笔记视图 = 建笔记后逐键写 frontmatter。 */
   const addRow = (initial?: Record<string, CellValue>): void => {
+    // 活动日志:含 todo 列=任务、日期列=日程,其余=普通行(标题此刻必空,由 setCell 的 task.name 补)
+    act(db.columns.some((c) => c.type === 'todo') ? 'task.new' : db.columns.some(isDateish) ? 'event.new' : 'row.new', { db: dbRef })
     if (isNoteView) {
       void nv().addNote(noteFolder as string).then((p) => {
         if (!initial) return
@@ -322,7 +342,9 @@ function DbTable({ dbRef, db, pagePath, initialView, onViewChange }: {
 
   // 行管道:每视图筛选 → 每视图排序(都存在视图配置里;不动文件 rows 顺序)。
   const rows = useMemo(() => {
-    const filtered = applyFilters(baseRows, view.filters, kindOf)
+    const af = applyFilters(baseRows, view.filters, kindOf)
+    const needle = q.trim().toLowerCase()
+    const filtered = needle ? af.filter((r) => rowTitle(r).toLowerCase().includes(needle)) : af
     if (!sort) return filtered
     const col = db.columns.find((c) => c.id === sort.colId)
     if (!col) return filtered
@@ -341,8 +363,8 @@ function DbTable({ dbRef, db, pagePath, initialView, onViewChange }: {
       const cmp = typeof ka === 'number' && typeof kb === 'number' ? ka - kb : String(ka).localeCompare(String(kb), 'zh')
       return sort.dir === 'asc' ? cmp : -cmp
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- kindOf 只依赖 db.columns(已在列)
-  }, [baseRows, db.columns, sort, view.filters])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- kindOf/rowTitle 只依赖 db.columns(已在列)
+  }, [baseRows, db.columns, sort, view.filters, q])
 
   const openPop = (e: ReactMouseEvent, p: Omit<Pop, 'x' | 'y'>): void => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -448,6 +470,10 @@ function DbTable({ dbRef, db, pagePath, initialView, onViewChange }: {
           <FilterIcon />
           筛选{(view.filters?.length ?? 0) > 0 && ` ${view.filters!.length}`}
         </button>
+        <input className="amx-db-search" placeholder="搜索…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="搜索行" />
+        <button className="amx-db-iconbtn" onClick={() => openDb(dbPath)} title="在新标签打开为页面" aria-label="open as page"><ExternalLink size={15} /></button>
+        <button className="amx-db-iconbtn" onClick={(e) => openPop(e, { kind: 'viewmenu', viewId: view.id })} title="视图设置" aria-label="view settings"><Settings2 size={15} /></button>
+        <button className="amx-db-newbtn" onClick={() => addRow()} title="新建"><Plus size={14} /> 新建</button>
       </div>
 
       {db.columns.length === 0 ? (
@@ -545,6 +571,8 @@ function DbTable({ dbRef, db, pagePath, initialView, onViewChange }: {
           <ViewMenu
             view={popView}
             columns={db.columns}
+            sort={sort ?? undefined}
+            onSetSort={(colId, dir) => setColSort(colId, dir)}
             onRename={(name) => patchView(popView.id, { name })}
             onPickGroupBy={(id) => patchView(popView.id, { groupBy: id })}
             onPickDateCol={(id) => patchView(popView.id, { dateCol: id })}
@@ -553,7 +581,21 @@ function DbTable({ dbRef, db, pagePath, initialView, onViewChange }: {
               const next = cur.includes(colId) ? cur.filter((x) => x !== colId) : [...cur, colId]
               patchView(popView.id, { hidden: next.length ? next : undefined })
             }}
+            onOpenFilters={() => setPop({ kind: 'filters', x: pop.x, y: pop.y })}
+            onOpenCalendar={() => setPop({ kind: 'calendar', x: pop.x, y: pop.y })}
+            calendarActive={!!memberOf(vault, calByVault, dbPath)}
             onDelete={views.length > 1 ? () => delView(popView.id) : undefined}
+          />
+        </PopShell>
+      )}
+      {pop && pop.kind === 'calendar' && (
+        <PopShell x={pop.x} y={pop.y} onClose={() => setPop(null)}>
+          <MemberColPicker
+            dbName={db.name}
+            columns={db.columns}
+            initial={memberOf(vault, calByVault, dbPath)}
+            onCancel={() => setPop(null)}
+            onConfirm={(dateCol, checkboxCol) => { addMember(vault, dbPath, dateCol, checkboxCol); setPop(null) }}
           />
         </PopShell>
       )}
@@ -948,7 +990,8 @@ function ColMenu({
         <>
           <div className="amx-db-pop-sec">类型</div>
           <div className="amx-db-pop-list">
-            {[...COLUMN_TYPES, ...allPropertyTypes().map((p) => p.type)].map((t) => (
+            {/* 撤下 primitive date 与 todo:日期统一走富类型 calendarDate(标签「日期」),完成标记用普通 checkbox */}
+            {[...COLUMN_TYPES, ...allPropertyTypes().map((p) => p.type)].filter((t) => t !== 'date' && t !== 'todo').map((t) => (
               <button key={t} className="amx-db-opt" onClick={() => onSetType(t)}>
                 <span className="amx-db-th-icon" aria-hidden>{colMeta(t).icon}</span>
                 {colMeta(t).label}
@@ -1029,13 +1072,18 @@ function OptionsPop({ x, y, col, row, setCell, createOption, onClose }: {
 }
 
 /** 视图 tab 菜单:改名 + 按类型的配置(看板分组列/日历日期列)+ 列显隐 + 删除(最后一个不可删)。 */
-function ViewMenu({ view, columns, onRename, onPickGroupBy, onPickDateCol, onToggleHidden, onDelete }: {
+function ViewMenu({ view, columns, sort, onSetSort, onRename, onPickGroupBy, onPickDateCol, onToggleHidden, onOpenFilters, onOpenCalendar, calendarActive, onDelete }: {
   view: DbView
   columns: DbColumn[]
+  sort?: { colId: string; dir: 'asc' | 'desc' }
+  onSetSort: (colId: string, dir: 'asc' | 'desc' | null) => void
   onRename: (name: string) => void
   onPickGroupBy: (colId: string) => void
   onPickDateCol: (colId: string) => void
   onToggleHidden: (colId: string) => void
+  onOpenFilters: () => void
+  onOpenCalendar: () => void
+  calendarActive: boolean
   onDelete?: () => void
 }) {
   const selectCols = columns.filter((c) => resolveBaseType(c.type) === 'select')
@@ -1093,6 +1141,22 @@ function ViewMenu({ view, columns, onRename, onPickGroupBy, onPickDateCol, onTog
           </div>
         </>
       )}
+      <div className="amx-db-pop-sec">排序(本视图)</div>
+      <div className="amx-db-pop-list">
+        {columns.map((c) => {
+          const on = sort?.colId === c.id
+          return (
+            <button key={c.id} className="amx-db-opt" data-dim={!on || undefined} onClick={() => onSetSort(c.id, on && sort!.dir === 'asc' ? 'desc' : 'asc')}>
+              <span className="amx-db-th-icon" aria-hidden>{colMeta(c.type).icon}</span>
+              {c.name}
+              {on && <span className="amx-db-opt-check">{sort!.dir === 'asc' ? '↑' : '↓'}</span>}
+            </button>
+          )
+        })}
+        {sort && <button className="amx-db-opt amx-db-opt-clear" onClick={() => onSetSort(sort.colId, null)}>清除排序</button>}
+      </div>
+      <button className="amx-db-opt" onClick={onOpenFilters}>筛选…{(view.filters?.length ?? 0) > 0 && <span className="amx-db-opt-check">{view.filters!.length}</span>}</button>
+      <button className="amx-db-opt" onClick={onOpenCalendar}>{calendarActive ? 'Calendar 设置' : '＋ 添加到 Calendar Space'}</button>
       {onDelete ? (
         <button className="amx-db-opt amx-db-opt-danger" onClick={onDelete}>删除视图</button>
       ) : (

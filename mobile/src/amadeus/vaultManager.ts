@@ -5,6 +5,7 @@
 import path from 'path-browserify'
 import { fs, type Dirent } from './fsAdapter'
 import type { CompilerIO } from '@amadeus-shared/compiler'
+import { isDrawingPath } from '@amadeus-shared/excalidraw/format'
 import { attachmentPaths } from './attachmentPaths'
 
 export class VaultManager {
@@ -47,8 +48,9 @@ export class VaultManager {
     return out.sort()
   }
 
-  async listPages(): Promise<string[]> { return this.collectFiles((n) => n.endsWith('.md')) }
-  async listFiles(): Promise<string[]> { return this.collectFiles((n) => !n.endsWith('.md')) }
+  // 白板(.excalidraw.md)绝不进 pages:进了会被 compiler 当页面解析改写=毁档(desktop vaultManager 同款)。
+  async listPages(): Promise<string[]> { return this.collectFiles((n) => n.endsWith('.md') && !isDrawingPath(n)) }
+  async listFiles(): Promise<string[]> { return this.collectFiles((n) => !n.endsWith('.md') || isDrawingPath(n)) }
 
   wasSelfWrite(abs: string, content: string): boolean { return this.lastWritten.get(abs) === content }
 
@@ -187,6 +189,126 @@ export class VaultManager {
     if (abs === this.requireRoot()) throw new Error('Refusing to remove the vault root')
     await fs.rm(abs, { recursive: true, force: true })
     this.lastWritten.delete(abs)
+  }
+
+  // ── 二进制读写(PDF 阅读器/字节资产;desktop writeVaultBytes/readVaultBytes 同款,IO 走 fsAdapter) ──
+
+  async writeVaultBytes(rel: string, bytes: Uint8Array): Promise<void> {
+    const abs = this.resolveInVault(rel) // 越界即抛
+    await fs.mkdir(path.dirname(abs), { recursive: true })
+    await fs.writeFile(abs, bytes)
+  }
+
+  async readVaultBytes(rel: string): Promise<Uint8Array> {
+    return fs.readFile(this.resolveInVault(rel)) // 无 encoding = Uint8Array
+  }
+
+  // ── 回收站(.trash):desktop vaultManager 同款(扁平存放,撞名加 " (N)",.meta.json 记原位;
+  //    点开头目录被扫描/索引天然跳过 → 树/搜索/链接全免疫)。差异:无 watcher → 无 emitMutate。 ──
+
+  private trashDir(): string {
+    return path.join(this.requireRoot(), '.trash')
+  }
+
+  /** trash 条目名来自渲染端,须为纯 basename(防路径穿越)。 */
+  private trashItemAbs(name: string): string {
+    if (!name || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) {
+      throw new Error('Bad trash entry name')
+    }
+    return path.join(this.trashDir(), name)
+  }
+
+  private async readTrashMeta(): Promise<Record<string, { original: string; deletedAt: number }>> {
+    try {
+      const raw = JSON.parse(await fs.readFile(path.join(this.trashDir(), '.meta.json'), 'utf8')) as unknown
+      return raw && typeof raw === 'object' ? (raw as Record<string, { original: string; deletedAt: number }>) : {}
+    } catch {
+      return {}
+    }
+  }
+
+  private async writeTrashMeta(meta: Record<string, { original: string; deletedAt: number }>): Promise<void> {
+    await fs.mkdir(this.trashDir(), { recursive: true })
+    await fs.writeFile(path.join(this.trashDir(), '.meta.json'), `${JSON.stringify(meta, null, 2)}\n`)
+  }
+
+  /** 撞名找空位:在扩展名前追加 " (N)"。probe 返回 true = 已占用。 */
+  private async freeName(base: string, probe: (candidate: string) => Promise<boolean>): Promise<string> {
+    let name = base
+    for (let i = 2; await probe(name); i++) {
+      const ext = path.extname(base)
+      name = `${base.slice(0, base.length - ext.length)} (${i})${ext}`
+    }
+    return name
+  }
+
+  /** 移入回收站(文件或文件夹)。 */
+  async trashEntry(rel: string): Promise<void> {
+    const srcAbs = this.resolveInVault(rel)
+    if (srcAbs === this.requireRoot()) throw new Error('Refusing to trash the vault root')
+    await fs.mkdir(this.trashDir(), { recursive: true })
+    const exists = async (n: string): Promise<boolean> => {
+      try { await fs.access(this.trashItemAbs(n)); return true } catch { return false }
+    }
+    const name = await this.freeName(path.basename(rel), exists)
+    await fs.rename(srcAbs, this.trashItemAbs(name))
+    this.lastWritten.delete(srcAbs)
+    const meta = await this.readTrashMeta()
+    meta[name] = { original: rel.replace(/\\/g, '/'), deletedAt: Date.now() }
+    await this.writeTrashMeta(meta)
+  }
+
+  async listTrash(): Promise<Array<{ name: string; original: string; deletedAt: number; dir: boolean }>> {
+    let entries: Dirent[]
+    try {
+      entries = await fs.readdir(this.trashDir(), { withFileTypes: true })
+    } catch {
+      return []
+    }
+    const meta = await this.readTrashMeta()
+    const out: Array<{ name: string; original: string; deletedAt: number; dir: boolean }> = []
+    for (const e of entries) {
+      if (e.name === '.meta.json') continue
+      // 无 meta 的孤儿(外部塞进来的)也可见可恢复,原位视为 vault 根同名
+      out.push({ name: e.name, original: meta[e.name]?.original ?? e.name, deletedAt: meta[e.name]?.deletedAt ?? 0, dir: e.isDirectory() })
+    }
+    out.sort((a, b) => b.deletedAt - a.deletedAt)
+    return out
+  }
+
+  /** 恢复:回 meta 记录的原位(父目录补建);原位被占在文件名后加 " (N)"。返回恢复后的相对路径。 */
+  async restoreTrash(name: string): Promise<string> {
+    const root = this.requireRoot()
+    const srcAbs = this.trashItemAbs(name)
+    const meta = await this.readTrashMeta()
+    const original = (meta[name]?.original ?? name).replace(/\\/g, '/')
+    const occupied = async (rel: string): Promise<boolean> => {
+      try { await fs.access(path.resolve(root, rel)); return true } catch { return false }
+    }
+    const dir = original.includes('/') ? original.slice(0, original.lastIndexOf('/')) : ''
+    const base = await this.freeName(original.slice(original.lastIndexOf('/') + 1), (n) => occupied(dir ? `${dir}/${n}` : n))
+    const dstRel = dir ? `${dir}/${base}` : base
+    const dstAbs = this.resolveInVault(dstRel)
+    await fs.mkdir(path.dirname(dstAbs), { recursive: true })
+    await fs.rename(srcAbs, dstAbs)
+    delete meta[name]
+    await this.writeTrashMeta(meta)
+    return dstRel
+  }
+
+  /** 彻底删除单条。 */
+  async deleteTrashEntry(name: string): Promise<void> {
+    await fs.rm(this.trashItemAbs(name), { recursive: true, force: true })
+    const meta = await this.readTrashMeta()
+    if (meta[name]) {
+      delete meta[name]
+      await this.writeTrashMeta(meta)
+    }
+  }
+
+  /** 清空回收站。 */
+  async emptyTrash(): Promise<void> {
+    await fs.rm(this.trashDir(), { recursive: true, force: true })
   }
 
   pageIO(pagePath: string): CompilerIO {

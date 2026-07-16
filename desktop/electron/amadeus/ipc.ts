@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { app, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
-import { IPC, gatePluginManifest, type DbReadResult, type ExternalPluginSource, type PageProps } from '@amadeus-shared/ipc'
+import { IPC, gatePluginManifest, type DbReadResult, type DrawingReadResult, type ExternalPluginSource, type PageProps } from '@amadeus-shared/ipc'
 import { dbFileSchema, parseDb, serializeDb, seedCalendarDb } from '@amadeus-shared/db/schema'
 import { rewriteDbRefs } from '@amadeus-shared/db/rewriteDbRefs'
 import { parseFmObject, setFmExtraOnSource } from '@amadeus-shared/db/pageFrontmatter'
@@ -13,11 +13,23 @@ import { VaultWatcher } from './fs/watcher'
 import { VaultIndex } from './fs/vaultIndex'
 import { readConfig, writeConfig } from './settings'
 import { defaultWorkspaceDir, forsionHomeDir } from '../forsionHome'
+import { logActivity, logNoteEdit } from '../activityLog'
 import { loadTanguCreds } from '../forsionAuth'
 import { fetchLinkMeta, searchImages } from './linkMeta'
 import { cloudVaultDir, legacyCloudVaultDir, migrateCloudMirrorDir, createSyncEngine } from './sync/engine'
 import { createCollabMain, planOf, type SharedBindingPlan } from './sync/collabMain'
 import { SYNC_IPC } from './sync/ipcKeys'
+import {
+  applyRemoteOpToEntries,
+  buildScope,
+  hash8,
+  rewriteEntriesForMove,
+  scopeMatches,
+  validateCloudName,
+  type ScopeSet,
+} from './sync/entryRegistry'
+import { deleteShadowFile } from './sync/shadow'
+import type { CloudChange } from './sync/cloudClient'
 
 const nowIso = (): string => new Date().toISOString()
 
@@ -133,6 +145,122 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
 
   /** 活动 vault 是否就是云镜像(胶囊滑块的 Cloud 侧)。 */
   const onCloudSide = (): boolean => vault.getRoot() === cloudVaultDir()
+
+  // ── 按条目云同步:每个开过同步的本地 vault 一个绑定(localRoot=vault 根,serverDir=<云名>)。
+  // own 镜像引擎不排除 <云名>/ 前缀 → 条目绑定推上去的内容被它当「另一台设备」拉进镜像,
+  // 云端侧 UI 白得;两引擎靠 clientIdSuffix 区分回声。注册表在 AmadeusConfig.entrySync。
+  type EntryEngineRec = { engine: ReturnType<typeof createSyncEngine>; scope: { current: ScopeSet }; cloudName: string }
+  const entryEngines = new Map<string, EntryEngineRec>()
+  const entryMarkersEnsured = new Set<string>()
+  const emitEntryChange = (): void => {
+    getWindow()?.webContents.send(SYNC_IPC.entryChange)
+  }
+  /** 远端结构事件(move/delete…)应用后跟进注册表,否则远端改名后 scope 失配静默停同步。 */
+  const onEntryRemote = (vaultRoot: string, ev: CloudChange): void => {
+    void (async () => {
+      const rec = entryEngines.get(vaultRoot)
+      if (!rec) return
+      const strip = (p: string | null | undefined): string | null =>
+        p && p.startsWith(`${rec.cloudName}/`) ? p.slice(rec.cloudName.length + 1) : null
+      const rel = strip(ev.path)
+      if (!rel) return
+      const cfg = await readConfig()
+      const v = (cfg.entrySync ?? []).find((x) => x.vaultRoot === vaultRoot)
+      if (!v) return
+      const r = applyRemoteOpToEntries(
+        v.entries,
+        ev.op as 'move' | 'rename-folder' | 'move-folder' | 'delete' | 'delete-folder',
+        rel,
+        strip(ev.newPath),
+      )
+      if (!r.changed) return
+      v.entries = r.next
+      await writeConfig({ entrySync: cfg.entrySync })
+      rec.scope.current = buildScope(v.entries)
+      emitEntryChange()
+    })()
+  }
+  const entryEngineDeps = (vaultRoot: string): typeof engineDeps & { onRemoteApplied: (ev: CloudChange) => void } => ({
+    ...engineDeps,
+    onStatus: (s: unknown) =>
+      getWindow()?.webContents.send(SYNC_IPC.status, { ...(s as object), side: 'local', binding: vaultRoot }),
+    onRemoteApplied: (ev) => onEntryRemote(vaultRoot, ev),
+  })
+  const refreshEntryBindings = async (): Promise<void> => {
+    const list = (await readConfig()).entrySync ?? []
+    const want = new Map(list.map((v) => [v.vaultRoot, v]))
+    for (const [root, rec] of entryEngines) {
+      const v = want.get(root)
+      if (v && v.cloudName === rec.cloudName) continue
+      rec.engine.stop()
+      entryEngines.delete(root)
+      // 云名变更:serverDir 变了,旧 shadow 的服务端路径键全部失效,必须清掉重来。
+      if (v) void deleteShadowFile(`amadeus-sync-entry-${hash8(root)}`)
+    }
+    for (const v of list) {
+      const existing = entryEngines.get(v.vaultRoot)
+      if (existing) {
+        existing.scope.current = buildScope(v.entries)
+        continue
+      }
+      const scope = { current: buildScope(v.entries) }
+      const cloudName = v.cloudName
+      const engine = createSyncEngine(entryEngineDeps(v.vaultRoot), {
+        localRoot: v.vaultRoot,
+        shadowName: `amadeus-sync-entry-${hash8(v.vaultRoot)}`,
+        vaultId: 'first',
+        serverDir: cloudName,
+        clientIdSuffix: `entry-${hash8(v.vaultRoot)}`,
+        requireRootExists: true,
+        ignoreNames: ['.git', 'node_modules', '.trash'],
+        inScope: (sp) => {
+          if (sp === cloudName) return true // 根文件夹本身(mkdir 等结构事件)
+          if (!sp.startsWith(`${cloudName}/`)) return false
+          return scopeMatches(scope.current, sp.slice(cloudName.length + 1))
+        },
+      })
+      entryEngines.set(v.vaultRoot, { engine, scope, cloudName })
+      engine.start()
+    }
+    // 旧库标记补写:<云名>/.forsion-vault 是 web 端识别「同步 Vault 分区」的标记,标记机制
+    // 之前开启的库没有。幂等(已存在=409 吞),每进程每云名只试一次;失败(离线)下次进程再试。
+    for (const v of list) {
+      if (entryMarkersEnsured.has(v.cloudName)) continue
+      entryMarkersEnsured.add(v.cloudName)
+      void (async () => {
+        try {
+          const vid = await collabMain.ensureOwnVault()
+          await collabMain.call('PUT', `/vaults/${encodeURIComponent(vid)}/file`, { path: `${v.cloudName}/.forsion-vault`, content: '', baseSeq: 0 })
+        } catch { /* 已存在/离线:无害 */ }
+      })()
+    }
+  }
+  /** 本地 vault 内移动/改名跟随:过渡期新旧路径并集进 scope(精确 move 两端过闸,.md 与 .fd
+   *  是两次独立 hook,宽限期让后到的 .fd move 也走精确通道),再落盘收敛。 */
+  const onLocalEntryMove = async (root: string, fromRel: string, toRel: string, rec: EntryEngineRec): Promise<void> => {
+    const from = fromRel.replace(/\\/g, '/')
+    const to = toRel.replace(/\\/g, '/')
+    const cfg = await readConfig()
+    const v = (cfg.entrySync ?? []).find((x) => x.vaultRoot === root)
+    if (!v) {
+      rec.engine.notifyLocalMove(from, to)
+      return
+    }
+    const r = rewriteEntriesForMove(v.entries, from, to)
+    if (!r.changed) {
+      rec.engine.notifyLocalMove(from, to)
+      return
+    }
+    rec.scope.current = buildScope([...v.entries, ...r.next])
+    rec.engine.notifyLocalMove(from, to)
+    v.entries = r.next
+    await writeConfig({ entrySync: cfg.entrySync })
+    emitEntryChange()
+    setTimeout(() => {
+      const cur = entryEngines.get(root)
+      if (cur === rec) cur.scope.current = buildScope(v.entries)
+    }, 10_000)
+  }
   /** 按路径把应用内写事件路由到对应引擎(与我共享/<slug>/** → 该共享绑定;其余 → own)。 */
   const routeNotify = (rel: string): { engine: ReturnType<typeof createSyncEngine>; rel: string } => {
     const posix = rel.replace(/\\/g, '/')
@@ -141,22 +269,32 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
     }
     return { engine: sync, rel: posix }
   }
-  // 应用内写钩子只在活动 vault = 镜像时转发(精确 move 保服务端文件 id);其余场景引擎自带 watcher 兜底。
+  // 应用内写钩子:活动 vault=镜像 → 按前缀路由到 own/共享引擎;活动 vault=本地且开了按条目
+  // 同步 → 转发该 vault 的条目绑定(move 必须走这里:光靠 chokidar 是 unlink+add,新路径若
+  // 尚未跟进注册表就不在 scope,重命名会变成云端删除)。其余场景引擎自带 watcher 兜底。
   vault.setMutationHooks(
     (rel, kind) => {
-      if (!onCloudSide()) return
-      const r = routeNotify(rel)
-      r.engine.notifyLocal(r.rel, kind)
+      if (onCloudSide()) {
+        const r = routeNotify(rel)
+        r.engine.notifyLocal(r.rel, kind)
+        return
+      }
+      entryEngines.get(vault.getRoot() ?? '')?.engine.notifyLocal(rel, kind)
     },
     (from, to) => {
-      if (!onCloudSide()) return
-      const f = routeNotify(from)
-      const t = routeNotify(to)
-      if (f.engine === t.engine) f.engine.notifyLocalMove(f.rel, t.rel)
-      else {
-        f.engine.notifyLocal(f.rel, 'remove')
-        t.engine.notifyLocal(t.rel, 'write')
+      if (onCloudSide()) {
+        const f = routeNotify(from)
+        const t = routeNotify(to)
+        if (f.engine === t.engine) f.engine.notifyLocalMove(f.rel, t.rel)
+        else {
+          f.engine.notifyLocal(f.rel, 'remove')
+          t.engine.notifyLocal(t.rel, 'write')
+        }
+        return
       }
+      const root = vault.getRoot() ?? ''
+      const rec = entryEngines.get(root)
+      if (rec) void onLocalEntryMove(root, from, to, rec)
     },
   )
 
@@ -204,8 +342,83 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
   ipcMain.handle(SYNC_IPC.syncNow, async () => {
     void refreshSharedBindings() // 顺带发现新接受的共享
     for (const { engine } of sharedEngines.values()) void engine.syncNow()
+    for (const { engine } of entryEngines.values()) void engine.syncNow()
     return sync.syncNow()
   })
+
+  // ── 按条目云同步 IPC 面 ────────────────────────────────────────────────────
+  ipcMain.handle(SYNC_IPC.entryGet, async () => {
+    const cfg = await readConfig()
+    return { vaults: cfg.entrySync ?? [], activeRoot: vault.getRoot(), cloudRoot: cloudVaultDir() }
+  })
+  ipcMain.handle(
+    SYNC_IPC.entryEnable,
+    async (_e, payload: { entries: Array<{ path: string; kind: 'page' | 'folder' | 'asset' }>; cloudName?: string; merge?: boolean }) => {
+      const root = vault.getRoot()
+      if (!root || onCloudSide()) return { error: '仅本地 vault 可开启云同步' }
+      const cfg = await readConfig()
+      const list = cfg.entrySync ?? []
+      let v = list.find((x) => x.vaultRoot === root)
+      if (!v) {
+        const name = (payload.cloudName ?? path.basename(root)).normalize('NFC').trim()
+        const err = validateCloudName(name, list.map((x) => x.cloudName))
+        if (err) return { error: err }
+        if (!payload.merge) {
+          // 云端根占用检测(同名文件夹或文件都算);merge=true 显式合并进现有云文件夹(换机重开)。
+          try {
+            const vid = await collabMain.ensureOwnVault()
+            const tree = await collabMain.call<{ folders?: string[]; entries?: Array<{ path: string }> }>(
+              'GET',
+              `/vaults/${encodeURIComponent(vid)}/tree`,
+            )
+            const occupied =
+              (tree.folders ?? []).some((f) => f === name || f.startsWith(`${name}/`)) ||
+              (tree.entries ?? []).some((en) => en.path === name || en.path.startsWith(`${name}/`))
+            if (occupied) return { conflict: name }
+          } catch (err2) {
+            return { error: (err2 as Error)?.message || '无法连接云端(首次开启需要在线)' }
+          }
+        }
+        v = { vaultRoot: root, cloudName: name, entries: [] }
+        list.push(v)
+        // 云端 vault 分区标记(web 端借此识别「同步 Vault 文件夹」;点开头文件对桌面树/本地回流全隐身)。
+        // 失败不阻断开启(web 少一个分区而已);已存在(merge/换机)409 同样吞掉。
+        void (async () => {
+          try {
+            const vid = await collabMain.ensureOwnVault()
+            await collabMain.call('PUT', `/vaults/${encodeURIComponent(vid)}/file`, { path: `${v!.cloudName}/.forsion-vault`, content: '', baseSeq: 0 })
+          } catch { /* ignore */ }
+        })()
+      }
+      for (const en of payload.entries ?? []) {
+        const p = String(en.path ?? '').replace(/\\/g, '/').normalize('NFC')
+        if (!p || v.entries.some((x) => x.path === p)) continue
+        v.entries.push({ path: p, kind: en.kind === 'folder' || en.kind === 'asset' ? en.kind : 'page' })
+      }
+      await writeConfig({ entrySync: list })
+      await refreshEntryBindings()
+      void entryEngines.get(root)?.engine.syncNow()
+      emitEntryChange()
+      return { ok: true, cloudName: v.cloudName }
+    },
+  )
+  ipcMain.handle(SYNC_IPC.entryDisable, async (_e, p: string) => {
+    const root = vault.getRoot()
+    const cfg = await readConfig()
+    const v = (cfg.entrySync ?? []).find((x) => x.vaultRoot === root)
+    if (!root || !v) return { ok: false }
+    const norm = String(p ?? '').replace(/\\/g, '/').normalize('NFC')
+    const before = v.entries.length
+    v.entries = v.entries.filter((x) => x.path !== norm)
+    if (v.entries.length === before) return { ok: false }
+    await writeConfig({ entrySync: cfg.entrySync })
+    await refreshEntryBindings() // scope 缩小=dropShadow 干净解绑;云端/镜像副本保留(撤共享同款纪律)
+    emitEntryChange()
+    return { ok: true }
+  })
+  ipcMain.handle(SYNC_IPC.entryClosure, (_e, rootRel: string, kind: 'page' | 'folder') =>
+    index.relatedClosure(String(rootRel ?? ''), kind === 'folder' ? 'folder' : 'page'),
+  )
 
   // ── collab(页面级共享/发布/presence):token 留主进程,渲染端经 window.amadeusCollab ──
   ipcMain.handle(SYNC_IPC.collabCall, async (_e, fn: string, args: unknown[]) => {
@@ -348,8 +561,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
   ipcMain.handle(
     IPC.savePage,
     async (_e, pagePath: string, manifest: PageManifest, contents: Record<string, string>) => {
-      await savePage(vault.pageIO(pagePath), pagePath, manifest, { contents })
+      const io = vault.pageIO(pagePath)
+      // 活动日志 note.edit:保存前后各读一次盘算行差(文件小,开销可忽略;失败不阻断保存)。
+      const oldText = await io.readFile(pageFileName(pagePath)).catch(() => '')
+      await savePage(io, pagePath, manifest, { contents })
       await index.update(pagePath)
+      try {
+        const newText = await io.readFile(pageFileName(pagePath))
+        logNoteEdit(pagePath, String(oldText ?? ''), String(newText ?? ''))
+      } catch { /* 装饰性数据 */ }
     },
   )
 
@@ -398,10 +618,21 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
       vault.writeAsset(pagePath, fileName, bytes),
   )
 
+  ipcMain.handle(IPC.saveVaultBytes, async (_e, filePath: string, bytes: Uint8Array) => {
+    await vault.writeVaultBytes(filePath, bytes)
+    logActivity('file.save', { f: filePath })
+  })
+
+  ipcMain.handle(IPC.readVaultBytes, (_e, filePath: string) => vault.readVaultBytes(filePath))
+
   ipcMain.handle(
     IPC.saveAttachment,
-    (_e, pagePath: string, fileName: string, bytes: Uint8Array, opts: { mode: 'attachments' | 'same' | 'vault'; folder: string }) =>
-      vault.writeAttachment(pagePath, fileName, bytes, opts),
+    async (_e, pagePath: string, fileName: string, bytes: Uint8Array, opts: { mode: 'attachments' | 'same' | 'vault'; folder: string }) => {
+      const r = await vault.writeAttachment(pagePath, fileName, bytes, opts)
+      // 活动日志:附件/非 md 文件落盘;.db 跳过(renderer 已记 base.create,免重复)。
+      if (!/\.db$/i.test(fileName || '')) logActivity('file.save', { f: fileName })
+      return r
+    },
   )
 
   ipcMain.handle(IPC.openAttachment, async (_e, pagePath: string, ref: string) => {
@@ -455,6 +686,27 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
   ipcMain.handle(IPC.dbWrite, async (_e, dbPath: string, data: unknown) => {
     const parsed = dbFileSchema.parse(data) // 防御性校验:坏数据拒写,绝不落半截文件
     await vault.writeTextFile(dbPath, serializeDb(parsed))
+  })
+
+  // Excalidraw 画板(`.excalidraw.md`,Obsidian 插件同款格式;裸 `.excalidraw` 也认)。
+  // 只搬字节:解析/序列化是纯函数,在渲染端与编辑器同侧(见 shared/amadeus/excalidraw)。
+  ipcMain.handle(IPC.drawingRead, async (_e, pagePath: string, ref: string): Promise<DrawingReadResult> => {
+    // Obsidian 链接省略 .md:`![[Foo.excalidraw]]` 实指 `Foo.excalidraw.md` → 原样先试,落空再补 .md。
+    const abs =
+      (await vault.resolveAttachment(pagePath, ref)) ?? (await vault.resolveAttachment(pagePath, `${ref}.md`))
+    const root = vault.getRoot()
+    if (!abs || !root) return { status: 'missing' }
+    try {
+      return { status: 'ok', path: path.relative(root, abs), source: await fs.readFile(abs, 'utf8') }
+    } catch {
+      return { status: 'missing' }
+    }
+  })
+
+  // 必须走 writeTextFile 而非 saveVaultBytes:后者不记自写账本,而 .excalidraw.md 命中 watcher 的
+  // `.md` 分支 → 每次自动保存都会被当成外部改动回弹。
+  ipcMain.handle(IPC.drawingWrite, async (_e, drawingPath: string, source: string) => {
+    await vault.writeTextFile(drawingPath, source)
   })
 
   // 「笔记视图」(Bases):行 = 目标文件夹直属笔记,frontmatter 是唯一真源。
@@ -638,70 +890,62 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
   ipcMain.handle(IPC.fetchLinkMeta, (_e, url: string) => fetchLinkMeta(url))
   ipcMain.handle(IPC.searchImages, (_e, q: string) => searchImages(q))
 
-  const pluginsDir = (): string | null => {
-    const root = vault.getRoot()
-    return root ? path.join(root, '.amadeus', 'plugins') : null
-  }
-  /** 全局插件目录(跨 vault 生效;market type='amadeus-plugin' 装到同目录)。 */
-  const globalPluginsDir = (): string => path.join(forsionHomeDir(), 'amadeus', 'plugins')
+  // Forsion(UI)插件单一目录(market type='amadeus-plugin' 装到同目录)。vault 级装载已砍——
+  // Amadeus 只是一个 Space,插件属于 Forsion 桌面本体,不属于某个 vault。
+  const globalPluginsDir = (): string => path.join(forsionHomeDir(), 'plugins')
 
   ipcMain.handle(IPC.listPlugins, async (): Promise<ExternalPluginSource[]> => {
-    // 双根扫描,vault 优先(同 id vault 覆盖全局 = Obsidian 式开发覆盖;先扫先得,照 tangu-agent loader 的纪律)。
-    const vaultDir = pluginsDir()
-    const roots: Array<{ dir: string; source: 'vault' | 'global' }> = [
-      ...(vaultDir ? [{ dir: vaultDir, source: 'vault' as const }] : []),
-      { dir: globalPluginsDir(), source: 'global' as const },
-    ]
     const seen = new Set<string>()
     const out: ExternalPluginSource[] = []
-    for (const root of roots) {
-      let entries: import('node:fs').Dirent[]
+    let entries: import('node:fs').Dirent[]
+    try {
+      entries = await fs.readdir(globalPluginsDir(), { withFileTypes: true })
+    } catch {
+      return out
+    }
+    for (const e of entries) {
+      if (!e.isDirectory() || e.name.startsWith('.')) continue
+      const pdir = path.join(globalPluginsDir(), e.name)
       try {
-        entries = await fs.readdir(root.dir, { withFileTypes: true })
-      } catch {
-        continue
-      }
-      for (const e of entries) {
-        if (!e.isDirectory() || e.name.startsWith('.')) continue
-        const pdir = path.join(root.dir, e.name)
-        try {
-          const m = JSON.parse(await fs.readFile(path.join(pdir, 'manifest.json'), 'utf8')) as {
-            id?: string
-            name?: string
-            version?: string
-            description?: string
-            main?: string
-            apiVersion?: number
-            minAppVersion?: string
-          }
-          const id = m.id || e.name
-          if (seen.has(id)) continue
-          // 门禁:apiVersion 不匹配 / 应用太旧 → 列出但不可加载(blocked 徽章),code 不读不发。
-          const blocked = gatePluginManifest(m, app.getVersion())
-          const code = blocked ? '' : await fs.readFile(path.join(pdir, m.main || 'main.js'), 'utf8')
-          // seen 只在成功列出后占位:vault 副本坏了(如 main.js 缺失)不该把同 id 的全局副本也藏掉。
-          seen.add(id)
-          out.push({
-            id,
-            name: m.name || e.name,
-            version: m.version || '0.0.0',
-            description: m.description,
-            code,
-            apiVersion: typeof m.apiVersion === 'number' ? m.apiVersion : 1,
-            minAppVersion: typeof m.minAppVersion === 'string' ? m.minAppVersion : undefined,
-            source: root.source,
-            blocked: blocked ?? undefined,
-          })
-        } catch {
-          /* skip malformed plugin */
+        const m = JSON.parse(await fs.readFile(path.join(pdir, 'manifest.json'), 'utf8')) as {
+          id?: string
+          name?: string
+          version?: string
+          description?: string
+          main?: string
+          apiVersion?: number
+          minAppVersion?: string
+          requiresApp?: string
         }
+        const id = m.id || e.name
+        if (seen.has(id)) continue
+        // 门禁:apiVersion 不匹配 / 应用太旧 → 列出但不可加载(blocked 徽章),code 不读不发。
+        const blocked = gatePluginManifest(m, app.getVersion())
+        const code = blocked ? '' : await fs.readFile(path.join(pdir, m.main || 'main.js'), 'utf8')
+        // README 给设置详情页;blocked 也读(无害,帮用户了解这插件是什么)。
+        const readme = await fs.readFile(path.join(pdir, 'README.md'), 'utf8').then((s) => s.slice(0, 65536), () => undefined)
+        seen.add(id)
+        out.push({
+          id,
+          name: m.name || e.name,
+          version: m.version || '0.0.0',
+          description: m.description,
+          code,
+          apiVersion: typeof m.apiVersion === 'number' ? m.apiVersion : 1,
+          minAppVersion: typeof m.minAppVersion === 'string' ? m.minAppVersion : undefined,
+          requiresApp: typeof m.requiresApp === 'string' ? m.requiresApp : undefined,
+          readme,
+          blocked: blocked ?? undefined,
+        })
+      } catch {
+        /* skip malformed plugin */
       }
     }
     return out
   })
 
   ipcMain.handle(IPC.openPluginsFolder, async () => {
-    const dir = pluginsDir() ?? globalPluginsDir() // 无 vault → 打开全局目录
+    const dir = globalPluginsDir()
     await fs.mkdir(dir, { recursive: true })
     await shell.openPath(dir)
   })
@@ -714,8 +958,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
   })
 
   ipcMain.handle(IPC.scaffoldPlugin, async () => {
-    const dir = pluginsDir() ?? globalPluginsDir() // 无 vault → 脚手架落全局目录
-    const pdir = path.join(dir, 'hello-amadeus')
+    const pdir = path.join(globalPluginsDir(), 'hello-amadeus')
     await fs.mkdir(pdir, { recursive: true })
     await fs.writeFile(path.join(pdir, 'manifest.json'), SAMPLE_MANIFEST, 'utf8')
     await fs.writeFile(path.join(pdir, 'main.js'), SAMPLE_MAIN, 'utf8')
@@ -723,6 +966,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
 
   sync.start() // 云镜像同步独立于活动 vault,应用启动即拉起(未登录/显式停用时安静待命)
   void refreshSharedBindings() // 与我共享的绑定引擎(未登录时静默,syncNow/共享列表访问时再刷)
+  void refreshEntryBindings() // 按条目同步绑定(注册表为空时零动作;vault 根不在时该绑定停在 error 态)
 
   return { getVaultRoot: () => vault.getRoot() }
 }

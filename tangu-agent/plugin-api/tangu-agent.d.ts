@@ -30,6 +30,10 @@ export interface ToolContext {
   execMode?: 'sandbox' | 'host';
   cwd?: string;
   agentSlug?: string;
+  /** 工具产出图片的回流闸(view_image / computer-use observe 用):把图片 data URL 交回 loop,
+   *  loop 在本轮工具执行完后物化成一条 user 图像消息追加到对话尾部,让模型"看见"图片。
+   *  缺省(未装配此闸)时工具应优雅降级,不要假定一定可用。 */
+  collectImage?: (img: { url: string; name?: string }) => void;
   displayFile?: (item: { name: string; mime?: string; path?: string; dataUrl?: string }) => void;
 }
 
@@ -38,6 +42,9 @@ export interface ToolCapabilities {
   parallel?: boolean;
   concurrencyKey?: string;
   defaultTimeoutMs?: number;
+  /** 声明本工具的审批档:'command' = 与 run_bash 同档(readonly/auto-edit 下需用户批准)。
+   *  缺省=只读语义,不触发审批。核心据此把插件工具并入审批,无需硬编码工具名。 */
+  approval?: 'command';
 }
 
 export interface ToolDef {
@@ -104,9 +111,19 @@ export interface TanguSdk {
   ): Promise<{ ok: boolean; error?: string }>;
 }
 
+/** 插件注册的 CLI 子命令(`tangu <name> ...`)。 */
+export interface PluginCommand {
+  name: string;
+  summary: string;
+  /** 命令名之后的 argv;返回退出码(或 void=保持进程存活,由其打开的句柄决定)。 */
+  run(argv: string[]): Promise<number | void>;
+}
+
 export interface TanguPluginContext {
   registerPlugin(meta: PluginMeta): void;
   registerToolProvider(p: ToolProvider): void;
+  /** 注册 `tangu <name>` 子命令(如 computer-use 的 doctor/setup)。 */
+  registerCommand(cmd: PluginCommand): void;
   sdk: TanguSdk;
   log(msg: string): void;
   paths: { pluginDir: string };

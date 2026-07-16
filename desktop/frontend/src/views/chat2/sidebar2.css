@@ -1,6 +1,8 @@
 /**
  * 侧栏(编辑式)样式。全 token 驱动 → 随换肤/明暗/扁平自动流动。t2s- 前缀,自含,不依赖 base.css/chat2.css。
  * 右键菜单复用 base.css 的 .ctx-menu。
+ * 度量:字号与间距全表以「工作区-笔记 view」(.t2s-srow 一族)为准统一,间距再一律 ×0.765
+ * (= 用户先 ×0.85 再 ×0.9;新值一律由原始值一次算出,不在 0.85 的结果上二次取整)。字号只统一、不缩放。图标/按钮命中区(24/20/14px)不是间距,不动。
  */
 .t2s-side {
   display: flex;
@@ -39,9 +41,9 @@
 .t2s-search {
   display: flex;
   align-items: center;
-  gap: 7px;
-  margin: 12px 10px 8px;
-  padding: 7px 11px;
+  gap: 5.5px;
+  margin: 9px 7.5px 6px;
+  padding: 5.5px 8.5px;
   border-radius: 999px;
   background: var(--overlay-light, rgba(127, 127, 127, 0.08));
   color: var(--text-muted);
@@ -57,6 +59,55 @@
   font-size: 13px;
 }
 .t2s-dim { opacity: 0.7; flex-shrink: 0; }
+
+/* ══ 前导槽 .t2s-lead ══ 会话 / 文件 / 笔记**三个 view 共用**的行首图标位(用户拍板:三模式统一)。
+ * 槽内:图标(.t2s-lead-icon,或 Amadeus 的 .amx-page-emoji)与展开箭头(.t2s-lead-chev)**叠放**;
+ * 默认恒显图标,可展开的行 hover 才换成箭头。行结构一律 [槽][名字] —— 别再把箭头排到图标外面,
+ * 那正是「图标对不齐」的根因(箭头会把图标往右推)。
+ * 组头与行的左缩进算术见 amadeus/lib/treeIndent.ts(两者 DOM 层数不同,须差 4.5px 补偿)。
+ *
+ * --t2s-icon = 图标尺寸的**唯一旋钮**,且必须是**绝对值**:各类行字号不一定相同(组头曾 11.5、行 13),
+ * 用 em 跟各行字号会让图标又不一样大 —— 这正是用户报过的「文件夹图标小了一圈」。 */
+.t2s-side { --t2s-icon: 13px; }
+.t2sw .t2s-side { --t2s-icon: 16.9px; } /* = 13 × 1.3(用户:emoji 约为字体的 1.3 倍) */
+.t2s-side .t2s-lead {
+  position: relative; flex-shrink: 0;
+  /* 槽跟着图标走:16.9px 图标塞不进写死的 18px 槽(emoji 字形还会略溢出 em 框)。 */
+  width: calc(var(--t2s-icon) + 1.5px); height: calc(var(--t2s-icon) + 1.5px);
+  font-size: var(--t2s-icon);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+/* lucide 默认 24px 是**表现属性**,CSS 压得过 —— 故 JSX 一律别传 size。 */
+.t2s-side .t2s-lead .t2s-lead-icon { width: 1em; height: 1em; }
+.t2s-side .t2s-lead .t2s-lead-chev {
+  position: absolute; inset: 0; margin: 0;
+  align-items: center; justify-content: center;
+  transition: opacity var(--duration-fast, 0.15s), transform var(--duration-fast, 0.15s) var(--ease-out, ease);
+}
+/* 箭头默认恒隐;hover 可展开行才现、图标让位(:has 保证不可展开的行图标恒亮)。
+ * 展开态旋转沿用 .t2s-chev.open;文件夹的「展开了没」靠 FolderOpen/Folder 表达,不靠常驻箭头。 */
+.t2s-side .t2s-lead .t2s-lead-chev { opacity: 0; }
+.t2s-side .t2s-srow:hover .t2s-lead-chev,
+.t2s-side .t2s-folder-row:hover .t2s-lead-chev { opacity: 0.7; }
+.t2s-side .t2s-srow:hover .t2s-lead:has(.t2s-lead-chev) > :not(.t2s-lead-chev),
+.t2s-side .t2s-folder-row:hover .t2s-lead:has(.t2s-lead-chev) > :not(.t2s-lead-chev) { opacity: 0; }
+.t2s-side .t2s-chev { transition: transform var(--duration-fast, 0.15s) var(--ease-out, ease); }
+.t2s-side .t2s-chev.open { transform: rotate(90deg); }
+/* 树的「文件夹/工作区」组头:去掉 .t2s-group-toggle 那套「分区标题」装(11.5px/全大写/字间距)——
+ * 它是给**真**分区头(收藏/最近/集合)用的,树的组头应与行同档 13px(用户拍板)。
+ * gap 对齐 .t2s-srow 的 5.5px、padding 对齐 4.5px,否则图标齐了名字仍差 1.5px、行高还矮 1px。
+ * ⚠️只挂 .t2s-folder-row —— 真分区头不能跟着变。 */
+.t2s-side .t2s-folder-row {
+  gap: 5.5px;
+  padding: 4.5px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+/* .t2s-group 的 margin-top:4.5px 是用来分隔会话侧栏「工作区组」的;树的组头复用了这个类,
+ * 结果组头上方凭空多 4.5px(行之间只有 .t2s-group-sessions 的 1px gap)= 用户报的「间距不统一」。 */
+.t2s-side .t2s-group:has(.t2s-folder-row) { margin-top: 0; }
 
 /* Local|Cloud 胶囊滑块(VaultSideSwitch):等宽双选项,滑块弹性平移 + 文字颜色过渡。
  * 常驻 Amadeus 工作区各子 view 开头(笔记树/全文搜索/标签)。整体 no-drag(Electron 拖窗区兜底)。 */
@@ -127,13 +178,14 @@
 /* (账号卡 + 设置已移到左侧 ribbon 底部,原 .t2s-footer 已退役) */
 
 /* 文件面板:工作区展开后的磁盘文件树 */
-.t2sf-tree { display: flex; flex-direction: column; padding: 2px 0 6px; }
+.t2sf-tree { display: flex; flex-direction: column; padding: 1.5px 0 4.5px; }
+/* 行度量对齐笔记树 .t2s-srow(左缩进实际由内联 paddingLeft: 14+depth*10.5 覆盖)。 */
 .t2sf-row {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 5.5px;
   width: 100%;
-  padding: 4px 8px;
+  padding: 4.5px 6px 4.5px 14px;
   text-align: left;
   border-radius: var(--radius-sm, 8px);
   color: var(--text);
@@ -142,38 +194,38 @@
   transition: background var(--duration-fast, 0.15s);
 }
 .t2sf-row:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.08)); }
-.t2sf-chev { width: 14px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--text-faint, var(--text-muted)); }
 .t2sf-fic { flex-shrink: 0; color: var(--text-muted); }
 .t2sf-file .t2sf-fic { color: var(--text-faint, var(--text-muted)); }
 .t2sf-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.t2sf-size { flex-shrink: 0; font-size: 11px; color: var(--text-faint, var(--text-muted)); }
-.t2sf-loading { font-size: 12px; color: var(--text-faint, var(--text-muted)); padding: 3px 8px; }
-.t2sf-empty { font-size: 12px; color: var(--text-faint, var(--text-muted)); padding: 4px 8px 4px 22px; }
+.t2sf-size { flex-shrink: 0; font-size: 10.5px; color: var(--text-faint, var(--text-muted)); }
+.t2sf-loading { font-size: 12.5px; color: var(--text-faint, var(--text-muted)); padding: 2.5px 6px; }
+/* 左 30px 不是间距而是对齐常量(= 缩进基准 14 + 图标列偏移 16),与同槽 .t2sf-loading 的内联值一致。 */
+.t2sf-empty { font-size: 12.5px; color: var(--text-faint, var(--text-muted)); padding: 3px 6px 3px 30px; }
 .t2sf-row.sel { background: var(--overlay-medium); }
 .t2sf-row.drop, .t2s-group.drop { background: var(--accent-light); box-shadow: inset 0 0 0 1px var(--accent-ink); border-radius: var(--radius-sm, 8px); }
 .t2sf-input {
-  display: block; width: calc(100% - 32px); margin: 2px 8px 2px 0;
-  padding: 3px 6px; font-size: 12.5px; color: var(--text);
+  display: block; width: calc(100% - 32px); margin: 1.5px 6px 1.5px 0;
+  padding: 1.5px 4.5px; font-size: 13px; color: var(--text);
   background: var(--bg-card); border: 1px solid var(--accent-ink); border-radius: var(--radius-sm, 8px);
   outline: none;
 }
 
 
 /* 滚动区 */
-.t2s-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 8px 12px; }
+.t2s-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 1.5px 6px 9px; }
 /* 常驻底部区(sticky footer):笔记的回收站 / 会话的添加本地工作区+已归档 —— 不随列表滚走。
  * 归档展开可能很长 → 自身 max-height + 滚动,绝不无限撑高把列表挤没。 */
-.t2s-foot { flex: 0 0 auto; -webkit-app-region: no-drag; border-top: var(--border-width, 1px) solid var(--border); padding: 4px 8px 8px; max-height: 45vh; overflow-y: auto; }
-.t2s-hint { padding: 10px; font-size: 12.5px; color: var(--text-muted); }
+.t2s-foot { flex: 0 0 auto; -webkit-app-region: no-drag; border-top: var(--border-width, 1px) solid var(--border); padding: 3px 6px 6px; max-height: 45vh; overflow-y: auto; }
+.t2s-hint { padding: 7.5px; font-size: 12.5px; color: var(--text-muted); }
 
 /* 顶部入口行 */
-.t2s-special-group { display: flex; flex-direction: column; gap: 1px; margin-bottom: 8px; }
+.t2s-special-group { display: flex; flex-direction: column; gap: 1px; margin-bottom: 6px; }
 .t2s-special {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 7px;
   width: 100%;
-  padding: 8px 10px;
+  padding: 6px 7.5px;
   border: none;
   background: transparent;
   color: var(--text);
@@ -187,6 +239,9 @@
 .t2s-special:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.08)); }
 .t2s-special.active { background: color-mix(in srgb, var(--accent-ink) 12%, transparent); }
 .t2s-special-ic { display: inline-flex; color: var(--text-muted); flex-shrink: 0; }
+/* 入口行图标也吃同一个 --t2s-icon:它与树行的图标同处一列,尺寸不同就是「有的图标偏小」。
+ * ⚠️CSS 的 width/height 压得过 lucide 的 size={N}(表现属性)→ JSX 里传的 size 对本槽**无效**,别改那里。 */
+.t2s-side .t2s-special-ic > svg { width: var(--t2s-icon, 13px); height: var(--t2s-icon, 13px); }
 .t2s-special.active .t2s-special-ic { color: var(--accent-ink); }
 .t2s-special-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .t2s-special-go { display: inline-flex; color: var(--text-faint, var(--text-muted)); opacity: 0.6; border-radius: 6px; }
@@ -196,8 +251,8 @@
 .t2s-group {
   display: flex;
   align-items: center;
-  gap: 2px;
-  margin-top: 6px;
+  gap: 1.5px;
+  margin-top: 4.5px;
   border-radius: 8px;
   position: relative;
 }
@@ -219,8 +274,8 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 6px;
+  gap: 4px;
+  padding: 4px 4.5px;
   border: none;
   background: transparent;
   color: var(--text-muted);
@@ -236,7 +291,7 @@
 .t2s-group-toggle:hover { color: var(--text); }
 .t2s-group-toggle.active { color: var(--accent-ink); }
 .t2s-chev { display: inline-flex; opacity: 0.7; flex-shrink: 0; cursor: pointer; }
-.t2s-group-name { display: inline-flex; align-items: center; gap: 5px; flex: 1; min-width: 0; white-space: nowrap; }
+.t2s-group-name { display: inline-flex; align-items: center; gap: 4px; flex: 1; min-width: 0; white-space: nowrap; }
 .t2s-group-name > svg { flex-shrink: 0; }
 .t2s-group-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .t2s-count {
@@ -246,7 +301,7 @@
   color: var(--text-faint, var(--text-muted));
   background: var(--overlay-light, rgba(127, 127, 127, 0.1));
   border-radius: 999px;
-  padding: 0 6px;
+  padding: 0 4.5px;
   line-height: 16px;
 }
 .t2s-mini-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint, var(--text-muted)); opacity: 0.5; }
@@ -262,14 +317,14 @@
 .t2s-group-add:hover { opacity: 1; background: var(--overlay-light, rgba(127, 127, 127, 0.12)); color: var(--text); }
 
 /* 会话行 */
-.t2s-group-sessions { display: flex; flex-direction: column; gap: 1px; padding-bottom: 2px; }
+.t2s-group-sessions { display: flex; flex-direction: column; gap: 1px; padding-bottom: 1.5px; }
 .t2s-srow {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 5.5px;
   width: 100%;
-  padding: 6px 8px 6px 18px;
+  padding: 4.5px 6px 4.5px 14px;
   border: none;
   background: transparent;
   color: var(--text);
@@ -285,13 +340,16 @@
 .t2s-srow.active::before {
   content: '';
   position: absolute;
-  left: 6px; top: 7px; bottom: 7px;
+  left: 4.5px; top: 5.5px; bottom: 5.5px;
   width: 2px; border-radius: 2px;
   background: var(--accent-ink);
 }
 .t2s-srow-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .t2s-faint { color: var(--text-faint, var(--text-muted)); }
 .t2s-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+/* 会话状态点贴在前导槽图标的右下角:**绝对定位**,不进内联流 —— 曾经内联排在标题前,
+ * 有状态的行会被整体推右 6px+gap,会话行自己就先对不齐了。描边让它在深色图标上也看得清。 */
+.t2s-lead .t2s-dot { position: absolute; right: -1px; bottom: -1px; box-shadow: 0 0 0 1.5px var(--sidebar-bg); }
 .t2s-dot.running { background: var(--accent-ink); animation: t2s-pulse 1.4s ease-in-out infinite; }
 .t2s-dot.unread { background: var(--accent-ink); opacity: 0.6; }
 @keyframes t2s-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.7); } }
@@ -312,29 +370,29 @@
   font-family: var(--font-ui); font-size: 13px;
   border: var(--border-width, 1px) solid var(--accent-ink);
   border-radius: var(--radius-sm, 8px);
-  padding: 2px 6px; outline: none;
+  padding: 1.5px 4.5px; outline: none;
 }
 
 .t2s-viewmore {
-  margin: 2px 0 0 18px;
-  padding: 4px 8px;
+  margin: 1.5px 0 0 14px;
+  padding: 3px 6px;
   border: none; background: transparent;
-  color: var(--text-muted); font-family: var(--font-ui); font-size: 12px;
+  color: var(--text-muted); font-family: var(--font-ui); font-size: 13px;
   text-align: left; cursor: pointer; border-radius: 6px;
 }
 .t2s-viewmore:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.08)); color: var(--text); }
 
 .t2s-add-ws {
-  display: flex; align-items: center; gap: 7px;
-  width: 100%; margin-top: 8px; padding: 8px 10px;
+  display: flex; align-items: center; gap: 5.5px;
+  width: 100%; margin-top: 6px; padding: 6px 7.5px;
   border: 1px dashed var(--border); background: transparent;
-  color: var(--text-muted); font-family: var(--font-ui); font-size: 12.5px;
+  color: var(--text-muted); font-family: var(--font-ui); font-size: 13px;
   border-radius: 10px; cursor: pointer;
   transition: border-color var(--duration-fast, 0.15s), color var(--duration-fast, 0.15s);
 }
 .t2s-add-ws:hover { border-color: var(--accent-ink); color: var(--text); }
 
-.t2s-archived-toggle { margin-top: 6px; padding-left: 8px; }
+.t2s-archived-toggle { margin-top: 4.5px; padding-left: 6px; }
 
 /* ── 统一「工作区」视图壳(WorkspaceView):头部模式切换器 + 模式体容器 ── */
 .t2sw { display: flex; flex-direction: column; height: 100%; min-height: 0; }
@@ -352,3 +410,10 @@
 /* 子视图(会话/文件/笔记)不自带底色 —— 直接用工作区视图所在面板的背景,切换时无「另一层」。 */
 .t2sw .t2s-side { background: transparent; }
 .t2sw-empty { padding: 18px 12px; color: var(--text-muted); font-size: 12.5px; }
+/* 观感(用户指定):工作区视图整体加粗 + 前导图标放大到字号的 1.3 倍。
+ * `*` 兜住 button/input(不继承 font)与子视图自带的 500/600;.t2s-vaultseg button 特异性(0,1,1)更高故单列。
+ * ponytail: 图标只调笔记树的前导槽(.t2s-lead);标题正文里手打的 emoji 不跟(要跟得上
+ * @font-face size-adjust + unicode-range 那套,等有人抱怨再说)。 */
+.t2sw, .t2sw * { font-weight: 600; }
+.t2sw .t2s-vaultseg button { font-weight: 600; }
+/* 图标放大档 = 本文件上方的 `.t2sw .t2s-side { --t2s-icon }`(三个 view 共用的那一个旋钮)。 */

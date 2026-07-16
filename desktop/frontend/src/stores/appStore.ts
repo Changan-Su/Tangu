@@ -8,7 +8,7 @@
 import { create } from 'zustand'
 import type {
   AgentConfig, AgentRunEvent, Attachment, AuthStatusInfo, ModelsResponse, NormalAgentDef,
-  SessionRecord, SkillInfo, SubChat, TanguDesktopConfig, UiMessage, WorkspaceDescriptor, StoredDesktopConfig,
+  MsgSeg, SessionRecord, SkillInfo, SubChat, TanguDesktopConfig, UiMessage, WorkspaceDescriptor, StoredDesktopConfig,
 } from '../types'
 import { CLOUD_WORKSPACE_KEY, SHOW_SYSTEM_PROMPT_KEY } from '../types'
 import * as api from '../services/backendService'
@@ -108,6 +108,23 @@ function appendSubText(s: SubChat, delta: string): SubChat {
   return { ...s, segs }
 }
 
+// 助手消息顺序段(直播归约):文字并入尾部 text 段;连续工具并入尾部 tools 段——保留文字↔工具发生顺序。
+export function pushTextSeg(segs: MsgSeg[] | undefined, delta: string): MsgSeg[] {
+  if (!delta) return segs || []
+  const next = (segs || []).slice()
+  const last = next[next.length - 1]
+  if (last && last.t === 'text') next[next.length - 1] = { t: 'text', text: last.text + delta }
+  else next.push({ t: 'text', text: delta })
+  return next
+}
+export function pushToolSeg(segs: MsgSeg[] | undefined, id: string): MsgSeg[] {
+  const next = (segs || []).slice()
+  const last = next[next.length - 1]
+  if (last && last.t === 'tools') next[next.length - 1] = { t: 'tools', ids: [...last.ids, id] }
+  else next.push({ t: 'tools', ids: [id] })
+  return next
+}
+
 // 非响应式跨事件状态(App.tsx 的 useRef Map/Set)。
 /** 助手身份盖章:外部引擎→引擎名(无 agentId,不冒用 Tangu agent 头像);否则非群聊用会话 agent(或默认 agent)slug+名;空=基础 Tangu。送出/恢复/续聊共用,保证恢复的 run 不退回「TANGU」。 */
 function agentStamp(s: Pick<AppState, 'engines' | 'agentDefs' | 'defaultAgentSlug'>, config?: AgentConfig): { agentId?: string; agentName?: string } {
@@ -162,17 +179,21 @@ export interface AppState {
   agentAvatars: Record<string, string>
   defaultAgentSlug: string
   authInfo: AuthStatusInfo | null
-  engines: Array<{ id: string; name: string; available?: boolean; defaultModel?: string }>
+  engines: Array<{ id: string; name: string; available?: boolean; status?: 'available' | 'needs-signin' | 'not-installed'; defaultModel?: string }>
   engineCaps: Record<string, { models: Array<{ id: string; name: string; description?: string }>; commands: Array<{ name: string; description: string; hint?: string }> }>
   specialEnabled: { historian: boolean; muse: boolean }
   newChatWs: WorkspaceDescriptor | null
   newChatCfg: AgentConfig
   newChatModel: string | null
+  /** 瞬态:外部入口(反馈诊断/对话建 agent/插件)预填聊天框的草稿;Composer2 mount 消费一次即清,不落盘。 */
+  pendingDraft: string | null
   filePreview: PreviewTarget | null
   messagesBySession: Record<string, UiMessage[]>
   configBySession: Record<string, AgentConfig>
   runningBySession: Record<string, string>
   groupVoting: Record<string, boolean>
+  /** LLM 瞬时失败重试中(引擎 status/llm_retry 事件):渲染「第 N/M 次重试,Xs 后」。任何后续非 status 事件即清除。 */
+  llmRetryBySession: Record<string, { attempt: number; max: number; waitMs: number; error?: string } | undefined>
   subChatsBySession: Record<string, SubChat[]>
   usageBySession: Record<string, { ctx: number; base: number; live: number }>
   /** 语音消息:按 agent 的生效开关(voice-message 插件启用 + 该 agent apply)。缓存,首次进会话惰性拉取。 */
@@ -244,6 +265,8 @@ export interface AppState {
   setNewChatWs(ws: WorkspaceDescriptor | null): void
   setNewChatCfg(fn: (c: AgentConfig) => AgentConfig): void
   setNewChatModel(id: string | null): void
+  /** 预填聊天框草稿(外部 via-chat 入口的统一接缝);Composer2 消费后自行清空。 */
+  setPendingDraft(text: string | null): void
   setFilePreview(p: PreviewTarget | null): void
   patchConfig(patch: Partial<TanguDesktopConfig>): void
   ensureEngineCaps(engineId: string | undefined): void
@@ -292,12 +315,14 @@ export const useApp = create<AppState>((set, get) => ({
   newChatWs: null,
   newChatCfg: {},
   newChatModel: null,
+  pendingDraft: null,
   filePreview: null,
   messagesBySession: {},
   configBySession: {},
   voiceOnByAgent: {},
   runningBySession: {},
   groupVoting: {},
+  llmRetryBySession: {},
   subChatsBySession: {},
   usageBySession: {},
   unread: loadUnread(),
@@ -352,6 +377,10 @@ export const useApp = create<AppState>((set, get) => ({
     const { patchMessage } = get()
     const pl = ev.payload || {}
     const assistantId = assistantRef.current
+    // 重试提示自清:重试后流恢复(token/…)或终结(done/error)的第一个非 status 事件就撤掉横幅。
+    if (ev.type !== 'status' && get().llmRetryBySession[sessionId]) {
+      set((s) => ({ llmRetryBySession: { ...s.llmRetryBySession, [sessionId]: undefined } }))
+    }
     const upsertSubChat = (id: string, fn: (s: SubChat) => SubChat, init?: Partial<SubChat>) => {
       set((s) => {
         const list = s.subChatsBySession[sessionId] || []
@@ -370,7 +399,8 @@ export const useApp = create<AppState>((set, get) => ({
         patchMessage(sessionId, assistantId, (m) => {
           // 单条正文软上限:超长正文 + markdown 重渲染会持续吃渲染进程内存(白屏 OOM 诱因之一)。
           if (m.content.length >= MAX_MSG_CHARS) return m // 已达上限,停止累积(后端仍完整落库)
-          return { ...m, content: capContent(m.content + (pl.delta || '')) }
+          // ponytail: 顺序段用原始 delta;极长消息 capContent 后 segments 文字或略长于 content——罕见且已降级,不特殊处理。
+          return { ...m, content: capContent(m.content + (pl.delta || '')), segments: pushTextSeg(m.segments, pl.delta || '') }
         })
         break
       case 'reasoning':
@@ -383,9 +413,9 @@ export const useApp = create<AppState>((set, get) => ({
         patchMessage(sessionId, assistantId, (m) => {
           const evs = (m.toolEvents || []).slice()
           const i = evs.findIndex((tt) => tt.id === pl.id)
-          if (i >= 0) evs[i] = { ...evs[i], arguments: (evs[i].arguments || '') + (pl.delta || '') }
-          else evs.push({ id: pl.id, name: pl.name || 'tool', arguments: pl.delta || '', done: false })
-          return { ...m, toolEvents: evs }
+          if (i >= 0) { evs[i] = { ...evs[i], arguments: (evs[i].arguments || '') + (pl.delta || '') }; return { ...m, toolEvents: evs } }
+          evs.push({ id: pl.id, name: pl.name || 'tool', arguments: pl.delta || '', done: false })
+          return { ...m, toolEvents: evs, segments: pushToolSeg(m.segments, pl.id) }
         })
         break
       case 'tool_call':
@@ -394,9 +424,9 @@ export const useApp = create<AppState>((set, get) => ({
           const evs = (m.toolEvents || []).slice()
           const i = evs.findIndex((tt) => tt.id === pl.id)
           const item = { id: pl.id, name: pl.name, arguments: pl.arguments, done: false, startedAt: pl.startedAt, parallelGroup: pl.parallelGroup }
-          if (i >= 0) evs[i] = { ...evs[i], ...item }
-          else evs.push(item)
-          return { ...m, toolEvents: evs }
+          if (i >= 0) { evs[i] = { ...evs[i], ...item }; return { ...m, toolEvents: evs } }
+          evs.push(item)
+          return { ...m, toolEvents: evs, segments: pushToolSeg(m.segments, pl.id) }
         })
         break
       case 'tool_result':
@@ -611,6 +641,20 @@ export const useApp = create<AppState>((set, get) => ({
         else if (pl.phase === 'done') upsertSubChat(id, (s) => ({ ...s, streaming: false }))
         break
       }
+      case 'status':
+        // 引擎的其余 status(generating 进度等)对桌面 UI 无用,只取网络重试提示。
+        if (pl.phase === 'llm_retry') {
+          set((s) => ({
+            llmRetryBySession: {
+              ...s.llmRetryBySession,
+              [sessionId]: {
+                attempt: Number(pl.attempt) || 1, max: Number(pl.max) || 0,
+                waitMs: Number(pl.waitMs) || 0, error: pl.error ? String(pl.error) : undefined,
+              },
+            },
+          }))
+        }
+        break
       default: break
     }
   },
@@ -1318,6 +1362,7 @@ export const useApp = create<AppState>((set, get) => ({
   setNewChatWs: (ws) => set({ newChatWs: ws }),
   setNewChatCfg: (fn) => set((s) => ({ newChatCfg: fn(s.newChatCfg) })),
   setNewChatModel: (id) => set({ newChatModel: id }),
+  setPendingDraft: (text) => set({ pendingDraft: text }),
   // 预览改道:所有入口(文件面板/右栏工作区/对话内联)汇聚于此 —— 一律开主区标签页(wsfile 视图)。
   // 原 chatbox 上方浮层暂时停用(filePreview 永不置非空,ChatView 渲染块保留但不触发)。
   setFilePreview: (p) => { if (p) openWsFile(p); else set({ filePreview: null }) },

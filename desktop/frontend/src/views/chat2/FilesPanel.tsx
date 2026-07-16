@@ -6,7 +6,7 @@
  *  云端工作区(无磁盘路径)暂不在此面板(之后再开发)。 */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  ChevronRight, ChevronDown, Folder, FolderOpen, RefreshCw,
+  ChevronRight, Folder, FolderOpen, RefreshCw,
   Eye, ExternalLink, FilePlus2, FolderPlus, Pencil, Copy, FolderSearch, Trash2,
 } from 'lucide-react'
 import type { WorkspaceDescriptor } from '../../types'
@@ -17,6 +17,8 @@ import { iconForFile, mimeForExt, fmtSize } from '../../services/fileKinds'
 import { AnimatedCollapse } from '../../components/AnimatedUI'
 import { useApp } from '../../stores/appStore'
 import { hostTargetFor } from '../wsFileNav'
+import { tipProps, fsTipLines } from '../../hoverTip'
+import { folderPadLeft, nameLeft, rowPadLeft } from '@amadeus/lib/treeIndent'
 import './sidebar2.css'
 
 interface Entry { name: string; isDir: boolean; size: number; path: string }
@@ -59,7 +61,7 @@ function NameInput({ initial, depth, onCommit, onCancel }: { initial: string; de
   return (
     <input
       className="t2sf-input"
-      style={{ marginLeft: 6 + depth * 14 + 16 }}
+      style={{ marginLeft: nameLeft(depth + 1) }}
       value={v}
       autoFocus
       spellCheck={false}
@@ -80,8 +82,8 @@ function FileRow({ entry, depth, ctx }: { entry: Entry; depth: number; ctx: Tree
   return (
     <div
       className={`t2sf-row t2sf-file${ctx.selected === entry.path ? ' sel' : ''}`}
-      style={{ paddingLeft: 6 + depth * 14 }}
-      title={entry.name}
+      style={{ paddingLeft: rowPadLeft(depth + 1) }}
+      {...tipProps(() => fsTipLines(entry.path, entry.name))}
       draggable
       onDragStart={(e) => ctx.rowDragStart(e, entry)}
       onDragEnd={ctx.dragEnd}
@@ -89,8 +91,7 @@ function FileRow({ entry, depth, ctx }: { entry: Entry; depth: number; ctx: Tree
       onDoubleClick={() => ctx.openFile(entry)}
       onContextMenu={(e) => ctx.onMenu(e, entry)}
     >
-      <span className="t2sf-chev" />
-      <Icon size={14} className="t2sf-fic" />
+      <span className="t2s-lead"><Icon className="t2s-lead-icon t2sf-fic" /></span>
       <span className="t2sf-name">{entry.name}</span>
       {entry.size > 0 && <span className="t2sf-size">{fmtSize(entry.size)}</span>}
     </div>
@@ -131,8 +132,8 @@ function DirRow({ entry, depth, ctx, forceOpen }: { entry: Entry; depth: number;
         : (
           <div
             className={`t2sf-row${ctx.selected === entry.path ? ' sel' : ''}${ctx.dropDir === entry.path ? ' drop' : ''}`}
-            style={{ paddingLeft: 6 + depth * 14 }}
-            title={entry.name}
+            style={{ paddingLeft: rowPadLeft(depth + 1) }}
+            {...tipProps(() => fsTipLines(entry.path, entry.name))}
             draggable
             onDragStart={(e) => ctx.rowDragStart(e, entry)}
             onDragEnd={ctx.dragEnd}
@@ -142,8 +143,11 @@ function DirRow({ entry, depth, ctx, forceOpen }: { entry: Entry; depth: number;
             onClick={(e) => { ctx.select(entry.path); if (e.detail === 1) setOpen((o) => !o) }}
             onContextMenu={(e) => ctx.onMenu(e, entry)}
           >
-            <span className="t2sf-chev">{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
-            {open ? <FolderOpen size={14} className="t2sf-fic" /> : <Folder size={14} className="t2sf-fic" />}
+            {/* 前导槽:与笔记/会话 view 同构(图标 ↔ hover 换箭头);展开态靠 FolderOpen/Folder 表达。 */}
+            <span className="t2s-lead">
+              {open ? <FolderOpen className="t2s-lead-icon t2sf-fic" /> : <Folder className="t2s-lead-icon t2sf-fic" />}
+              <span className={`t2s-chev t2s-lead-chev${open ? ' open' : ''}`}><ChevronRight size={12} /></span>
+            </span>
             <span className="t2sf-name">{entry.name}</span>
           </div>
         )}
@@ -152,7 +156,7 @@ function DirRow({ entry, depth, ctx, forceOpen }: { entry: Entry; depth: number;
           <NameInput initial="" depth={depth + 1} onCommit={(n) => ctx.commitCreate(entry.path, ctx.creating!.kind, n)} onCancel={ctx.cancelEdit} />
         )}
         {kids === null
-          ? <div className="t2sf-loading" style={{ paddingLeft: 6 + (depth + 1) * 14 + 16 }}>…</div>
+          ? <div className="t2sf-loading" style={{ paddingLeft: nameLeft(depth + 2) }}>…</div>
           : <>{kids.map((k) => k.isDir
             ? <DirRow key={k.path} entry={k} depth={depth + 1} ctx={ctx} forceOpen={onPath ? forceOpen : null} />
             : <FileRow key={k.path} entry={k} depth={depth + 1} ctx={ctx} />)}</>}
@@ -337,7 +341,7 @@ export function FilesPanel({ workspaces, onOpenPreview, activeWorkspaceKey, onEn
     if (w?.path && rootsByKey[activeWorkspaceKey] === undefined) loadRoot(activeWorkspaceKey, w.path)
   }, [activeWorkspaceKey, locals, rootsByKey, loadRoot])
 
-  if (!locals.length) return <div className="panel-note" style={{ padding: '18px 12px' }}>{t('panel.files.noLocalWs')}</div>
+  if (!locals.length) return <div className="t2s-hint" style={{ padding: '18px 12px' }}>{t('panel.files.noLocalWs')}</div>
 
   return (
     <aside className="t2s-side">
@@ -349,14 +353,20 @@ export function FilesPanel({ workspaces, onOpenPreview, activeWorkspaceKey, onEn
             <div key={ws.key}>
               <div
                 className={`t2s-group${dropDir === ws.path ? ' drop' : ''}`}
+                // 组头 = depth 0;其下的文件/文件夹行走 rowPadLeft(depth+1) → 缩进一级(见 treeIndent.ts)。
+                style={{ paddingLeft: folderPadLeft(0) }}
                 onContextMenu={(e) => onWsMenu(e, ws)}
                 onDragOver={(e) => { if (ws.path && open) dragOverDir(e, ws.path) }}
                 onDragLeave={() => { if (ws.path) dragLeaveDir(ws.path) }}
                 onDrop={(e) => { if (ws.path) dropOnDir(e, ws.path) }}
               >
-                <button className="t2s-group-toggle" onClick={() => toggleWs(ws)} title={ws.path || undefined}>
-                  <span className="t2s-chev">{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
-                  <span className="t2s-group-name"><Folder size={12} /><span className="t2s-group-label">{ws.name}</span></span>
+                <button className="t2s-group-toggle t2s-folder-row" onClick={() => toggleWs(ws)} title={ws.path || undefined}>
+                  {/* 前导槽:三个 view 同构;展开态靠 FolderOpen/Folder 表达,箭头 hover 才现。 */}
+                  <span className="t2s-lead">
+                    {open ? <FolderOpen className="t2s-lead-icon" /> : <Folder className="t2s-lead-icon" />}
+                    <span className={`t2s-chev t2s-lead-chev${open ? ' open' : ''}`}><ChevronRight size={12} /></span>
+                  </span>
+                  <span className="t2s-group-label">{ws.name}</span>
                 </button>
                 {open && (
                   <button className="t2s-group-add" title={t('panel.action.newFile')} onClick={() => { if (ws.path) setCreating({ dir: ws.path, kind: 'file' }) }}><FilePlus2 size={13} /></button>
@@ -371,7 +381,7 @@ export function FilesPanel({ workspaces, onOpenPreview, activeWorkspaceKey, onEn
                   {creating && ws.path && creating.dir === ws.path && (
                     <NameInput initial="" depth={1} onCommit={(n) => commitCreate(ws.path!, creating.kind, n)} onCancel={() => setCreating(null)} />
                   )}
-                  {roots == null ? <div className="t2sf-loading" style={{ paddingLeft: 22 }}>…</div>
+                  {roots == null ? <div className="t2sf-loading" style={{ paddingLeft: nameLeft(1) }}>…</div>
                     : roots.length === 0 ? <div className="t2sf-empty">{t('panel.files.empty')}</div>
                     : roots.map((e) => e.isDir
                       ? <DirRow key={e.path} entry={e} depth={1} ctx={ctx} forceOpen={open ? expandToPath : null} />

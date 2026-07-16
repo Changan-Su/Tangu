@@ -12,6 +12,8 @@ import type {
   StackNode,
 } from '@amadeus-shared/compiler/types'
 import { pageKey, resolvePageName } from '@amadeus-shared/links'
+import { parsePdfLinkInner } from '@amadeus-shared/pdfLink'
+import { isDrawingPath } from '@amadeus-shared/excalidraw/format'
 import { patchFmExtraText } from '@amadeus-shared/db/pageFrontmatter'
 import { amadeus } from '../api'
 import { computeFdChildren, fdDirOf, isNoteMd, nearestFd, noteOfFd } from '../lib/fd'
@@ -19,6 +21,7 @@ import { resolveFileName } from '../lib/vaultFiles'
 import { makeUndoStack, type Snap } from '../lib/undoHistory'
 import { useUiStore } from './uiStore'
 import { track } from '../../achievements/store'
+import { act } from '../../activity/log'
 
 export interface BlockState {
   id: BlockId
@@ -476,7 +479,7 @@ export const usePageStore = create<PageState>((set, get) => {
       }
       const path = join(base)
       const page = await amadeus.newPage(path)
-      track('note.create')
+      track('note.create'); act('note.create', { f: path })
       await get().refreshPages()
       set({ activePage: path, ...hydrate(page), status: 'ready', focusTitleFor: path })
     },
@@ -563,6 +566,21 @@ export const usePageStore = create<PageState>((set, get) => {
       const raw = name.trim()
       if (!raw) return
       const src = sourcePath ?? get().activePage ?? undefined
+      // PDF 目标 [[report.pdf#page=N]] → 应用内可批注阅读器(必须先接住 raw:linkTarget 会砍掉 #page=)。
+      const pdf = parsePdfLinkInner(raw)
+      if (pdf) {
+        const pdfFile = resolveFileName(pdf.target, get().files, src)
+        if (pdfFile) window.dispatchEvent(new CustomEvent('amadeus:open-pdf', { detail: { path: pdfFile, page: pdf.loc?.page } }))
+        return // 是 PDF 链接:命中即开;未命中也不落「创建笔记」兜底(带 # 的名字无意义)
+      }
+      // 画板命名空间([[X.excalidraw]] 链接,Obsidian 惯例省 .md;listPages 不收画板 → 页面命中不可能):
+      // 应用内开白板 tab(事件解耦同 open-db)。绝不落「创建笔记」兜底 —— createWikiPage 的 newPage
+      // 会把已有画板文件覆盖成空笔记。
+      if (isDrawingPath(raw)) {
+        const hit = resolveFileName(raw, get().files, src) ?? resolveFileName(`${raw}.md`, get().files, src)
+        window.dispatchEvent(new CustomEvent('amadeus:open-drawing', { detail: { path: hit ?? raw } }))
+        return
+      }
       const match = resolvePageName(raw, get().pages, src)
       if (match) {
         void get().loadPage(match)
@@ -587,7 +605,7 @@ export const usePageStore = create<PageState>((set, get) => {
         await get().flushSave() // 换页前落盘,防待存的上一页内容被丢/写错对象
         const path = `${base}.md`
         const page = await amadeus.newPage(path)
-        track('note.create')
+        track('note.create'); act('note.create', { f: path })
         await get().refreshPages()
         set({ activePage: path, ...hydrate(page), status: 'ready', focusTitleFor: path })
       } catch (e) {
@@ -608,7 +626,7 @@ export const usePageStore = create<PageState>((set, get) => {
           await get().flushSave()
           const path = /\.md$/i.test(clean) ? clean : `${clean}.md`
           const page = await amadeus.newPage(path)
-          track('note.create')
+          track('note.create'); act('note.create', { f: path })
           await get().refreshStructure()
           set({ activePage: path, ...hydrate(page), status: 'ready', focusTitleFor: path })
           return
@@ -642,7 +660,7 @@ export const usePageStore = create<PageState>((set, get) => {
       for (let i = 1; globalKeys.has(pageKey(base)) || inFd.has(`${base}.md`.toLowerCase()); i++) base = `${stem}-${i}`
       const path = `${fd}/${base}.md`
       await amadeus.newPage(path) // mkdir -p 语义:desktop atomicWrite / cloud materializeParents / mobile 同
-      track('note.create')
+      track('note.create'); act('note.create', { f: path })
       await get().syncFdChildren(parentPath) // 内含 refreshStructure
       set({ focusTitleFor: path }) // 打开后落光标到标题栏(调用方负责 loadPage 导航)
       return path

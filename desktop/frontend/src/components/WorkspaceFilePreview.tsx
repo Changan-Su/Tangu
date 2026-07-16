@@ -19,7 +19,8 @@ import { useIsDark } from '../services/useIsDark'
 import { useI18n } from '../i18n'
 import 'diff2html/bundles/css/diff2html.min.css'
 // pdf.js worker(?url 走 Vite 资源,单独 asset);PDF 渲染到 canvas,不依赖 Electron PDF 插件。
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+// ⚠️legacy 构建:pdf.js 5.7 用了 Map.prototype.getOrInsertComputed,Electron 40 V8 没有(见 PdfAnnotator)。
+import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
 
 const CodeView = lazy(() => import('./CodeView'))
 
@@ -145,7 +146,7 @@ export const PdfView: React.FC<{ bytes: Uint8Array; download?: () => void }> = (
     setErr(false); setBusy(true); setMore(null)
     void (async () => {
       try {
-        const pdfjs: any = await import('pdfjs-dist')
+        const pdfjs: any = await import('pdfjs-dist/legacy/build/pdf.mjs')
         pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
         doc = await pdfjs.getDocument({ data: bytes.slice() }).promise
         if (cancelled || !ref.current) return

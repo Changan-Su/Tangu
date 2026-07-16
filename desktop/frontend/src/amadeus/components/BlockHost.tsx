@@ -4,9 +4,11 @@ import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { stripPageBasename } from '@amadeus-shared/compiler/names'
 import { toAssetUrl } from '@amadeus-shared/assets'
+import { isDrawingPath } from '@amadeus-shared/excalidraw/format'
 import type { EmbedResolved } from '@amadeus-shared/ipc'
 import { getBlockType } from '../blocks/registry'
 import { DatabaseEmbed } from '../blocks/database/DatabaseEmbed'
+import { ExcalidrawEmbed } from '../blocks/excalidraw/ExcalidrawEmbed'
 import { BookmarkCard } from './BookmarkCard'
 import { useBlockSelection } from '../store/blockSelection'
 import { usePageStore } from '../store/pageStore'
@@ -82,14 +84,22 @@ export const BlockHost = memo(function BlockHost({
     return { name: t, view: viewName?.trim() || null }
   }, [embedTarget, embedImage])
 
+  // `![[画板.excalidraw]]` → Excalidraw 画板(文件其实是 `画板.excalidraw.md`,Obsidian 链接省略 .md 的
+  // 惯例;主进程解析 ref 时会补回来)。同 embedDb:必须先于 embedFile 判定,否则被文件卡吃掉。
+  const embedDraw = useMemo(() => {
+    if (!embedTarget || embedImage || embedDb) return null
+    const t = embedTarget.split('|')[0].trim()
+    return !t.includes('#') && isDrawingPath(t) ? t : null
+  }, [embedTarget, embedImage, embedDb])
+
   // Non-image file (has an extension, no block anchor) → inline preview (pdf/video/audio) or file card.
   const embedFile = useMemo(() => {
-    if (!embedTarget || embedImage || embedDb) return null
+    if (!embedTarget || embedImage || embedDb || embedDraw) return null
     const t = embedTarget.split('|')[0].trim()
     if (t.includes('#') || !FILE_EXT_RE.test(t)) return null
     const kind = PDF_EXT_RE.test(t) ? 'pdf' : VIDEO_EXT_RE.test(t) ? 'video' : AUDIO_EXT_RE.test(t) ? 'audio' : 'other'
     return { name: t, kind, url: kind === 'other' ? '' : toAssetUrl(t) }
-  }, [embedTarget, embedImage, embedDb])
+  }, [embedTarget, embedImage, embedDb, embedDraw])
   const [previewOpen, setPreviewOpen] = useState(true)
 
   // 整块恰是一条裸 URL → 书签卡(og 元数据/YouTube 嵌入);md 落盘仍是那行 URL,零私有语法。
@@ -101,7 +111,7 @@ export const BlockHost = memo(function BlockHost({
   // Resolve a cross-note embed; re-resolve when the link graph changes (source edited externally).
   const [embed, setEmbed] = useState<EmbedResolved | null | 'loading'>('loading')
   useEffect(() => {
-    if (!embedTarget || embedImage || embedDb || embedFile) return
+    if (!embedTarget || embedImage || embedDb || embedDraw || embedFile) return
     let alive = true
     setEmbed('loading')
     amadeus
@@ -115,7 +125,7 @@ export const BlockHost = memo(function BlockHost({
     return () => {
       alive = false
     }
-  }, [embedTarget, embedImage, embedDb, embedFile, linkVersion])
+  }, [embedTarget, embedImage, embedDb, embedDraw, embedFile, linkVersion])
 
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } =
     useSortable({ id: blockId })
@@ -285,6 +295,32 @@ export const BlockHost = memo(function BlockHost({
     )
   }
 
+  // --- Excalidraw 画板(`![[画板.excalidraw]]`)→ 可编辑画布(✕ 只移除块,不删文件) ---
+  if (embedDraw) {
+    return (
+      <div
+        ref={setNodeRef}
+        className="block-host"
+        data-block-id={blockId}
+        data-selected={selected || undefined}
+        data-embed
+        data-menu={blockMenu ? '' : undefined}
+        data-dragging={isDragging || undefined}
+        style={{ transform: CSS.Translate.toString(transform), transition }}
+        onContextMenu={onCtxMenu}
+        onFocusCapture={() => { if (useBlockSelection.getState().id) useBlockSelection.getState().select(null) }}
+      >
+        {isDropTarget && <div className="drop-line" />}
+        {blockEdges}
+        {dragHandle}
+        <div className="block-body">
+          <ExcalidrawEmbed target={embedDraw} pagePath={pagePath} />
+        </div>
+        {blockMenuNode}
+      </div>
+    )
+  }
+
   // --- Non-image file transclusion (`![[report.pdf]]`) → openable file card ---
   if (embedFile) {
     return (
@@ -431,6 +467,7 @@ export const BlockHost = memo(function BlockHost({
         onFocusCapture={() => { if (useBlockSelection.getState().id) useBlockSelection.getState().select(null) }}
     >
       {isDropTarget && <div className="drop-line" />}
+      {blockEdges /* 七个 embed 分支都有,唯独普通块(text)漏了 → text 块左右分栏从来没有落点(实报根因) */}
       {dragHandle}
       <div className="block-body">
         {Editor ? (
