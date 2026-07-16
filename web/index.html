@@ -34,6 +34,25 @@
         } catch (e) { /* private mode */ }
       })();
     </script>
+    <script>
+      // 手机浏览器自动用移动单列布局(@lcl/engine uiMode 在模块加载时定格,必须在任何模块求值前写键)。
+      // 判定=触屏(pointer:coarse)且窄视口;键已存在(含用户经命令面板手动切换过)则尊重,不再自动改。
+      // 加载时命中 → 只写键(模块稍后读到);运行中才命中(DevTools 切设备模拟/真机旋转,UI_MODE 已定格)
+      // → 写键并 reload,否则切了模拟不刷新永远停在桌面布局。
+      (function () {
+        try {
+          var KEY = 'lcl.uiMode';
+          var auto = function () {
+            if (localStorage.getItem(KEY) != null) return false;
+            localStorage.setItem(KEY, 'mobile');
+            return true;
+          };
+          var mq = matchMedia('(pointer: coarse) and (max-width: 820px)');
+          if (mq.matches) auto();
+          mq.addEventListener('change', function (e) { if (e.matches && auto()) location.reload(); });
+        } catch (e) { /* private mode */ }
+      })();
+    </script>
     <style id="tangu-splash-style">
       /* 启动闪屏(白屏过渡):底色取动画 stage 底色 #fbf8f5;logo 动画 1600ms 后整层淡出。 */
       #tangu-splash {

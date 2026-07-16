@@ -26,6 +26,9 @@ const PREVIEW_SIZES: Array<[number, string]> = [[390, 'iPhone'], [414, 'Max'], [
 function MobilePreviewFrame({ children }: { children: ReactNode }) {
   const [w, setW] = useState(390)
   if (UI_MODE !== 'mobile') return <>{children}</>
+  // 视口本身就是手机尺寸(真手机浏览器访问 web / 极窄窗口)→ 全屏裸壳,预览框只服务宽屏桌面预览。
+  // 挂载时一次判定(UI_MODE 同为 reload 制,行为一致)。
+  if (window.innerWidth <= 820) return <>{children}</>
   return (
     <div className="sc-frame">
       <div className="sc-bar">
