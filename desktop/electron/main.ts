@@ -31,6 +31,7 @@ import { logActivity, setActivityLogEnabled, pruneActivity, exportActivity, flus
 import { KNOWN_APPS } from '../shared/knownApps'
 import { registerAssetSchemes as registerAmadeusAssetSchemes, registerAssetProtocol as registerAmadeusAssetProtocol } from './amadeus/assetProtocol'
 import { nearestEdge, collapsedBounds, expandedBounds, miniSizeFromWidth, visibleRect, pointInRect, growRect, type Rect, type Edge } from './windowGeometry'
+import { applyWindowMaterial, parseWindowMaterialRequest } from './windowMaterial'
 
 /** ~/.tangu(与包内 core/tanguHome.ts 同约定;TANGU_HOME 可整体重定向)。 */
 setDevMode(!app.isPackaged) // dev 数据目录 ~/.forsion-dev,与正式版隔离(模块装载即定,先于一切路径解析)
@@ -568,7 +569,10 @@ function createWindow(): void {
     // 最小化/最大化/关闭按钮,否则该值被忽略可能导致无窗口控件。菜单条另由 setApplicationMenu(null) 去除。
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     autoHideMenuBar: true, // 即便保留了菜单也不在窗口内显示(Alt 不唤出);与置空菜单双保险
-    backgroundColor: '#fbf8f5', // 启动闪屏底色(动画 stage 底色),避免首帧白屏闪烁
+    // macOS 系统玻璃必须在建窗时具备透明能力;是否真的启用 vibrancy 由当前主题经 IPC 动态决定。
+    // 其他平台保持原来的实色窗口,不改变稳定性/窗口行为。
+    transparent: process.platform === 'darwin',
+    backgroundColor: process.platform === 'darwin' ? '#00000000' : '#fbf8f5',
     webPreferences: satelliteWebPreferences(),
   })
 
@@ -664,7 +668,8 @@ function createDetachedWindow(opts: { id?: string; views?: ViewDesc[]; bounds?: 
     minHeight: 360,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     autoHideMenuBar: true,
-    backgroundColor: '#fbf8f5',
+    transparent: process.platform === 'darwin',
+    backgroundColor: process.platform === 'darwin' ? '#00000000' : '#fbf8f5',
     webPreferences: satelliteWebPreferences(),
   })
   detachedWindows.set(id, win)
@@ -1236,6 +1241,13 @@ app.whenReady().then(async () => {
   ipcMain.handle('themes:openDir', async () => {
     await mkdir(themesDir(), { recursive: true })
     await shell.openPath(themesDir())
+    return { ok: true }
+  })
+  // 主题只提交白名单语义(system-glass/opaque);具体 vibrancy 类型与平台能力由主进程掌控。
+  ipcMain.handle('window:setMaterial', (e, input: unknown) => {
+    const request = parseWindowMaterialRequest(input)
+    if (!request) return { ok: false }
+    applyWindowMaterial(BrowserWindow.fromWebContents(e.sender), request)
     return { ok: true }
   })
 

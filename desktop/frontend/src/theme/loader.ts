@@ -14,6 +14,17 @@ let currentKey: string | null = null;
 let currentCssId: string | null = null;
 let themesWarmed = false;
 
+/** 把主题 manifest 的材质意图同步给 Electron 窗口。浏览器/Web 环境无 preload 时自然 no-op。 */
+export function syncWindowMaterial(): void {
+  const root = document.documentElement;
+  const entry = currentCssId ? getLanguage(currentCssId) : null;
+  const wantsGlass = entry?.manifest.windowMaterial === 'system-glass' && root.dataset.glass !== 'off';
+  const mode = root.dataset.mode === 'dark' ? 'dark' : 'light';
+  try {
+    void window.tangu?.setWindowMaterial?.({ material: wantsGlass ? 'system-glass' : 'opaque', mode });
+  } catch { /* browser/no preload */ }
+}
+
 function ensureThemeLinks(): void {
   for (const id of Object.keys(themeRegistry)) {
     const linkId = LINK_ID_PREFIX + id;
@@ -125,6 +136,7 @@ export function applyTheme(
   ensureFontLink(cssId);
   currentKey = nextKey;
   currentCssId = cssId;
+  syncWindowMaterial();
 
   try {
     localStorage.setItem('forsion_theme_lang', cssId);

@@ -6,7 +6,7 @@
  */
 import { create } from 'zustand'
 import { track } from '../achievements/store'
-import { applyTheme, removeInjectedThemeStyles } from '../theme/loader'
+import { applyTheme, removeInjectedThemeStyles, syncWindowMaterial } from '../theme/loader'
 import {
   resolveInitialLang, resolveInitialSkin, resolveInitialMode, listSkins, listLanguages,
   hasLanguage, mergeDiskThemes, clearDiskThemes, DEFAULT_SEED, DEFAULT_LANG,
@@ -111,6 +111,7 @@ export const useTheme = create<ThemeState>((set, get) => {
     setGlass: (on) => {
       try { document.documentElement.dataset.glass = on ? 'on' : 'off' } catch { /* ignore */ }
       try { localStorage.setItem('forsion_glass', on ? 'on' : 'off') } catch { /* ignore */ }
+      syncWindowMaterial()
       set({ glass: on })
     },
     setFlat: (on) => {

@@ -20,10 +20,10 @@ const targets = existsSync(pluginsDir)
       .filter((f) => existsSync(f))
   : [];
 
-// 外部独立仓插件(与 tangu-agent 平级,如 tangu-computer-use)的 types/ 拷贝:
-// 单独 checkout 里可能不存在 → existsSync 过滤,不崩。
-for (const ext of ['tangu-computer-use']) {
-  const f = join(root, '..', ext, 'types', 'tangu-agent.d.ts');
+// 外部独立仓插件的 types/ 拷贝(相对 tangu-agent 根的路径段;单独 checkout 里可能不存在 → existsSync 过滤,不崩)。
+// tangu-computer-use 在 Forsion/Forsion-Instrumentality-Project/(插件生态目录,07-16 从 Forsion-Genesis 移出)。
+for (const rel of [['..', '..', 'Forsion-Instrumentality-Project', 'tangu-computer-use']]) {
+  const f = join(root, ...rel, 'types', 'tangu-agent.d.ts');
   if (existsSync(f)) targets.push(f);
 }
 

@@ -14,7 +14,8 @@ export interface OAuthTokens {
   tokenEndpoint: string; // 刷新用
   clientId: string;
   account_id?: string; // Codex 订阅:chatgpt-account-id(从 id_token JWT 解出)
-  modelIds?: string[]; // 登录时从 provider /models 端点拉取并缓存(再登录刷新;失败回退硬编提示)
+  modelIds?: string[]; // 登录时从 provider /models 端点拉取并缓存(空或 stale 时启动懒刷;失败回退硬编提示)
+  modelIdsAt?: number; // modelIds 拉取时刻 epoch ms(TTL 判 stale 用)
 }
 
 const dir = (): string => dirname(providerAuthFile()); // 共享域(home=…/tangu 时为其父目录)

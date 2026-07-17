@@ -13,6 +13,8 @@ export interface ThemeManifest {
   supportsDarkMode: boolean;
   /** 浮卡布局信号:>0 时 Shell 给停靠面板留间距(soft=8)。取代旧的 lang==='soft' 魔法字符串。 */
   panelGap?: number;
+  /** 请求宿主窗口提供跨窗取样的系统玻璃;缺省 opaque,非 macOS 当前安全降级为实色。 */
+  windowMaterial?: 'system-glass';
   tags?: string[];
   /** 主题激活时懒加载的 Google Fonts(离线环境会静默失败,主题需有本地字体回退)。 */
   fonts?: { google?: string[] };

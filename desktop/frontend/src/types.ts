@@ -631,6 +631,8 @@ declare global {
       onUpdaterStatus?(cb: (st: UpdaterStatusInfo) => void): () => void
       /** 应用内清空数据(卸载/重置);清完主进程 relaunch。 */
       clearAppData?(opts: { desktop?: boolean; tangu?: boolean }): Promise<{ ok: boolean }>
+      /** 主题请求窗口级材质;system-glass 在 macOS 映射为可取样窗口后方的高透原生 vibrancy。 */
+      setWindowMaterial?(input: { material: 'opaque' | 'system-glass'; mode: 'light' | 'dark' }): Promise<{ ok: boolean }>
       onAuthDevice?(cb: (info: { url: string; userCode: string }) => void): () => void
       pickDirectory?(): Promise<string | null>
       /** 另存为文本文件(导出日志等);取消返回 { ok:false }。 */

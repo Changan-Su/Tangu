@@ -70,9 +70,9 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProvider> = {
     redirectPath: '/auth/callback',
     baseUrl: 'https://chatgpt.com/backend-api/codex',
     protocol: 'openai-responses',
-    // ChatGPT 账号支持的 slug(取自 Codex 源 models-manager/models.json;gpt-5-codex/gpt-5 不被支持)。
-    // gpt-5.3-codex = 主力编码模型(gpt-5.2 是其降级 fallback)。
-    modelIds: ['gpt-5.3-codex', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.2'],
+    // 仅兜底提示(实拉 /models 失败时才用),快照会过时——真实列表以 fetchProviderModels 实拉为准。
+    // 2026-07-17 实测 list 集;gpt-5.3-codex/gpt-5.2 已从订阅通道下线。
+    modelIds: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'],
     extraAuthParams: { id_token_add_organizations: 'true', codex_cli_simplified_flow: 'true' },
   },
 };
@@ -139,14 +139,18 @@ export async function fetchProviderModels(p: OAuthProvider, accessToken: string,
       url = base.endsWith('/v1') ? `${base}/models` : `${base}/v1/models`;
       headers['anthropic-version'] = '2023-06-01';
       headers['anthropic-beta'] = 'oauth-2025-04-20';
+    } else if (p.protocol === 'openai-responses') {
+      // Codex 后端强制要求 client_version query(缺=400),后端还按它 gate 新模型——太老的版本号看不到新 slug。
+      url = `${base}/models?client_version=0.150.0`;
+      if (accountId) headers['chatgpt-account-id'] = accountId;
     } else {
-      url = `${base}/models`; // OpenAI 兼容 + Codex 同形
+      url = `${base}/models`; // OpenAI 兼容
       if (accountId) headers['chatgpt-account-id'] = accountId;
     }
     const res = await fetch(url, { headers, signal: AbortSignal.timeout(5000) });
     if (!res.ok) return null;
     const j: any = await res.json();
-    const arr: any[] = Array.isArray(j) ? j : Array.isArray(j?.data) ? j.data : [];
+    const arr: any[] = Array.isArray(j) ? j : Array.isArray(j?.data) ? j.data : Array.isArray(j?.models) ? j.models : []; // Codex 实测 { models: [...] }
     const ids = arr
       .filter((m) => {
         const v = m?.visibility;
@@ -228,7 +232,7 @@ export async function providerOAuthLogin(p: OAuthProvider): Promise<OAuthTokens>
   }
   // 登录即问 /models 拿真实模型列表(失败则后续 load 时再懒补;再不行回退硬编提示)。
   const models = await fetchProviderModels(p, creds.access_token, creds.account_id);
-  if (models) creds.modelIds = models;
+  if (models) { creds.modelIds = models; creds.modelIdsAt = Date.now(); }
   saveProviderCred(p.id, creds);
   return creds;
 }
@@ -260,11 +264,13 @@ export async function loadOAuthDirectProviders(): Promise<DirectProvider[]> {
       saveProviderCred(id, tok);
     }
     const cfg = OAUTH_PROVIDERS[id];
-    // 模型列表懒补:已登录但还没缓存过(如本次升级前登录的)→ 拉一次回写;失败保持空,下次再试。
-    if ((!tok.modelIds || !tok.modelIds.length) && cfg) {
+    // 模型列表懒刷:缓存为空或超过 24h(provider 会上新模型,冻结的缓存=用户「看不到最新模型」)→
+    // 拉一次回写;失败保留旧缓存下次再试。
+    const stale = !tok.modelIds?.length || (tok.modelIdsAt ?? 0) < Date.now() - 24 * 3600_000;
+    if (stale && cfg) {
       const models = await fetchProviderModels(cfg, tok.access_token, tok.account_id);
       if (models) {
-        tok = { ...tok, modelIds: models };
+        tok = { ...tok, modelIds: models, modelIdsAt: Date.now() };
         saveProviderCred(id, tok);
       }
     }
