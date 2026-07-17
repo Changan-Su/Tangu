@@ -3,7 +3,7 @@
 # 新增的 app profile(如 tangu)/端点全都缺,表现为 /agent/runs 400 unknown app_id。
 # worker 插件是独立私仓 Changan-Su/Tangu-Worker(本仓 .gitignore 刻意排除,开源边界):
 # 经 TANGU_WORKER_DEPLOY_KEY secret(该私仓的只读 deploy key)checkout 后放进构建上下文。
-# 触发:手动 Run workflow(worker 部署是慎重动作);Dockerfile/本文件改动推 main 也触发。
+# 触发:手动 Run workflow(worker 部署是慎重动作);Dockerfile/本文件改动推 main 也触发。secret 就绪于 2026-07-17。
 name: build-worker
 
 on:
