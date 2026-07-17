@@ -5,13 +5,18 @@
 
 # ===== builder:构建核心 + 本插件,裁剪为运行期依赖 =====
 FROM node:20-bookworm-slim AS builder
-# 原生模块(better-sqlite3 等)无预编译时需本地编译
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+# CN_MIRROR=1 → apt/npm 全走国内镜像(阿里云 ECS 直连 deb.debian.org/npmjs 龟速,实测 apt 一步 20min+)。
+# CI(GitHub runner)不传该 arg,官源直连。
+ARG CN_MIRROR=
+RUN if [ -n "$CN_MIRROR" ]; then sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources; fi \
+ # 原生模块(better-sqlite3 等)无预编译时需本地编译
+ && apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/tangu/core
 # 先拷清单装依赖(层缓存),再拷全量源码构建核心 tsc → dist/(含 dist/index.d.ts)
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN if [ -n "$CN_MIRROR" ]; then npm config set registry https://registry.npmmirror.com; fi \
+ && npm ci
 COPY . .
 RUN npm run build
 # 插件已随 COPY . . 进来(plugins/forsion-worker/),构建它(tsconfig paths 指向 ../../dist/index.d.ts)
