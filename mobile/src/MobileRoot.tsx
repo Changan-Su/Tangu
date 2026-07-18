@@ -4,6 +4,7 @@
  * 需要时按 state 门控逐个加回。
  */
 import { useEffect } from 'react'
+import { App as CapApp } from '@capacitor/app'
 import { useApp } from '@/stores/appStore'
 import { useTheme } from '@/stores/themeStore'
 import { useBootstrap } from '@/stores/bootstrap'
@@ -12,7 +13,7 @@ import { pullInbox } from '@/services/backendService'
 import { SettingsModal } from '@/components/SettingsModal'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useShallow } from 'zustand/react/shallow'
-import { SingleColumnHost } from '@lcl/engine'
+import { SingleColumnHost, useWorkspace, useNav } from '@lcl/engine'
 import { buildDefaultLayout } from '@/bootstrapEngine'
 
 /** 移动端本地 inbox 内容来自云端广播,但无服务端 inboxPull 调度器 → 客户端定时静默拉(绕开 inboxStore.pull 的 toast)。 */
@@ -33,9 +34,33 @@ function useInboxAutoPull(): void {
   }, [])
 }
 
+/** Android 系统返回(实体键/全面屏侧滑手势)接管:浮层→抽屉→tab 内后退→关视图→挂起。
+ *  此前无人监听 backButton,返回手势直接把 app 退到后台——「侧滑返回没反应」的根因。 */
+function useAndroidBack(): void {
+  useEffect(() => {
+    if (!window.tangu?.mobile) return // 仅原生壳;浏览器无此事件
+    const sub = CapApp.addListener('backButton', () => {
+      const app = useApp.getState()
+      if (app.settingsOpen) { app.closeSettings(); return }
+      const ws = useWorkspace.getState()
+      if (ws.leftVisible) { ws.toggleSidebar('left'); return }
+      if (ws.rightVisible) { ws.toggleSidebar('right'); return }
+      const active = ws.mainTabs.find((t) => t.active)
+      if (active) {
+        const st = useNav.getState().stacks[active.id]
+        if (st && st.idx > 0) { useNav.getState().back(active.id); return }
+        if (active.type !== 'home') { ws.closeLeaf(active.id); return } // 白板/PDF/会话等 → 关回列表/home
+      }
+      void CapApp.minimizeApp() // 已在底:挂起(Android 默认原行为)
+    })
+    return () => { void sub.then((h) => h.remove()) }
+  }, [])
+}
+
 export function MobileRoot() {
   useBootstrap()
   useInboxAutoPull()
+  useAndroidBack()
   const theme = useTheme()
   const a = useApp(useShallow((s) => ({
     sessions: s.sessions,

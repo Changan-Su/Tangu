@@ -171,12 +171,18 @@
   position: relative;
   width: min(86vw, 380px);
   height: 100%;
+  /* 抽屉是 fixed 全高浮层,不吃 .mb-shell 的 safe-area padding → 自己避开状态栏(非刘海设备 env=0)。 */
+  padding-top: env(safe-area-inset-top);
   background: var(--bg, #fff);
   color: var(--text, #111);
   display: flex;
   flex-direction: column;
   box-shadow: 0 0 40px rgba(0, 0, 0, 0.25);
   animation: mb-slide-in 0.2s var(--ease-out, ease-out);
+}
+/* 竖屏(窄比):抽屉=全屏接管(用户拍板);宽屏(≥4:3)左栏走 docked 并排、右栏保持 380px 浮层。 */
+@media (max-aspect-ratio: 4/3) {
+  .mb-drawer { width: 100%; }
 }
 .mb-drawer--left { margin-right: auto; }
 .mb-drawer--right { margin-left: auto; }
@@ -382,4 +388,10 @@
   flex-direction: column;
   border-right: 1px solid var(--border, rgba(0, 0, 0, 0.08));
   background: var(--bg, #fff);
+}
+
+/* ── 移动端全局放大 15%(用户拍板:整体等比)。触屏+窄屏才命中:手机 APK 与手机浏览器吃到,
+   桌面(鼠标)与桌面手机框预览不吃。zoom 不影响媒体查询评估与 fixed inset:0 贴边。 ── */
+@media (pointer: coarse) and (max-width: 820px) {
+  body { zoom: 1.15; }
 }

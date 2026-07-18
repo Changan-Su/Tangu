@@ -2518,3 +2518,49 @@ html.dark .brand-logo--dark { display: inline-block; }
 /* 设置/市场页顶部标题行补回拖窗条(交互子元素抠回,防止重蹈本 bug)。 */
 .settings-main-head { -webkit-app-region: drag; }
 .settings-main-head button, .settings-main-head input { -webkit-app-region: no-drag; }
+
+/* ── 移动端(触屏+窄屏)二级页统一形态:左列表 → 顶部横滑 chips(用户拍板)。
+   结构级选择器,settings 与 market 同一套 .settings-page/.settings-nav 布局一起吃到。 ── */
+@media (pointer: coarse) and (max-width: 820px) {
+  .settings-page {
+    display: flex;
+    flex-direction: column;
+    padding-top: env(safe-area-inset-top); /* 浮层 fixed inset:0,自己避开状态栏 */
+  }
+  .settings-nav {
+    flex: 0 0 auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 2px;
+    border-right: none;
+    border-bottom: var(--border-width) solid var(--border);
+  }
+  .settings-nav-top { display: flex; align-items: center; padding: 8px 4px 8px 8px; }
+  .settings-nav-search { display: none; } /* chips 本身就是快速选择,搜索是桌面长列表的产物 */
+  .settings-back { width: auto; margin: 0; font-size: 0; gap: 0; padding: 8px; } /* 只留 ← 图标 */
+  .settings-nav-list {
+    flex: 1 1 auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 8px 12px 8px 2px;
+    scrollbar-width: none;
+  }
+  .settings-nav-list::-webkit-scrollbar { display: none; }
+  /* 分区/分组容器扁平化成一条 chips 流;组头隐藏 */
+  .settings-nav-section, .settings-nav-group { display: contents; }
+  .settings-nav-sectionhead, .settings-nav-grouphead { display: none; }
+  .settings-nav-list button {
+    width: auto;
+    flex: 0 0 auto;
+    min-height: 32px;
+    padding: 6px 13px;
+    border-radius: 999px;
+    white-space: nowrap;
+    background: var(--overlay-light, rgba(127, 127, 127, 0.08));
+  }
+  .settings-nav-list button.active { background: var(--accent-light); }
+  .settings-main { flex: 1 1 auto; min-height: 0; }
+}

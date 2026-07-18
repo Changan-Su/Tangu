@@ -139,6 +139,10 @@ export const SettingsModal: React.FC<{
     x === 'connection' || x === 'forsion' ? 'general' : x === 'agent-clis' ? 'agents' : (x ?? 'general')
   const [tab, setTab] = useState<Tab>(normalizeTab(p.initialTab))
   const [navQuery, setNavQuery] = useState('')
+  // 选中项滚到可见:移动端顶部横滑 chips 必需(initialTab 可能在条深处);桌面竖列表同样受益。
+  useEffect(() => {
+    document.querySelector('.settings-nav-list button.active')?.scrollIntoView({ block: 'nearest', inline: 'center' })
+  }, [tab])
   const [appVersion, setAppVersion] = useState<string>('')
   // custom 配色的独立背景色(强调/背景双取色器;走 themeStore,不经 props 链)。
   const themeBgSeed = useTheme((s) => s.bgSeed)

@@ -253,6 +253,7 @@ export const SingleColumnHost: React.FC<{ dark?: boolean; soft?: boolean; buildD
   const wide = useWideAspect(!mini)
   // 进入宽屏布局:左栏默认并排展开(用户拍板);离开宽屏回抽屉形态(visible 状态原样保留)。
   useEffect(() => {
+    useWorkspace.getState().setWideMode(wide) // store 据此决定主区导航后是否自动收左抽屉
     if (!wide) return
     const ws = useWorkspace.getState()
     if (!ws.leftVisible && (ws.leftLeaves.length > 0 || ws.sidebarDefaults.left.length > 0)) ws.toggleSidebar('left')

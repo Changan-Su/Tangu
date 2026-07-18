@@ -621,7 +621,8 @@ export function AmadeusPagesView() {
   const activeViewFile = useMemo(() => {
     const t = mainTabs.find((x) => x.active)
     const key = t && ({ 'amadeus-drawing': 'drawingPath', 'amadeus-pdf': 'pdfPath', 'amadeus-db': 'dbPath' } as Record<string, string>)[t.type]
-    const v = key ? (useWorkspace.getState().api?.getPanel(t!.id)?.params as Record<string, unknown> | undefined)?.[key] : null
+    // leafById 两壳皆有;移动单列壳 api 恒 null(getPanel 读法在手机上恒 null→白板/PDF 树行不亮)。
+    const v = key ? (useWorkspace.getState().leafById(t!.id)?.params as Record<string, unknown> | undefined)?.[key] : null
     return typeof v === 'string' ? v : null
   }, [mainTabs])
 

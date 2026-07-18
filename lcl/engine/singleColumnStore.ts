@@ -74,6 +74,9 @@ interface WS {
   getActiveLeaf(): Leaf | null
   getActiveSideLeaf(side: 'left' | 'right'): Leaf | null
   leafById(id: string): Leaf | null
+  /** 宽屏(≥4:3)并排形态标记(Host 按 useWideAspect 同步)。窄屏抽屉=全屏接管,主区导航时自动收回;宽屏 docked 左栏不收。 */
+  wideMode: boolean
+  setWideMode(v: boolean): void
   splitActive(direction: 'right' | 'down', paramsOverride?: Record<string, unknown>): Leaf | null
   toggleSidebar(side: 'left' | 'right'): void
   showSideView(side: 'left' | 'right', type: string): void
@@ -128,6 +131,16 @@ export const useWorkspace = create<WS>((set, get) => {
     }
   }
 
+  /** 主区导航/激活后自动收抽屉:窄屏抽屉=全屏接管,选中条目即收回(用户拍板);
+   *  宽屏 docked 左栏不收(wideMode 由 Host 同步),右栏恒浮层恒收。 */
+  const autoCloseDrawers = (): void => {
+    const s = get()
+    const patch: Partial<WS> = {}
+    if (!s.wideMode && s.leftVisible) patch.leftVisible = false
+    if (s.rightVisible) patch.rightVisible = false
+    if (Object.keys(patch).length) set(patch)
+  }
+
   return {
     api: null,
     mainLeaves: [],
@@ -138,6 +151,7 @@ export const useWorkspace = create<WS>((set, get) => {
     rightActiveId: null,
     leftVisible: false,
     rightVisible: false,
+    wideMode: false,
     focusedChatLeafId: null,
     chatSurfaces: {},
     sidebarDefaults: { left: [], right: [] },
@@ -147,6 +161,7 @@ export const useWorkspace = create<WS>((set, get) => {
     defaultBuilder: null,
 
     setApi: () => { /* 移动端无 Dockview api，恒 null */ },
+    setWideMode: (v) => set({ wideMode: v }),
     setDefaultBuilder: (fn) => set({ defaultBuilder: fn }),
     setSidebarDefaults: (d) => set({ sidebarDefaults: d }),
     // Dockview「可拖宽侧栏画像」;单列无侧栏宽度概念 → no-op(补齐 store 契约,否则 spaceRegistry/bootstrap 调用即崩)。
@@ -195,6 +210,7 @@ export const useWorkspace = create<WS>((set, get) => {
         if (existing) {
           if (reuseKey === 'primary') { set((s) => ({ [bucketOf(existing.loc)]: s[bucketOf(existing.loc)].map((r) => r.id === existing.id ? { ...r, params: { ...r.params, ...params } } : r) } as Partial<WS>)) }
           setActive(existing.loc, existing.id)
+          if (existing.loc === 'main') autoCloseDrawers()
           get().refreshTabs()
           return leaf(existing)
         }
@@ -217,6 +233,7 @@ export const useWorkspace = create<WS>((set, get) => {
       set((s) => ({ [bucketOf(loc)]: [...s[bucketOf(loc)], rec] } as Partial<WS>))
       set({ [activeKeyOf(loc)]: rec.id } as Partial<WS>)
       if (type === 'chat') set({ focusedChatLeafId: rec.id })
+      if (loc === 'main') autoCloseDrawers()
       get().refreshTabs()
       return leaf(rec)
     },
@@ -233,6 +250,7 @@ export const useWorkspace = create<WS>((set, get) => {
         const otherChat = get().mainLeaves.find((r) => r.id !== leafId && r.type === 'chat')
         set({ focusedChatLeafId: otherChat?.id ?? null })
       }
+      if (rec.loc === 'main') autoCloseDrawers()
       get().refreshTabs()
       return leaf(nextRec)
     },
@@ -283,6 +301,7 @@ export const useWorkspace = create<WS>((set, get) => {
       const rec = find(id)
       if (!rec) return
       setActive(rec.loc, id)
+      if (rec.loc === 'main') autoCloseDrawers()
       get().refreshTabs()
     },
 
