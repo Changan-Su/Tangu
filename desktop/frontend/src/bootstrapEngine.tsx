@@ -30,6 +30,7 @@ import { WsFileView } from './views/WsFileView'
 import { CodeStudioView } from './views/CodeStudioView'
 import { ChangelogView } from './views/ChangelogView'
 import { setMobileUiCommand, MOBILE_UI_KEY } from './mobileUiCommand'
+import { initUiZoom } from './uiZoom'
 import { setActivityViewCommand, ACTIVITY_VIEW_KEY } from './activityViewCommand'
 import { ActivityLogView } from './views/ActivityLogView'
 import { AutomationListView } from './views/automation/AutomationListView'
@@ -231,6 +232,13 @@ export function installEngine(): void {
   if (PRODUCT.spaces.includes('tangu')) addCommand({ id: 'compact', title: () => app().tr('command.compact'), keywords: 'compact 压缩', run: () => void app().compact() })
   if (PRODUCT.spaces.includes('tangu')) addCommand({ id: 'branch', title: () => app().tr('command.branch'), keywords: 'branch 分支', run: () => void app().branchFromMessage() })
   addCommand({ id: 'open-settings', title: () => app().tr('settings.title'), keywords: 'settings 设置 preferences', hotkey: 'mod+,', run: () => app().openSettings() })
+  // UI 缩放:应用持久值 + 注册放大/缩小/重置命令。端默认:桌面 Electron 1 / 触屏窄屏 1.15(同
+  // singleColumn.css 移动 zoom 段) / 桌面浏览器(网页端) 1.1 / 移动端平板 1。
+  {
+    const w = window as { tangu?: { mobile?: boolean } }
+    const coarse = ((): boolean => { try { return window.matchMedia('(pointer: coarse) and (max-width: 820px)').matches } catch { return false } })()
+    initUiZoom(w.tangu && !w.tangu.mobile ? 1 : coarse ? 1.15 : w.tangu?.mobile ? 1 : 1.1)
+  }
   // 开发者选项:移动端 UI 预览命令(开关持久化在 MOBILE_UI_KEY;已在移动模式则强制保留切回入口)。
   try { setMobileUiCommand(localStorage.getItem(MOBILE_UI_KEY) === '1') } catch { /* ignore */ }
   // 开发者选项:活动日志实时视图命令(同款模式)。

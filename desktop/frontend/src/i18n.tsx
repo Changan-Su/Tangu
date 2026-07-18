@@ -572,6 +572,9 @@ const zh: Dict = {
   'settings.developer.mobileUiPreviewHint': '开启后命令面板(⌘K)多一条「切换到移动端 UI」,运行时把桌面壳换成单列移动壳预览(会刷新页面);web 端同样可用。仅本机调试,关闭开发者模式时自动一并关闭。',
   'command.switchToMobileUi': '切换到移动端 UI',
   'command.switchToDesktopUi': '切换回桌面 UI',
+  'command.zoomIn': '放大页面',
+  'command.zoomOut': '缩小页面',
+  'command.zoomReset': '重置页面缩放',
   'chat.systemPrompt': 'System Prompt',
 
   // 引导 - 主题 / 工作区(新增步骤)
@@ -1530,6 +1533,9 @@ const en: Dict = {
   'settings.developer.mobileUiPreviewHint': 'Adds a "Switch to mobile UI" entry to the command palette (⌘K) that swaps the desktop shell for the single-column mobile shell at runtime (reloads the page). Works on web too. Local debugging only; cleared when you disable developer mode.',
   'command.switchToMobileUi': 'Switch to mobile UI',
   'command.switchToDesktopUi': 'Switch back to desktop UI',
+  'command.zoomIn': 'Zoom in',
+  'command.zoomOut': 'Zoom out',
+  'command.zoomReset': 'Reset zoom',
   'chat.systemPrompt': 'System Prompt',
 
   // Onboarding - theme / workspace (new steps)

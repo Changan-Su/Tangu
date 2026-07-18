@@ -63,7 +63,8 @@ function readGlass(): boolean {
   try { return localStorage.getItem('forsion_glass') !== 'off' } catch { return true }
 }
 function readFlat(): boolean {
-  try { return localStorage.getItem('forsion_theme_flat') === '1' } catch { return false }
+  // 默认扁平(2026-07-19 用户拍板):未显式设过 → on;存 '0'(用户关过)才 off。
+  try { return localStorage.getItem('forsion_theme_flat') !== '0' } catch { return true }
 }
 
 /** 读 ~/.tangu/themes(无 preload/出错 → 空,渲染端纯 bundle 运行)。 */
