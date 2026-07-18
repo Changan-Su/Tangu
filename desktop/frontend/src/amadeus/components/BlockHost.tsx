@@ -57,7 +57,11 @@ export const BlockHost = memo(function BlockHost({
   )
   const pagePath = usePageStore((s) => s.activePage ?? '')
   const selected = useBlockSelection((s) => s.id === blockId)
-  const linkVersion = usePageStore((s) => s.linkGraphVersion)
+  // linkGraphVersion 每次 save 都 bump;只有嵌入块(![[...]])需要跟着重解析。
+  // 纯文本块订阅恒 0 → 不再「每次保存全页重渲染」(大页高频打字时的隐性卡源)。
+  const linkVersion = usePageStore((s) =>
+    (s.blocks[blockId]?.content ?? '').includes('![[') ? s.linkGraphVersion : 0,
+  )
 
   const embedTarget = useMemo(() => {
     const m = EMBED_RE.exec((block?.content ?? '').trim())

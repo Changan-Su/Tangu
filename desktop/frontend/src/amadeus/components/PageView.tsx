@@ -117,6 +117,17 @@ function appendAtEnd(): void {
   else st.insertBlockAfter(null)
 }
 
+// 分片挂载:切页首帧只同步挂前 INITIAL_ROWS 行,其余空闲帧逐批补。每个文本块都是一个独立
+// ProseMirror 实例,大页一次性全量实例化会把主线程钉死数百 ms~数秒(云端/移动端「点不动」主因)。
+const INITIAL_ROWS = 24
+const MOUNT_BATCH = 16
+const idleMount: (cb: () => void) => number =
+  typeof requestIdleCallback === 'function'
+    ? (cb) => requestIdleCallback(cb, { timeout: 200 })
+    : (cb) => window.setTimeout(cb, 16)
+const cancelIdleMount: (h: number) => void =
+  typeof cancelIdleCallback === 'function' ? cancelIdleCallback : clearTimeout
+
 export function PageView({ bare = false }: { bare?: boolean } = {}) {
   const manifest = usePageStore((s) => s.manifest)
   const blocks = usePageStore((s) => s.blocks)
@@ -153,6 +164,18 @@ export function PageView({ bare = false }: { bare?: boolean } = {}) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
+  // ---- 分片挂载:切页重置;编辑同页加行不重置(挂载早已追平,一个 idle 批内补上) ----
+  const totalRows = manifest?.root.children.length ?? 0
+  const [mountState, setMountState] = useState({ page: activePage, n: INITIAL_ROWS })
+  // render 期间重置(非 effect):effect 版第一帧仍按旧上限全量 mount 新页,分片就失效了。
+  if (mountState.page !== activePage) setMountState({ page: activePage, n: INITIAL_ROWS })
+  const mountedRows = mountState.page === activePage ? mountState.n : INITIAL_ROWS
+  useEffect(() => {
+    if (mountedRows >= totalRows) return
+    const h = idleMount(() => setMountState((s) => ({ ...s, n: s.n + MOUNT_BATCH })))
+    return () => cancelIdleMount(h)
+  }, [mountedRows, totalRows])
 
   if (!manifest) return <div className="empty-state">打开一个 Vault，或新建页面开始。</div>
   const root = manifest.root
@@ -305,6 +328,7 @@ export function PageView({ bare = false }: { bare?: boolean } = {}) {
         <div className="stack" data-dnd={activeId ? '' : undefined}>
           <RowGap index={-1} />
           {root.children.map((row, i) => {
+            if (i >= mountedRows) return null // 分片:后续行在空闲帧逐批补挂
             if (hiddenRows.has(i)) return null
             const meta = rowMeta[i]
             const span = meta.level > 0 ? sectionSpan(i) : 0

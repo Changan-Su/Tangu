@@ -152,14 +152,27 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
   }
   activeVaultResolver = ensureVault
 
+  // ---- 页面内容缓存(SWR:切页命中立即渲染,后台比对 seq;写路径/SSE 失效) --------
+  // 高 RTT(实测 ~285ms/往返)下切回看过的页零等待。值是 parsePageSource 产物,
+  // pageStore.hydrate 复制 blocks、manifest 恒不可变替换,缓存对象不会被渲染层就地篡改。
+  const PAGE_CACHE_MAX = 50
+  const pageCache = new Map<string, LoadedPage>()
+  const cachePage = (path: string, page: LoadedPage): void => {
+    pageCache.delete(path) // Map 插入序当 LRU:重插到队尾
+    pageCache.set(path, page)
+    if (pageCache.size > PAGE_CACHE_MAX) pageCache.delete(pageCache.keys().next().value as string)
+  }
+
   // ---- path → seq(乐观并发基准;只由自己的 GET/PUT 更新) ---------------------
   const seqMap = new Map<string, number>()
   const noteSeq = (path: string, seq: number): void => { seqMap.set(path, seq) }
-  const forgetSeq = (path: string): void => { seqMap.delete(path) }
+  const forgetSeq = (path: string): void => { seqMap.delete(path); pageCache.delete(path) }
   const migrateSeq = (from: string, to: string, seq?: number): void => {
     const s = seq ?? seqMap.get(from)
     seqMap.delete(from)
     if (s !== undefined) seqMap.set(to, s)
+    pageCache.delete(from) // 缓存值内嵌 pagePath,迁移会带错路径 → 两端直接作废
+    pageCache.delete(to)
   }
   const migrateSeqPrefix = (fromDir: string, toDir: string): void => {
     const fromPrefix = `${fromDir}/`
@@ -169,18 +182,22 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
         seqMap.set(`${toDir}/${k.slice(fromPrefix.length)}`, v)
       }
     }
+    for (const k of [...pageCache.keys()]) if (k.startsWith(fromPrefix)) pageCache.delete(k)
   }
   const forgetSeqPrefix = (dir: string): void => {
     const prefix = `${dir}/`
     for (const k of [...seqMap.keys()]) if (k === dir || k.startsWith(prefix)) seqMap.delete(k)
+    for (const k of [...pageCache.keys()]) if (k === dir || k.startsWith(prefix)) pageCache.delete(k)
   }
 
-  // ---- 树缓存(~200ms 去重;listPages/listFiles/listFolders 三连击一次 GET) ----
+  // ---- 树缓存(60s;SSE onStructureChange 即时 invalidate,写路径各自 invalidate) ----
+  // 200ms 时代每次 refreshStructure 都真发 GET;失效通道齐备后放长,断线兜底最多陈旧 60s。
+  const TREE_TTL_MS = 60_000
   let treeState: { at: number; promise: Promise<TreeDto>; settled: boolean } | null = null
   const invalidateTree = (): void => { treeState = null }
   async function fetchTree(force = false): Promise<TreeDto> {
     const now = Date.now()
-    if (!force && treeState && (!treeState.settled || now - treeState.at < 200)) return treeState.promise
+    if (!force && treeState && (!treeState.settled || now - treeState.at < TREE_TTL_MS)) return treeState.promise
     const v = await ensureVault()
     const entry: { at: number; promise: Promise<TreeDto>; settled: boolean } = {
       at: Date.now(),
@@ -273,9 +290,10 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
       clientId,
       knownSeq: (p) => seqMap.get(p),
       lastLoadedPage: () => lastLoadedPage,
-      onPageChange: (p) => fireExternal(p),
+      onPageChange: (p) => { pageCache.delete(p); fireExternal(p) },
       onDbChange: (p) => fireDb(p),
-      onStructureChange: () => { invalidateTree(); fireStructure() },
+      // 结构事件不带明细 → 页面缓存整体作废(300ms 防抖 + 回声抑制,频率低,代价=切回多一发 GET)
+      onStructureChange: () => { invalidateTree(); pageCache.clear(); fireStructure() },
       onPresence: pushPresence,
       onPresenceRoster: setRoster,
     })
@@ -294,6 +312,7 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
   const putFile = async (path: string, content: string, baseSeq: number, force = false): Promise<PutResultDto> => {
     const r = await http.put<PutResultDto>(fileUrl(), { path, content, baseSeq, ...(force ? { force: true } : {}) })
     noteSeq(path, r.seq)
+    pageCache.delete(path) // 单点咽喉:任何文本写(fm 外科写/画板/trash meta…)后缓存失效;savePage 随手回填
     return r
   }
 
@@ -313,7 +332,20 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
   // ---- 页面装载(GET + parsePageSource;404 → 编译器 newPage 语义) --------------
   const fetchAndParse = async (pagePath: string): Promise<LoadedPage> => {
     const f = await getFile(pagePath)
-    return parsePageSource(pagePath, f.content, nowIso())
+    const page = parsePageSource(pagePath, f.content, nowIso())
+    cachePage(pagePath, page)
+    return page
+  }
+
+  /** SWR 后台校验:seq 没变零动作;变了刷缓存 + 走既有 LWW 外部变更通道重载。 */
+  const revalidatePage = async (pagePath: string): Promise<void> => {
+    try {
+      const before = seqMap.get(pagePath)
+      const f = await getFile(pagePath)
+      if (f.seq === before) return
+      cachePage(pagePath, parsePageSource(pagePath, f.content, nowIso()))
+      fireExternal(pagePath) // pageStore.reconcileExternal → reconcilePage(fetchAndParse 会再对齐缓存)
+    } catch { /* 校验失败不打扰;下次真加载自会暴露 */ }
   }
 
   /** 404 时的新建:编译器 newPage + 一次性 IO(writeFile → PUT baseSeq=0)。
@@ -338,6 +370,7 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
       }
     }
     invalidateTree() // 新文件出现
+    cachePage(pagePath, page)
     return page
   }
 
@@ -410,6 +443,7 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
 
   // ---- restoreVault(openVault 同体;web 无目录对话框) ---------------------------
   let assetCounter = 0
+  let iconsCache: { seq: number; icons: Record<string, string> } | null = null
   const openCloud = async (): Promise<VaultInfo> => {
     const v = await ensureVault()
     // asset token 必须赶在首屏 <img> 渲染前就位:fire-and-forget 会让早期图片 URL 缺 ?at=
@@ -438,6 +472,12 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
 
     loadPage: async (pagePath) => {
       await ensureVault()
+      const cached = pageCache.get(pagePath)
+      if (cached) {
+        rememberPage(pagePath)
+        void revalidatePage(pagePath) // SWR:先渲染缓存,后台比对;高 RTT 下切回 = 零等待
+        return cached
+      }
       const page = await loadOrCreate(pagePath)
       rememberPage(pagePath)
       return page
@@ -468,12 +508,14 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
         const base = await baseSeqFor(pagePath)
         try {
           await putFile(pagePath, content, base)
+          cachePage(pagePath, parsePageSource(pagePath, content, nowIso())) // 写后回填,切回零请求
         } catch (e) {
           if (is409(e)) {
             // 云端已被别处更新(EXISTS/CONFLICT 同治):采纳服务端 seq,走既有 LWW 通道
             // (onExternalChange → pageStore.reconcileExternal 重载服务端版本)。
             const body = (e as HttpError).body as ConflictBody | null
             if (body && typeof body.seq === 'number') noteSeq(pagePath, body.seq)
+            pageCache.delete(pagePath) // 服务端为准,reconcile 会重拉
             notify(CONFLICT_TOAST, true)
             // 必须晚于 pageStore.save() 的收尾 set(否则本地旧 manifest 会盖回 reconcile 结果)。
             setTimeout(() => fireExternal(pagePath), 0)
@@ -965,14 +1007,19 @@ export function createCloudAmadeusBridge(cfg: CloudBridgeCfg): AmadeusApi {
     },
 
     // 页面 emoji 图标表:page-props 的全库形态(all=1)+ 渲染端抠 fm icon 键(桌面=索引供给,这里按需拉)。
+    // refreshStructure 每次都调它 → 用 vault seq 做门:库没变(树缓存/SSE 同源)直接回上次结果,
+    // 免掉结构事件风暴里的反复全库 payload。
     pageIcons: async () => {
       await ensureVault()
+      const t = await fetchTree()
+      if (iconsCache && iconsCache.seq === t.seq) return iconsCache.icons
       const rows = await http.get<PagePropsDto[]>(`/amadeus/vaults/${encodeURIComponent(vid())}/page-props`, { folder: '', all: '1' })
       const out: Record<string, string> = {}
       for (const r of rows) {
         const icon = parseFmObject(r.fmExtra || '').icon
         if (typeof icon === 'string' && icon) out[r.path] = icon
       }
+      iconsCache = { seq: t.seq, icons: out }
       return out
     },
 

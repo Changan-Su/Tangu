@@ -528,7 +528,8 @@ export function AmadeusPagesView() {
   const folders = usePageStore((s) => s.folders)
   const files = usePageStore((s) => s.files)
   const icons = usePageStore((s) => s.icons)
-  const activePage = usePageStore((s) => s.activePage)
+  // pendingPage 先行:点击瞬间高亮就位,不等云端 GET 回来(activePage 那时才更新)
+  const activePage = usePageStore((s) => s.pendingPage ?? s.activePage)
   const vaultRoot = usePageStore((s) => s.vaultRoot)
   const vaultSide = usePageStore((s) => s.vaultSide)
   // 云端笔记库入口:web(无 amadeusSync)恒显示;桌面仅云端模式显示,本地模式给本地 Vault 选择器。

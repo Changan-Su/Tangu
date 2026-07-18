@@ -146,6 +146,8 @@ interface PageState {
   /** 页面 emoji 图标(fm icon: 键;path → emoji)。桌面索引供给,其余端为空表。 */
   icons: Record<string, string>
   activePage: string | null
+  /** 导航乐观反馈:点击即置,加载成败后清。侧边栏高亮用 pendingPage ?? activePage,高延迟(云端)下点击零等待变色。 */
+  pendingPage: string | null
   manifest: PageManifest | null
   blocks: Record<BlockId, BlockState>
   status: Status
@@ -261,6 +263,10 @@ interface PageState {
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 let loadSeq = 0
+// 在途保存(save() 进行中):loadPage 并行化后,仅当目标 path 与在途写同文件时才需等待。
+// ponytail: 单槽记账——并发 save 罕见(防抖+flush 都走这里),槽被覆盖时最坏退回旧的「读到略旧内容」现状。
+let flushingPath: string | null = null
+let inflightSave: Promise<void> | null = null
 
 function hydrate(page: LoadedPage): {
   manifest: PageManifest
@@ -302,6 +308,7 @@ export const usePageStore = create<PageState>((set, get) => {
     files: [],
     icons: {},
     activePage: null,
+    pendingPage: null,
     manifest: null,
     blocks: {},
     status: 'idle',
@@ -418,7 +425,7 @@ export const usePageStore = create<PageState>((set, get) => {
         void amadeus.pageIcons?.().then((icons) => { if (get().vaultRoot === info.root) set({ icons }) }).catch(() => {})
         const target = info.lastPage && info.pages.includes(info.lastPage) ? info.lastPage : info.pages[0]
         if (target) await get().loadPage(target)
-        else set({ activePage: null, manifest: null, blocks: {} }) // 空库(如未登录的云侧):清编辑器,防旧库笔记误存新根
+        else set({ activePage: null, pendingPage: null, manifest: null, blocks: {} }) // 空库(如未登录的云侧):清编辑器,防旧库笔记误存新根
       } catch (e) {
         set({ error: String(e) })
       }
@@ -443,14 +450,21 @@ export const usePageStore = create<PageState>((set, get) => {
 
     async loadPage(path) {
       const seq = ++loadSeq // last-request-wins:双击/多 tab 竞速时,迟到的结果不得覆盖新导航
-      await get().flushSave() // persist the outgoing page so its links are indexed before navigating
-      set({ status: 'loading', error: null })
+      // 乐观反馈先行:点击即高亮/即提示,再谈网络(云端一个往返 ~300ms,反馈不能等它)。
+      set({ pendingPage: path, status: 'loading', error: null })
+      // 上一页的在途保存与新页加载并行(不同文件互不相干);唯「读写同一文件」
+      // (重载当前页/切回正在保存的页)才等写完,防读回旧内容。链接索引在保存侧推进,顺序无关。
+      const flush = get().flushSave().catch(() => { /* save() 自己置 error */ })
+      if (path === get().activePage || path === flushingPath) {
+        await flush
+        if (path === flushingPath) await inflightSave?.catch(() => {}) // 更早发起的在途写也要等
+      }
       try {
         const page = await amadeus.loadPage(path)
         if (seq !== loadSeq) return // 已被更新的导航取代
-        set({ activePage: path, ...hydrate(page), status: 'ready' })
+        set({ activePage: path, pendingPage: null, ...hydrate(page), status: 'ready' })
       } catch (e) {
-        if (seq === loadSeq) set({ status: 'idle', error: String(e) })
+        if (seq === loadSeq) set({ status: 'idle', error: String(e), pendingPage: null })
       }
     },
 
@@ -481,7 +495,7 @@ export const usePageStore = create<PageState>((set, get) => {
       const page = await amadeus.newPage(path)
       track('note.create'); act('note.create', { f: path })
       await get().refreshPages()
-      set({ activePage: path, ...hydrate(page), status: 'ready', focusTitleFor: path })
+      set({ activePage: path, pendingPage: null, ...hydrate(page), status: 'ready', focusTitleFor: path })
     },
 
     async renamePage(newName) {
@@ -511,7 +525,7 @@ export const usePageStore = create<PageState>((set, get) => {
       for (const [id, b] of Object.entries(blocks)) contents[id] = b.content
       try {
         const { newPath, page } = await amadeus.renamePage(activePage, newName, manifest, contents)
-        set({ activePage: newPath, ...hydrate(page), status: 'ready', error: null })
+        set({ activePage: newPath, pendingPage: null, ...hydrate(page), status: 'ready', error: null })
         if (hasFd && newPath !== activePage) await cascadeFdAfterRename(activePage, newPath)
         await get().refreshStructure() // 级联可能动了文件夹,pages+folders 一起刷
         return true
@@ -607,7 +621,7 @@ export const usePageStore = create<PageState>((set, get) => {
         const page = await amadeus.newPage(path)
         track('note.create'); act('note.create', { f: path })
         await get().refreshPages()
-        set({ activePage: path, ...hydrate(page), status: 'ready', focusTitleFor: path })
+        set({ activePage: path, pendingPage: null, ...hydrate(page), status: 'ready', focusTitleFor: path })
       } catch (e) {
         set({ error: String(e) })
       }
@@ -628,7 +642,7 @@ export const usePageStore = create<PageState>((set, get) => {
           const page = await amadeus.newPage(path)
           track('note.create'); act('note.create', { f: path })
           await get().refreshStructure()
-          set({ activePage: path, ...hydrate(page), status: 'ready', focusTitleFor: path })
+          set({ activePage: path, pendingPage: null, ...hydrate(page), status: 'ready', focusTitleFor: path })
           return
         }
         if (sourcePath) {
@@ -735,7 +749,7 @@ export const usePageStore = create<PageState>((set, get) => {
       if (activeInside) {
         const next = get().pages.find((p) => p !== pagePath) ?? null
         if (next) await get().loadPage(next)
-        else set({ activePage: null, manifest: null, blocks: {}, status: 'idle' })
+        else set({ activePage: null, pendingPage: null, manifest: null, blocks: {}, status: 'idle' })
       }
     },
 
@@ -763,7 +777,7 @@ export const usePageStore = create<PageState>((set, get) => {
       if (wasActive || activeInFd) await get().flushSave() // persist before the files relocate
       try {
         const newPath = await amadeus.movePage(pagePath, dst)
-        if (wasActive) set({ activePage: newPath })
+        if (wasActive) set({ activePage: newPath, pendingPage: null })
         if (hasFd) {
           try {
             const newFd = await amadeus.moveFolder(fd, dst)
@@ -827,7 +841,7 @@ export const usePageStore = create<PageState>((set, get) => {
       if (activeInside) {
         const next = get().pages[0] ?? null
         if (next) await get().loadPage(next)
-        else set({ activePage: null, manifest: null, blocks: {}, status: 'idle' })
+        else set({ activePage: null, pendingPage: null, manifest: null, blocks: {}, status: 'idle' })
       }
     },
 
@@ -1094,15 +1108,27 @@ export const usePageStore = create<PageState>((set, get) => {
       const { manifest, activePage, blocks } = get()
       if (!manifest || !activePage) return
       set({ status: 'saving' })
-      try {
-        const contents: Record<string, string> = {}
-        for (const [id, b] of Object.entries(blocks)) contents[id] = b.content
-        const toSave: PageManifest = { ...manifest, updatedAt: new Date().toISOString() }
-        await amadeus.savePage(activePage, toSave, contents)
-        set((s) => ({ manifest: toSave, status: 'ready', linkGraphVersion: s.linkGraphVersion + 1 }))
-      } catch (e) {
-        set({ status: 'ready', error: String(e) })
-      }
+      // 记在途保存(path+promise):loadPage 借此只在「读写同一文件」时才等写完,其余并行(高 RTT 省一整个往返)。
+      const savedPath = activePage
+      flushingPath = savedPath
+      inflightSave = (async () => {
+        try {
+          const contents: Record<string, string> = {}
+          for (const [id, b] of Object.entries(blocks)) contents[id] = b.content
+          const toSave: PageManifest = { ...manifest, updatedAt: new Date().toISOString() }
+          await amadeus.savePage(savedPath, toSave, contents)
+          // 并行时代守卫:完成时若已导航去别页,绝不把旧页 manifest/status 盖回画面
+          set((s) => (s.activePage === savedPath
+            ? { manifest: toSave, status: 'ready' as const, linkGraphVersion: s.linkGraphVersion + 1 }
+            : { linkGraphVersion: s.linkGraphVersion + 1 }))
+        } catch (e) {
+          set((s) => (s.activePage === savedPath ? { status: 'ready' as const, error: String(e) } : { error: String(e) }))
+        } finally {
+          flushingPath = null
+          inflightSave = null
+        }
+      })()
+      await inflightSave
     },
 
     async flushSave() {

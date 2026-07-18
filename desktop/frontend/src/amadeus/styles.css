@@ -374,6 +374,13 @@
   align-items: stretch;
 }
 
+/* 视口外行跳过 layout/paint(长页滚动/重排大头)。拖拽中(data-dnd)解除:dnd-kit 持续测量
+   droppable 矩形,cv 的估高会让 drop 目标错位。80px≈单行文本块,估值只影响滚动条,不影响正确性。 */
+.am-app .stack:not([data-dnd]) .row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 80px;
+}
+
 .am-app .row-cols {
   display: flex;
   flex: 1;
