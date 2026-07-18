@@ -381,6 +381,22 @@ export const WorkspaceHost: React.FC<{
     return () => window.removeEventListener('keydown', onKey, true)
   }, [])
 
+  // 容器尺寸变化(窗口 / 外层分栏)时 dockview 会重分配各组宽度 → pinned 侧漂离黄金分割,
+  // 引擎原本无 resize 监听,得等下次开视图/切栏才回正(侧栏抽风根因 R3)。补一个防抖重钉。
+  // 观测容器盒本身而非各子组:repinSides 只改子组宽、不改容器盒 → 不会自触发,无反馈环。
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') return
+    const el = document.querySelector('.wb-dockview') // 本 realm 单实例(每 BrowserWindow 独立 document)
+    if (!el) return
+    let t: ReturnType<typeof setTimeout> | null = null
+    const ro = new ResizeObserver(() => {
+      if (t) clearTimeout(t)
+      t = setTimeout(() => useWorkspace.getState().repinSides(), 120)
+    })
+    ro.observe(el)
+    return () => { ro.disconnect(); if (t) clearTimeout(t) }
+  }, [])
+
   const onReady = (e: DockviewReadyEvent): void => {
     const ws = useWorkspace.getState()
     ws.setApi(e.api)
