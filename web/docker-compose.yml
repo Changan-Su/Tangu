@@ -31,3 +31,5 @@ services:
       timeout: 10s
       start_period: 10s
       retries: 3
+
+# retrigger: build-web(上一 run 未产出镜像,重触发)
