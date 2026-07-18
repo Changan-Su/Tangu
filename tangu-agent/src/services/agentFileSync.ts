@@ -13,6 +13,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import { join, dirname, extname } from 'node:path';
+import { deps } from '../seams/runtime.js';
 import { agentsDir, userMdFile } from '../core/tanguHome.js';
 import { getDeviceId } from '../core/deviceId.js';
 import { listAgents, parseAgentConfig, resolveMemorySlug, type NormalAgentDef } from '../agents/agentRegistry.js';
@@ -83,7 +84,26 @@ function rebuildLog(header: string, blocks: string[]): string {
 
 export interface AgentFileSyncResult { ok: boolean; agents: number; pushed: number; pulled: number; deleted: number; skipped: number; error?: string }
 
-/** 跑一次文件镜像。手动同步缺省全量；run 前可用 onlySlug 只同步当前 Agent，避免无关大文件拖慢对话。 */
+/**
+ * 后台跑一次双向镜像(fire-and-forget)。挂两类时机:① run 结束后(推本轮 Historian/工具写的
+ * MEMORY/LOG/Library 上云——此前只有下一次 run 的 pre-run sync 或手动同步才推,云端/他端的记忆
+ * 视图在窗口期看不到新记忆);② 记忆/日志视图打开时(拉云端 worker 侧写的新记忆下来)。
+ * 幂等(mtime 清单比较),未开 cloudSync 的 agent 零开销;仅本地形态(hostExec)有文件可动。
+ */
+export function scheduleAgentFilesSync(userId: string, slug?: string): void {
+  try {
+    const d = deps();
+    if (!d.profile.capabilities.hostExec) return;
+    const af = d.brain.agentFiles;
+    if (!af) return;
+    void runAgentFilesSync(af, userId, slug ? { onlySlug: slug } : undefined).catch((e: any) => {
+      console.warn('[agent-core] post-run agent files sync failed:', e?.message || e);
+    });
+  } catch {
+    /* deps 未装配(测试等)→ no-op */
+  }
+}
+
 export async function runAgentFilesSync(
   cloud: AgentFilesBrain,
   userId: string,

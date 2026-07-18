@@ -10,6 +10,9 @@ import { query, getOlderThanSql } from '../core/db.js';
 import { deps } from '../seams/runtime.js';
 import type { ChatMessage } from '../core/types.js';
 import { historianConfig } from './historianConfig.js';
+import { enterRunContext } from '../seams/runContext.js';
+import { cloudGetAgent } from '../agents/cloudAgentStore.js';
+import { resolveMemorySlug } from '../agents/agentRegistry.js';
 
 // ── 注入依赖的 lazy 别名(保持下方调用点不变)──
 const resolveModelAndKey = (modelId: string) => deps().brain.llm.resolveModelAndKey(modelId);
@@ -66,7 +69,21 @@ async function tick(): Promise<void> {
         LIMIT ?`,
       [BATCH],
     );
-    if (!rows.length) return;
+    // tangu 会话(web/安卓云端 Tangu Space):同谓词空闲扫描,但做「标题+日志」两件套维护
+    // (桌面 localHistorian 的云端等价物;memory 整文覆盖刻意不做——空闲版上下文不足,留桌面按轮版)。
+    const tanguRows = await query<any[]>(
+      `SELECT s.id, s.user_id, s.title, s.agent_config
+         FROM chat_sessions s
+        WHERE s.app_id = 'tangu'
+          AND s.archived = FALSE
+          AND (s.kind IS NULL OR s.kind = 'user')
+          AND ${getOlderThanSql('s.updated_at', cfg.idleMinutes)}
+          AND (s.historian_last_summary_at IS NULL OR s.historian_last_summary_at < s.updated_at)
+        ORDER BY s.updated_at ASC
+        LIMIT ?`,
+      [BATCH],
+    );
+    if (!rows.length && !tanguRows.length) return;
 
     // 整批共用一次模型解析；失败（如配置的模型被禁用）则本 tick 跳过，下 tick 重试（不标记，不丢会话）。
     let resolved: Resolved;
@@ -84,6 +101,13 @@ async function tick(): Promise<void> {
         console.warn(`[historian] session ${r.id} 复盘失败:`, e?.message || e);
       }
     }
+    for (const r of tanguRows) {
+      try {
+        await summarizeTanguSession(r, cfg.modelId, resolved);
+      } catch (e: any) {
+        console.warn(`[historian] tangu session ${r.id} 复盘失败:`, e?.message || e);
+      }
+    }
   } catch (e: any) {
     console.warn('[historian] tick failed:', e?.message || e);
   } finally {
@@ -94,8 +118,8 @@ async function tick(): Promise<void> {
 const markPass = (sessionId: string) =>
   query(`UPDATE chat_sessions SET historian_last_summary_at = CURRENT_TIMESTAMP WHERE id = ?`, [sessionId]).catch(() => {});
 
-async function summarizeSession(sessionId: string, userId: string, modelId: string, resolved: Resolved): Promise<void> {
-  // 最近消息（去空 / 去 tool 行），拼 transcript 并截断兜成本。
+/** 最近消息（去空 / 去 tool 行）拼 transcript 并截断兜成本；空串 = 无可复盘内容。 */
+async function buildTranscript(sessionId: string): Promise<string> {
   const msgs = await query<any[]>(
     `SELECT role, content FROM chat_messages WHERE session_id = ? ORDER BY timestamp DESC LIMIT 30`,
     [sessionId],
@@ -109,9 +133,14 @@ async function summarizeSession(sessionId: string, userId: string, modelId: stri
     if (!content) continue;
     lines.push(`${role === 'user' ? '用户' : 'AI'}：${content}`);
   }
-  let transcript = lines.join('\n');
-  if (!transcript.trim()) { await markPass(sessionId); return; } // 无可复盘内容，仍标记避免重扫
+  let transcript = lines.join('\n').trim();
   if (transcript.length > MAX_TRANSCRIPT_CHARS) transcript = transcript.slice(-MAX_TRANSCRIPT_CHARS);
+  return transcript;
+}
+
+async function summarizeSession(sessionId: string, userId: string, modelId: string, resolved: Resolved): Promise<void> {
+  const transcript = await buildTranscript(sessionId);
+  if (!transcript) { await markPass(sessionId); return; } // 无可复盘内容，仍标记避免重扫
 
   const { model, apiKey, baseUrl, apiModelId } = resolved;
   const messages = [
@@ -144,4 +173,92 @@ async function summarizeSession(sessionId: string, userId: string, modelId: stri
     await appendLogEntry(userId, out).catch((e: any) => console.warn('[historian] appendLog failed:', e?.message || e));
   }
   await markPass(sessionId); // 无论是否写日志都标记本趟
+}
+
+// ── tangu 云端会话(web/安卓 Tangu Space)的空闲复盘:标题 + 日志两件套 ─────────────
+// 桌面 localHistorian(按轮触发)的云端等价物:worker 无共享库跑不了按轮版,网关定时扫描补位。
+// memory 整文覆盖刻意不做(空闲版上下文不足以安全改写长期记忆,交桌面按轮版)。
+
+const TANGU_HISTORIAN_PROMPT =
+  'You are a "historian" maintaining a chat session between a user and an AI assistant. ' +
+  'Based on the recent conversation below, output STRICT JSON (no markdown fence): {"title": string, "log": string}\n' +
+  '- "title": a concise session title in the user\'s language (at most 20 characters, no quotes or decoration). ' +
+  'Output an empty string if the current title already fits the conversation.\n' +
+  '- "log": if the conversation contains facts, conclusions, completed tasks, or clear long-term preferences worth recording, ' +
+  "write ONE concise log entry in the user's language (at most 60 characters, no pleasantries); otherwise an empty string.\n" +
+  'Output nothing other than the JSON object.';
+
+/** 容错解析模型 JSON 输出(剥 ``` 围栏;失败 → null)。 */
+function parseTitleLog(raw: string): { title: string; log: string } | null {
+  let s = String(raw || '').trim();
+  if (s.startsWith('```')) s = s.replace(/^```[a-z]*\s*/i, '').replace(/```\s*$/, '').trim();
+  try {
+    const j = JSON.parse(s);
+    return { title: String(j?.title ?? '').trim(), log: String(j?.log ?? '').trim() };
+  } catch {
+    return null;
+  }
+}
+
+async function summarizeTanguSession(
+  row: { id: string; user_id: string; title: any; agent_config: any },
+  modelId: string,
+  resolved: Resolved,
+): Promise<void> {
+  const sessionId = String(row.id);
+  const userId = String(row.user_id);
+  const transcript = await buildTranscript(sessionId);
+  if (!transcript) { await markPass(sessionId); return; }
+
+  // 会话绑定 agent → LOG 落该 agent 的记忆域(经云端 agent 定义折叠 shareDefaultMemory);
+  // 解析失败/未绑定 → 全局日志。seams 的 memory 实现读 runContext 的 currentAgentSlug。
+  let memSlug: string | undefined;
+  try {
+    const raw = row.agent_config;
+    const cfg0 = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : null;
+    if (cfg0?.agentSlug) {
+      const def = await cloudGetAgent(userId, String(cfg0.agentSlug)).catch(() => null);
+      if (def) memSlug = resolveMemorySlug(def);
+    }
+  } catch { /* ignore */ }
+
+  const { model, apiKey, baseUrl, apiModelId } = resolved;
+  const sys = `${TANGU_HISTORIAN_PROMPT}\nCurrent session title: ${JSON.stringify(String(row.title || ''))}`;
+  const messages = [
+    { role: 'system', content: sys },
+    { role: 'user', content: transcript },
+  ] as ChatMessage[];
+  const payload = await buildProviderPayload({
+    model, apiModelId, messages,
+    projectSource: '',
+    temperature: 0.3,
+    maxTokens: 300,
+    stream: true,
+  });
+  const res = await streamProviderCompletion({ apiKey, baseUrl, payload });
+
+  try {
+    const user = await getUserById(userId);
+    const cost = await calculateCost(modelId, res.usage.prompt_tokens, res.usage.completion_tokens);
+    await logApiUsage(
+      user?.username || userId, modelId, model.name, model.provider,
+      res.usage.prompt_tokens, res.usage.completion_tokens, true, undefined, 'tangu-historian', cost,
+    );
+    if (HISTORIAN_CHARGE_USER) await consumeTokenPoints(userId, cost).catch(() => {});
+  } catch { /* 记账失败不阻断复盘 */ }
+
+  const j = parseTitleLog(String(res.content || ''));
+  if (j) {
+    const title = j.title.replace(/^["'《「]+|["'》」]+$/g, '').slice(0, 60);
+    if (title && title.length >= 2) {
+      await query(`UPDATE chat_sessions SET title = ? WHERE id = ?`, [title, sessionId])
+        .catch((e: any) => console.warn('[historian] tangu 标题更新失败:', e?.message || e));
+    }
+    const logText = j.log;
+    if (logText && logText.length >= 2 && logText.length <= 200) {
+      if (memSlug) enterRunContext(userId, undefined, memSlug);
+      await appendLogEntry(userId, logText).catch((e: any) => console.warn('[historian] tangu appendLog failed:', e?.message || e));
+    }
+  }
+  await markPass(sessionId);
 }

@@ -22,6 +22,7 @@ import path from 'node:path';
 import { agentsDir, readUserMd, writeUserMd } from '../core/tanguHome.js';
 import { listLoadoutTools } from '../tools/toolRegistry.js';
 import { createLocalMemoryStore } from '../adapters/standalone/localMemoryBrain.js';
+import { scheduleAgentFilesSync } from '../services/agentFileSync.js';
 
 const router = Router();
 
@@ -227,6 +228,8 @@ router.get('/agent/agents/:slug/memory', authMiddleware, async (req: AuthRequest
     const store = await storeForAgent(req.params.slug);
     if (!store) return res.status(404).json({ detail: 'Agent not found' });
     res.json({ content: store.readMemory() });
+    // 后台拉一次云端(不阻塞响应):云端 worker 侧写的新记忆迟一拍到位,重开视图即最新。
+    scheduleAgentFilesSync(req.user!.userId);
   } catch (e: any) {
     res.status(500).json({ detail: e?.message || 'read memory failed' });
   }
@@ -250,6 +253,8 @@ router.get('/agent/agents/:slug/logs', authMiddleware, async (req: AuthRequest, 
     const store = await storeForAgent(req.params.slug);
     if (!store) return res.status(404).json({ detail: 'Agent not found' });
     res.json({ dates: store.listLogDates() });
+    scheduleAgentFilesSync(req.user!.userId); // 同 memory:后台拉云端新日志
+
   } catch (e: any) {
     res.status(500).json({ detail: e?.message || 'list logs failed' });
   }
