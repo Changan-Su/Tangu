@@ -3,17 +3,19 @@
  *  交互(与旧 RightPanel 工作区树对齐,复用同一套 fs IPC):单击选中,双击在主区开预览标签页;
  *  右键菜单(打开/系统默认打开/新建文件/文件夹/重命名/复制路径/文件管理器显示/回收站);
  *  行拖进文件夹=移动、Alt+拖=原生拖出、OS 文件拖入=复制;行内重命名/新建。
- *  云端工作区(无磁盘路径)暂不在此面板(之后再开发)。 */
+ *  云端 Project 工作区(kind='cloud',无磁盘路径)走 workspace API 按 project 取数(CloudGroup):
+ *  只读呈现(预览/下载/删除),web/移动云端无 fs IPC 也可用;run 结束自动刷新。 */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  ChevronRight, Folder, FolderOpen, RefreshCw,
+  ChevronRight, Folder, FolderOpen, RefreshCw, Download,
   Eye, ExternalLink, FilePlus2, FolderPlus, Pencil, Copy, FolderSearch, Trash2,
 } from 'lucide-react'
-import type { WorkspaceDescriptor } from '../../types'
+import type { WorkspaceDescriptor, WorkspaceFileMeta } from '../../types'
 import type { PreviewTarget } from '../../components/WorkspaceFilePreview'
 import { ContextMenu, menuPos, type CtxItem, type CtxMenu } from '../../components/RightPanel'
 import { useI18n } from '../../i18n'
-import { iconForFile, mimeForExt, fmtSize } from '../../services/fileKinds'
+import { iconForFile, mimeForExt, fmtSize, b64ToBytes } from '../../services/fileKinds'
+import { listWorkspace, readWorkspaceFile, downloadWorkspaceFile, deleteWorkspaceFile } from '../../services/backendService'
 import { AnimatedCollapse } from '../../components/AnimatedUI'
 import { useApp } from '../../stores/appStore'
 import { hostTargetFor } from '../wsFileNav'
@@ -165,6 +167,102 @@ function DirRow({ entry, depth, ctx, forceOpen }: { entry: Entry; depth: number;
   )
 }
 
+/** 云端 Project 组:文件在 Penzor 云(files 表),经 workspace API 按 project 取数;fs IPC 不可用 →
+ *  只读呈现(双击预览 / 右键 预览・下载・删除)。
+ *  ponytail: 平铺相对路径,文件多层级复杂了再做树。 */
+function CloudGroup({ ws, open, onToggle, onOpenPreview }: {
+  ws: WorkspaceDescriptor
+  open: boolean
+  onToggle: () => void
+  onOpenPreview: (t: PreviewTarget) => void
+}) {
+  const { t } = useI18n()
+  const cfg = useApp((s) => s.cfg)
+  const running = useApp((s) => Object.keys(s.runningBySession).length > 0)
+  const [files, setFiles] = useState<WorkspaceFileMeta[] | null>(null)
+  const [menu, setMenu] = useState<CtxMenu>(null)
+  const project = ws.project!
+  const refresh = useCallback(() => {
+    void listWorkspace(cfg, '__project__', project)
+      .then((fs) => setFiles([...fs].sort((a, b) => a.path.localeCompare(b.path))))
+      .catch(() => setFiles([]))
+  }, [cfg, project])
+  useEffect(() => { if (open && files === null) refresh() }, [open, files, refresh])
+  // run 结束 → 刷新(agent 产物落云端后可见)
+  const prevRunning = useRef(running)
+  useEffect(() => {
+    if (prevRunning.current && !running && open) refresh()
+    prevRunning.current = running
+  }, [running, open, refresh])
+
+  const download = (f: WorkspaceFileMeta): void => {
+    void downloadWorkspaceFile(cfg, '__project__', f.path, project)
+      .catch((err) => useApp.getState().toast(err?.message || String(err), true))
+  }
+  const preview = (f: WorkspaceFileMeta): void => {
+    onOpenPreview({
+      name: f.path,
+      load: async () => {
+        const r = await readWorkspaceFile(cfg, '__project__', f.path, project)
+        return { mimeType: r.mimeType, bytes: b64ToBytes(r.content), size: r.size }
+      },
+      download: () => download(f),
+    })
+  }
+  const del = async (f: WorkspaceFileMeta): Promise<void> => {
+    if (!window.confirm(t('panel.confirm.delete', { name: f.path }))) return
+    try { await deleteWorkspaceFile(cfg, '__project__', f.path, project); refresh() }
+    catch (err: any) { useApp.getState().toast(err?.message || String(err), true) }
+  }
+  const onRowMenu = (ev: React.MouseEvent, f: WorkspaceFileMeta): void => {
+    ev.preventDefault(); ev.stopPropagation()
+    const items: CtxItem[] = [
+      { label: t('panel.action.preview'), icon: <Eye size={13} />, run: () => preview(f) },
+      { label: t('panel.action.download'), icon: <Download size={13} />, run: () => download(f) },
+      { label: t('panel.action.delete'), icon: <Trash2 size={13} />, danger: true, run: () => void del(f) },
+    ]
+    setMenu({ ...menuPos(ev, items.length), items })
+  }
+
+  return (
+    <div>
+      <div className="t2s-group" style={{ paddingLeft: folderPadLeft(0) }}>
+        <button className="t2s-group-toggle t2s-folder-row" onClick={onToggle} title={project}>
+          <span className="t2s-lead">
+            {open ? <FolderOpen className="t2s-lead-icon" /> : <Folder className="t2s-lead-icon" />}
+            <span className={`t2s-chev t2s-lead-chev${open ? ' open' : ''}`}><ChevronRight size={12} /></span>
+          </span>
+          <span className="t2s-group-label">{ws.name}</span>
+        </button>
+        <button className="t2s-group-add" title={t('panel.files.refresh')} onClick={refresh}><RefreshCw size={13} /></button>
+      </div>
+      <AnimatedCollapse open={open}>
+        <div className="t2sf-tree">
+          {files == null ? <div className="t2sf-loading" style={{ paddingLeft: nameLeft(1) }}>…</div>
+            : files.length === 0 ? <div className="t2sf-empty">{t('panel.files.empty')}</div>
+            : files.map((f) => {
+              const Icon = iconForFile(mimeForExt(f.path) || '', f.path)
+              return (
+                <div
+                  key={f.path}
+                  className="t2sf-row t2sf-file"
+                  style={{ paddingLeft: rowPadLeft(1) }}
+                  onDoubleClick={() => preview(f)}
+                  onContextMenu={(e) => onRowMenu(e, f)}
+                >
+                  <span className="t2s-lead"><Icon className="t2s-lead-icon t2sf-fic" /></span>
+                  <span className="t2sf-name">{f.path}</span>
+                  {f.size > 0 && <span className="t2sf-size">{fmtSize(f.size)}</span>}
+                </div>
+              )
+            })}
+        </div>
+      </AnimatedCollapse>
+      {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
+    </div>
+  )
+}
+
 export function FilesPanel({ workspaces, onOpenPreview, activeWorkspaceKey, onEnterWorkspace, expandToPath }: {
   workspaces: WorkspaceDescriptor[]
   onOpenPreview: (t: PreviewTarget) => void
@@ -177,6 +275,7 @@ export function FilesPanel({ workspaces, onOpenPreview, activeWorkspaceKey, onEn
   const { t } = useI18n()
   const running = useApp((s) => Object.keys(s.runningBySession).length > 0)
   const locals = workspaces.filter((w) => w.kind === 'local' && !!w.path)
+  const clouds = workspaces.filter((w) => w.kind === 'cloud' && !!w.project)
   const [rootsByKey, setRootsByKey] = useState<Record<string, Entry[] | null>>({})
   const [selected, setSelected] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -341,11 +440,20 @@ export function FilesPanel({ workspaces, onOpenPreview, activeWorkspaceKey, onEn
     if (w?.path && rootsByKey[activeWorkspaceKey] === undefined) loadRoot(activeWorkspaceKey, w.path)
   }, [activeWorkspaceKey, locals, rootsByKey, loadRoot])
 
-  if (!locals.length) return <div className="t2s-hint" style={{ padding: '18px 12px' }}>{t('panel.files.noLocalWs')}</div>
+  if (!locals.length && !clouds.length) return <div className="t2s-hint" style={{ padding: '18px 12px' }}>{t('panel.files.noLocalWs')}</div>
 
   return (
     <aside className="t2s-side">
       <div className="t2s-scroll" onClick={(e) => { if (e.target === e.currentTarget) setSelected(null) }}>
+        {clouds.map((ws) => (
+          <CloudGroup
+            key={ws.key}
+            ws={ws}
+            open={activeWorkspaceKey === ws.key}
+            onToggle={() => toggleWs(ws)}
+            onOpenPreview={onOpenPreview}
+          />
+        ))}
         {locals.map((ws) => {
           const open = activeWorkspaceKey === ws.key
           const roots = rootsByKey[ws.key]

@@ -518,22 +518,27 @@ export const createProject = (cfg: TanguDesktopConfig, name: string) =>
   request<{ name: string }>(cfg, '/agent/projects', { method: 'POST', body: JSON.stringify({ name }) })
 
 // ── 工作区 ──
-export const listWorkspace = (cfg: TanguDesktopConfig, sessionId: string) =>
+// project 有值 = 按云端 Project 树取数(服务端 resolveScope 显式 project 优先,sessionId 仅形式必填,
+// 调用方无会话时传 '__project__' 哑值即可)。
+const wsQ = (sessionId: string, project?: string) =>
+  `sessionId=${encodeURIComponent(sessionId)}${project ? `&project=${encodeURIComponent(project)}` : ''}`
+
+export const listWorkspace = (cfg: TanguDesktopConfig, sessionId: string, project?: string) =>
   request<{ files: WorkspaceFileMeta[] }>(
-    cfg, `/agent/workspace/list?sessionId=${encodeURIComponent(sessionId)}`,
+    cfg, `/agent/workspace/list?${wsQ(sessionId, project)}`,
   ).then((r) => r.files)
 
-export const readWorkspaceFile = (cfg: TanguDesktopConfig, sessionId: string, path: string) =>
+export const readWorkspaceFile = (cfg: TanguDesktopConfig, sessionId: string, path: string, project?: string) =>
   request<{ path: string; mimeType: string; content: string; encoding: 'base64'; size: number }>(
-    cfg, `/agent/workspace/read?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}`,
+    cfg, `/agent/workspace/read?${wsQ(sessionId, project)}&path=${encodeURIComponent(path)}`,
   )
 
-export const workspaceDownloadUrl = (cfg: TanguDesktopConfig, sessionId: string, path: string) =>
-  `${cfg.backendUrl}/agent/workspace/download?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}`
+export const workspaceDownloadUrl = (cfg: TanguDesktopConfig, sessionId: string, path: string, project?: string) =>
+  `${cfg.backendUrl}/agent/workspace/download?${wsQ(sessionId, project)}&path=${encodeURIComponent(path)}`
 
 /** 下载工作区文件(fetch 带 Bearer → blob → 触发保存)。 */
-export async function downloadWorkspaceFile(cfg: TanguDesktopConfig, sessionId: string, path: string): Promise<void> {
-  const r = await authFetch(workspaceDownloadUrl(cfg, sessionId, path), { headers: headers(cfg.token) })
+export async function downloadWorkspaceFile(cfg: TanguDesktopConfig, sessionId: string, path: string, project?: string): Promise<void> {
+  const r = await authFetch(workspaceDownloadUrl(cfg, sessionId, path, project), { headers: headers(cfg.token) })
   if (!r.ok) throw new Error(`下载失败 (${r.status})`)
   const blob = await r.blob()
   const a = document.createElement('a')
@@ -553,10 +558,10 @@ export const uploadWorkspaceFiles = (
     body: JSON.stringify({ sessionId, files }),
   })
 
-export const deleteWorkspaceFile = (cfg: TanguDesktopConfig, sessionId: string, path: string) =>
+export const deleteWorkspaceFile = (cfg: TanguDesktopConfig, sessionId: string, path: string, project?: string) =>
   request<{ ok: boolean }>(cfg, '/agent/workspace/delete', {
     method: 'POST',
-    body: JSON.stringify({ sessionId, path }),
+    body: JSON.stringify({ sessionId, path, ...(project ? { project } : {}) }),
   })
 
 // ── Inbox(收件箱)──

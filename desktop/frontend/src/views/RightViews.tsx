@@ -102,3 +102,5 @@ export function FilesView() {
 export const TocView = () => <RightView view="toc" />
 export const MemoryPanelView = () => <RightView view="memory" />
 export const SubchatsView = () => <RightView view="subchats" />
+/** 会话文件:当前会话的云端工作区文件(SandboxFilesTab,服务端按会话 project 自动分树)。 */
+export const SessionFilesView = () => <RightView view="workspace" />
