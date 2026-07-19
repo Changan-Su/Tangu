@@ -77,7 +77,10 @@ router.delete('/agent/skills/user/:id', authMiddleware, async (req: AuthRequest,
 
 router.get('/agent/tools', authMiddleware, async (req: AuthRequest, res) => {
   try {
-    const profile = deps().profile;
+    // 走 profileStore(appId 可指定):清单反映 admin 覆盖(tool_builtins 白名单等)后的**生效集**,
+    // 与 run 的 resolveProfile 同源——admin 面板/Tangu Manager 看到的即真实可用工具。
+    const appIdQ = typeof req.query.appId === 'string' && req.query.appId ? req.query.appId : undefined;
+    const profile = deps().profileStore.resolve(appIdQ ?? null) ?? deps().profile;
     const userId = req.user!.userId;
 
     // 内置:sandbox 与 host 两形态可见集的并集(host 集仅 hostExec profile 非空)。

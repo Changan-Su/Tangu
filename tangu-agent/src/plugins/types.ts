@@ -25,6 +25,7 @@ import type { createAiStudioProfile, createTanguProfile } from '../profiles/inde
 import type { currentRunUserId } from '../seams/runContext.js';
 import type { activeRunCount } from '../services/agentLoop.js';
 import type { createThinWorker } from '../adapters/httpWorkerHost.js';
+import type { createProfileStore } from '../profiles/profileStore.js';
 
 /** 插件契约版本。loader 只加载 `apiVersion === TANGU_PLUGIN_API` 的插件。 */
 export const TANGU_PLUGIN_API = 1;
@@ -66,6 +67,8 @@ export interface TanguSdk {
   activeRunCount: typeof activeRunCount;
   /** thin worker 装配:httpWorkerHost(无 pg/JWT_SECRET) + HttpStateStore(状态走 server) + brainToken。 */
   createThinWorker: typeof createThinWorker;
+  /** 配置驱动 profile store(可注入取数源;thin worker 传 HTTP 版接收 admin 覆盖下达)。 */
+  createProfileStore: typeof createProfileStore;
   /** 插件设置/数据存储(读写自身设置 + image-list blob;按 id + scope)。folder 插件经此读写,不直接 import 核心。 */
   pluginStore: typeof PluginStore;
   /** 把媒体(图片/文件)发到当前微信会话连接的用户(send_sticker 等用;非微信会话返回 ok:false)。 */

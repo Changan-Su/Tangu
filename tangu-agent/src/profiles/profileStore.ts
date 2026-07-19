@@ -124,6 +124,9 @@ export function createProfileStore(opts: {
   seedAppIds?: string[];
   /** 文件覆盖层;缺省取 checked-in APP_PROFILE_OVERRIDES。 */
   fileOverrides?: Record<string, AppProfileOverride>;
+  /** 覆盖行取数源(app_profile_overrides 表行,snake_case 列)。缺省=本进程 DB query;
+   *  thin worker 无 DB → 传 HTTP 版(经网关 /api/agent-state/profile-overrides),admin 覆盖得以下达。 */
+  fetchOverrideRows?: () => Promise<any[]>;
 }): ProfileStore {
   const baseline = opts.baseline;
   const fileOverrides = opts.fileOverrides ?? APP_PROFILE_OVERRIDES;
@@ -153,7 +156,9 @@ export function createProfileStore(opts: {
 
   async function refresh(): Promise<void> {
     try {
-      const rows = await query<any[]>(`SELECT * FROM app_profile_overrides`);
+      const rows = opts.fetchOverrideRows
+        ? await opts.fetchOverrideRows()
+        : await query<any[]>(`SELECT * FROM app_profile_overrides`);
       const map: Record<string, AppProfileOverride> = {};
       for (const r of rows || []) map[r.app_id] = rowToOverride(r);
       dbOverrides = map;

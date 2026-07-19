@@ -28,6 +28,20 @@ RUN npm prune --omit=dev
 
 # ===== runtime:仅运行期产物(node_modules 从 builder 拷,ABI 一致)=====
 FROM node:20-bookworm-slim AS runtime
+# docker-cli(纯客户端,无 daemon):TANGU_SANDBOX=docker 的 worker 经挂载的 /var/run/docker.sock
+# 用宿主 daemon 起 run_python 沙箱容器。挂载要求(部署侧):
+#   -v /var/run/docker.sock:/var/run/docker.sock
+#   -v <宿主沙箱目录>:<同一路径>  +  -e AGENT_SANDBOX_SESSION_DIR=<同一路径>
+# (sandbox 容器由**宿主** daemon 解析 -v 路径,worker 容器内外路径必须一致,否则挂到空目录。)
+# 不挂 sock/保持 TANGU_SANDBOX=none 时本层零行为变化(只多 ~40MB 镜像体积)。
+ARG CN_MIRROR=
+ARG TARGETARCH
+RUN if [ -n "$CN_MIRROR" ]; then sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources; fi \
+ && apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+ && ARCH=$([ "$TARGETARCH" = "arm64" ] && echo aarch64 || echo x86_64) \
+ && curl -fsSL "https://download.docker.com/linux/static/stable/${ARCH}/docker-27.5.1.tgz" \
+    | tar xz --strip-components=1 -C /usr/local/bin docker/docker \
+ && apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production \
     TANGU_PLUGINS_DIR=/opt/tangu/core/plugins \
     TANGU_HOME=/data/.tangu \

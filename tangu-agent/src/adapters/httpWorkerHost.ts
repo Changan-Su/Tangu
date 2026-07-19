@@ -88,6 +88,8 @@ export function createThinWorker(cfg: { cloudUrl: string; workerKey?: string }):
   state: StateStore;
   /** 供 httpBrain.token:当前 run(ALS runId)的 per-dispatch token。 */
   brainToken: () => string;
+  /** 实际生效的配对密钥(env 或生成持久值):供 worker 调网关 X-Fleet-Auth 闸的其它端点(如 profile-overrides)。 */
+  workerKey: string;
 } {
   const { key, source } = resolveWorkerKey(cfg.workerKey);
   // 打印配对密钥:admin 在「实例管理」登记本 worker 时填它,配对一致才放行。
@@ -101,5 +103,5 @@ export function createThinWorker(cfg: { cloudUrl: string; workerKey?: string }):
 
   const { host } = createHttpWorkerHost({ fleetSecret: key });
   const state = createHttpStateStore({ cloudUrl: cfg.cloudUrl, fleetSecret: key });
-  return { host, state, brainToken: () => currentToken() ?? '' };
+  return { host, state, brainToken: () => currentToken() ?? '', workerKey: key };
 }

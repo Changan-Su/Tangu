@@ -20,6 +20,7 @@ import { createAiStudioProfile, createTanguProfile } from '../profiles/index.js'
 import { currentRunUserId } from '../seams/runContext.js';
 import { activeRunCount } from '../services/agentLoop.js';
 import { createThinWorker } from '../adapters/httpWorkerHost.js';
+import { createProfileStore } from '../profiles/profileStore.js';
 import { activatePlugin, discoverPlugins, type DiscoveredPlugin } from './loader.js';
 import type {
   PluginCommand,
@@ -42,6 +43,7 @@ const sdk: TanguSdk = {
   currentRunUserId,
   activeRunCount,
   createThinWorker,
+  createProfileStore,
   pluginStore,
   sendWechatMedia: (userId, sessionId, buffer, opts, signal) => wechatRemote.sendMediaForSession(userId, sessionId, buffer, opts, signal),
 };
