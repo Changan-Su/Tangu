@@ -6,7 +6,42 @@ import { mkdtempSync, readFileSync, existsSync, mkdirSync, writeFileSync } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import JSZip from 'jszip'
-import { isSafeSlug, isJunkPath, computeStripPrefix, safeEntryPath, extractZipToDir, readInstalledVersion, readUserPluginDirs } from './marketInstall'
+import { isSafeSlug, isJunkPath, computeStripPrefix, safeEntryPath, extractZipToDir, readInstalledVersion, readUserPluginDirs, detectMarketType } from './marketInstall'
+
+async function zipOf(names: string[]): Promise<Buffer> {
+  const z = new JSZip()
+  for (const n of names) z.file(n, '{}')
+  return Buffer.from(await z.generateAsync({ type: 'nodebuffer' }))
+}
+
+describe('detectMarketType(插件双类型实测纠偏)', () => {
+  it('后端标 plugin 但包里是 manifest.json → 纠正为 amadeus-plugin(forsion-mindmap 场景)', async () => {
+    expect(await detectMarketType(await zipOf(['manifest.json', 'main.js']), 'plugin')).toBe('amadeus-plugin')
+  })
+  it('后端标 amadeus-plugin 但包里是 tangu-plugin.json → 纠正为 plugin', async () => {
+    expect(await detectMarketType(await zipOf(['tangu-plugin.json', 'dist/index.js']), 'amadeus-plugin')).toBe('plugin')
+  })
+  it('正确标注不动:引擎包(tangu-plugin.json)保持 plugin', async () => {
+    expect(await detectMarketType(await zipOf(['tangu-plugin.json']), 'plugin')).toBe('plugin')
+  })
+  it('二者皆有/皆无 → 尊重后端 type', async () => {
+    expect(await detectMarketType(await zipOf(['tangu-plugin.json', 'manifest.json']), 'plugin')).toBe('plugin')
+    expect(await detectMarketType(await zipOf(['readme.md']), 'amadeus-plugin')).toBe('amadeus-plugin')
+  })
+  it('嵌套目录里的 manifest 也算(单层文件夹包)', async () => {
+    expect(await detectMarketType(await zipOf(['my-plugin/manifest.json', 'my-plugin/main.js']), 'plugin')).toBe('amadeus-plugin')
+  })
+  it('包根 manifest.json + 嵌套 example 的 tangu-plugin.json → 以最浅者(amadeus-plugin)为准', async () => {
+    expect(await detectMarketType(await zipOf(['manifest.json', 'examples/engine/tangu-plugin.json', 'main.js']), 'plugin')).toBe('amadeus-plugin')
+  })
+  it('引擎包根 tangu-plugin.json + 嵌套 example 的 manifest.json → 以最浅者(plugin)为准', async () => {
+    expect(await detectMarketType(await zipOf(['tangu-plugin.json', 'examples/ui/manifest.json']), 'amadeus-plugin')).toBe('plugin')
+  })
+  it('非插件类型原样返回(即便含 manifest.json)', async () => {
+    expect(await detectMarketType(await zipOf(['manifest.json']), 'theme')).toBe('theme')
+    expect(await detectMarketType(await zipOf(['theme.json']), 'theme')).toBe('theme')
+  })
+})
 
 describe('isSafeSlug', () => {
   it('接受 kebab', () => { expect(isSafeSlug('my-skill')).toBe(true); expect(isSafeSlug('a1')).toBe(true) })

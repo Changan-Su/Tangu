@@ -2126,10 +2126,10 @@ a:hover { color: var(--accent-hover); }
   .ob-hero-mark, .ob-hero-title, .ob-hero-ver, .ob-hero-actions, .ob-hero-skip { animation: none; }
 }
 
-.ob-drawer-scrim { position: absolute; inset: 0; background: var(--overlay-medium, rgba(0,0,0,.28)); opacity: 0; pointer-events: none; transition: opacity .3s ease; }
+.ob-drawer-scrim { position: absolute; inset: 0; z-index: 3; background: var(--overlay-medium, rgba(0,0,0,.28)); opacity: 0; pointer-events: none; transition: opacity .3s ease; }
 .ob-drawer-scrim.open { opacity: 1; pointer-events: auto; }
 .ob-drawer {
-  position: absolute; top: 0; right: 0; bottom: 0; width: min(440px, 88%);
+  position: absolute; top: 0; right: 0; bottom: 0; z-index: 4; width: min(440px, 88%);
   display: flex; flex-direction: column;
   background: var(--bg-card, var(--bg)); border-left: var(--border-width, 1px) solid var(--border);
   box-shadow: var(--card-shadow, -8px 0 32px rgba(0,0,0,.22));

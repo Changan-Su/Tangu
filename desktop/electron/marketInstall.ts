@@ -132,6 +132,31 @@ export function safeEntryPath(name: string, prefix: string): string | null {
   return rel
 }
 
+/**
+ * 插件双类型实测判定:市场后端的 category 会把 Forsion(UI)插件误标成引擎 'plugin'(反之亦然),
+ * 装错目录后两边加载器都不认 → 插件失效(实测 forsion-mindmap 即被标成 'plugin')。下载后按包内
+ * manifest 重定类型:`tangu-plugin.json` = 引擎插件('plugin');`manifest.json` = Forsion/Amadeus
+ * 插件('amadeus-plugin')。只在 plugin 家族内纠偏;二者皆有/皆无 → 尊重后端;其它类型原样返回。
+ */
+export async function detectMarketType(zipBuffer: Buffer, backendType: string): Promise<string> {
+  if (backendType !== 'plugin' && backendType !== 'amadeus-plugin') return backendType
+  const zip = await JSZip.loadAsync(zipBuffer)
+  // 以「最浅 manifest」定类型:包根那个 manifest 才代表包本体,嵌套的 example/子模块 manifest
+  // (如 Forsion 插件带 examples/engine/tangu-plugin.json)不能盖过它 —— 与 computeStripPrefix 重定根口径一致。
+  let tanguDepth = Infinity
+  let manifestDepth = Infinity
+  for (const f of Object.values(zip.files)) {
+    if (f.dir || isJunkPath(f.name)) continue
+    const parts = f.name.replace(/\\/g, '/').replace(/\/+$/, '').split('/')
+    const base = parts[parts.length - 1].toLowerCase()
+    if (base === 'tangu-plugin.json') tanguDepth = Math.min(tanguDepth, parts.length)
+    else if (base === 'manifest.json') manifestDepth = Math.min(manifestDepth, parts.length)
+  }
+  if (tanguDepth < manifestDepth) return 'plugin'
+  if (manifestDepth < tanguDepth) return 'amadeus-plugin'
+  return backendType // 同深度(含二者皆缺失)→ 尊重后端
+}
+
 /** 解压 zip 到 destRoot(manifest 感知重定根 + 防穿越)。返回写入文件数。遇到穿越路径直接抛错。 */
 export async function extractZipToDir(zipBuffer: Buffer, destRoot: string, manifestNames: string[] = []): Promise<number> {
   const zip = await JSZip.loadAsync(zipBuffer)

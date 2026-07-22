@@ -21,7 +21,7 @@ import { importMcp, importSkills, scanAll } from './discovery'
 import { checkForUpdates, downloadUpdate, installUpdate } from './updater'
 import { createTray } from './tray'
 import { readThemesDir, seedDefaultThemes } from './themes'
-import { extractZipToDir, MARKET_SUBDIR, MARKET_MANIFEST, isSafeSlug, readInstalledVersion, readUserPluginDirs } from './marketInstall'
+import { extractZipToDir, detectMarketType, MARKET_SUBDIR, MARKET_MANIFEST, isSafeSlug, readInstalledVersion, readUserPluginDirs } from './marketInstall'
 import { serveDir as codePreviewServe, stopCodePreview } from './codePreview'
 import { transcribeViaOpenAI, transcribeViaForsion } from './asr'
 import { localModelReady, localModelSize, downloadLocalModel, removeLocalModel, transcribeLocal } from './asrLocal'
@@ -1476,8 +1476,7 @@ app.whenReady().then(async () => {
     const infoRes = await fetch(`${base}/api/market/items/${encodeURIComponent(id)}/install`, { headers: { 'User-Agent': MARKET_UA } })
     if (!infoRes.ok) throw new Error(`解析下载地址失败 HTTP ${infoRes.status}`)
     const info = (await infoRes.json()) as { type: string; installSlug: string; downloadUrl: string; source: string }
-    const sub = MARKET_SUBDIR[info.type]
-    if (!sub || !isSafeSlug(info.installSlug)) throw new Error('非法的安装目标')
+    if (!MARKET_SUBDIR[info.type] || !isSafeSlug(info.installSlug)) throw new Error('非法的安装目标')
     // 中国大陆镜像:github 源(release 资产)按「多代理 → 直连」序列依次尝试;zip 源(Forsion 对象存储)本就可达,不改。
     const stored = await loadConfig()
     const candidates = stored.mirror === 'china' && info.source === 'github'
@@ -1496,9 +1495,25 @@ app.whenReady().then(async () => {
     }
     if (!zipRes) throw new Error(`下载失败(${candidates.length} 个地址均不可达:${lastErr})`)
     const buf = Buffer.from(await zipRes.arrayBuffer())
-    const dest = join(tanguHomeDir(), sub, info.installSlug)
-    const files = await extractZipToDir(buf, dest, MARKET_MANIFEST[info.type] || [])
-    return { ok: true, path: dest, files, type: info.type, slug: info.installSlug }
+    // 后端 category 对插件家族可能误标(Forsion 插件标成引擎 'plugin')→ 按包内 manifest 实测重定,
+    // 否则装进错误目录后两边加载器都不认。返回 effType 让渲染层走对应的装后流程(引擎重扫 / amadeus 重载)。
+    const effType = await detectMarketType(buf, info.type)
+    const dest = join(tanguHomeDir(), MARKET_SUBDIR[effType], info.installSlug)
+    const files = await extractZipToDir(buf, dest, MARKET_MANIFEST[effType] || [])
+    // 插件家族:清掉同 slug 在「另一插件目录」里那份**误装的旧副本**(修复前 Forsion 插件被装进引擎位等),
+    // 消除 split-brain 双份。⚠ 身份守卫:若那份带对方类型的合法 manifest(是恰好同 slug 的**另一个合法插件**),
+    // 绝不删 —— 宁可留一份陈旧也不误删他人插件(install_slug 无全局唯一约束,跨类型可能撞名)。
+    if (effType === 'plugin' || effType === 'amadeus-plugin') {
+      const otherType = effType === 'plugin' ? 'amadeus-plugin' : 'plugin'
+      const otherDir = join(tanguHomeDir(), MARKET_SUBDIR[otherType], info.installSlug)
+      // 仅当「对方类型 manifest 确实不存在(ENOENT)」才判为误装旧副本并删除:读到=合法插件保留;
+      // 其它错误(EACCES/EIO/锁定等)不确定 → 保守保留,绝不因一时读不到就删掉可能合法的插件(codex R3)。
+      const staleMisinstall = await readFile(join(otherDir, MARKET_MANIFEST[otherType][0]), 'utf8')
+        .then(() => false)
+        .catch((e: NodeJS.ErrnoException) => e?.code === 'ENOENT')
+      if (staleMisinstall) await rm(otherDir, { recursive: true, force: true }).catch(() => {})
+    }
+    return { ok: true, path: dest, files, type: effType, slug: info.installSlug }
   })
 
   ipcMain.handle('market:installed', async () => {

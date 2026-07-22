@@ -1444,12 +1444,11 @@ export const useApp = create<AppState>((set, get) => ({
   onPluginInstalled: async () => {
     const t = get().tr
     try {
-      // 重扫让后端立刻发现新插件(免重启);装即启用;提示可能需重启;跳转到对应设置。
+      // 重扫让后端立刻发现新插件(免重启);装即启用;提示可能需重启。
+      // 不再自动关市场 / 跳设置:装完只 toast「已安装」,用户在插件详情里自行「打开设置」。
       const r = await api.rescanPlugins(get().cfg)
       for (const id of r.addedIds) await api.setPluginEnabled(get().cfg, id, true).catch(() => {})
       get().toast(r.needsRestart ? t('market.pluginInstalledRestartHint') : t('market.pluginInstalledOk'))
-      set({ marketOpen: false })
-      get().openSettings(r.addedIds[0] ? (`plugin:${r.addedIds[0]}` as SettingsTab) : 'plugins')
     } catch (e: any) {
       get().toast(t('market.installFail', { e: e?.message || String(e) }), true)
     }

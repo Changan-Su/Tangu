@@ -341,6 +341,7 @@ const zh: Dict = {
   'market.installing': '安装中…',
   'market.installed': '已安装',
   'market.reinstall': '重新安装',
+  'market.openSettings': '打开设置',
   'market.update': '更新',
   'market.updateTitle': '更新 v{from} → v{to}',
   'market.allUpToDate': '已安装的内容都是最新版本',
@@ -582,6 +583,7 @@ const zh: Dict = {
 
   // 引导 - 主题 / 工作区(新增步骤)
   'onboarding.connect.forsionHint': '用 Forsion 账号登录(云端地址由环境变量配置,无需填写);也可在上方切换为自带 API Key。',
+  'onboarding.connect.skipForNow': '暂时跳过',
   'onboarding.theme.stepLabel': '选择主题外观',
   'onboarding.theme.modeLabel': '明暗模式',
   'onboarding.theme.light': '浅色',
@@ -1314,6 +1316,7 @@ const en: Dict = {
   'market.installing': 'Installing…',
   'market.installed': 'Installed',
   'market.reinstall': 'Reinstall',
+  'market.openSettings': 'Open settings',
   'market.update': 'Update',
   'market.updateTitle': 'Update v{from} → v{to}',
   'market.allUpToDate': 'Everything installed is up to date',
@@ -1551,6 +1554,7 @@ const en: Dict = {
 
   // Onboarding - theme / workspace (new steps)
   'onboarding.connect.forsionHint': 'Sign in with your Forsion account (the cloud URL is set via an environment variable — nothing to enter here). Or switch to your own API key above.',
+  'onboarding.connect.skipForNow': 'Skip for now',
   'onboarding.theme.stepLabel': 'Choose a theme',
   'onboarding.theme.modeLabel': 'Light / Dark',
   'onboarding.theme.light': 'Light',

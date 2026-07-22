@@ -16,6 +16,7 @@ import { listLanguages, listSkins, forcedSchemeForLanguage } from '../theme/regi
 import { applyTheme } from '../theme/loader'
 import { ThemeCard } from './ThemeCard'
 import { BrandLogo } from './BrandLogo'
+import { LocaleToggle } from './LocaleToggle'
 import { AsrModelChoice } from './AsrModelChoice'
 import { Markdown } from './Markdown'
 import { CHANGELOG } from '../changelog'
@@ -330,7 +331,12 @@ export const OnboardingWizard: React.FC<{
   // ── ⓪ 欢迎页:开机式入场动画(标题/版本/按钮错峰淡入)+ 侧边丝滑展开的更新日志(markdown)。 ──
   if (step === 'welcome') {
     return (
-      <div className="ob-hero-wrap">
+      <div className="ob-hero-wrap" style={{ position: 'relative' }}>
+        {/* 语言开关固定**左上**:更新日志抽屉从右侧滑出、关闭时光标也在右侧,左上角与之全程不相交——
+            彻底避开重叠/关闭尾段误点(codex R3);抽屉/scrim 的 z-index(3/4)保留作窄窗纵深防御。 */}
+        <div style={{ position: 'absolute', top: 16, left: 16, zIndex: 2 }}>
+          <LocaleToggle />
+        </div>
         <div className="ob-hero">
           <div className="ob-hero-mark"><BrandLogo size={56} /></div>
           <h1 className="ob-hero-title">{t('onboarding.welcome.title', { name: PRODUCT_DISPLAY_NAME })}</h1>
@@ -894,7 +900,6 @@ export const OnboardingWizard: React.FC<{
             {step !== 'done' ? (
               <button
                 className="btn primary sm"
-                disabled={step === 'connect' && !connectReady}
                 onClick={() => {
                   // 只有用户改选了非云端默认的模型才写 cfg(显式设置=脱离跟随);保持预选默认
                   // 直接下一步 → cfg.modelId 留空,持续跟随 admin 的 app 级默认。
@@ -907,7 +912,8 @@ export const OnboardingWizard: React.FC<{
                   setStep(STEP_ORDER[stepIdx + 1])
                 }}
               >
-                {t('onboarding.nav.next')} <ArrowRight size={12} />
+                {/* 连接步不再强制:未连接也可「暂时跳过」进下一步(登录/连 provider 之后随时能在设置里补)。 */}
+                {step === 'connect' && !connectReady ? t('onboarding.connect.skipForNow') : t('onboarding.nav.next')} <ArrowRight size={12} />
               </button>
             ) : (
               <button className="btn primary sm" onClick={finish}>

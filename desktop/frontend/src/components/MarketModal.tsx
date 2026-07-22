@@ -4,7 +4,7 @@
  * 浏览/安装全走主进程 IPC(marketService),token 不下发渲染层。
  */
 import { useEffect, useState, useCallback } from 'react'
-import { ArrowLeft, Download, Check, Loader2, ExternalLink, PackageOpen, RefreshCw } from 'lucide-react'
+import { ArrowLeft, Download, Check, Loader2, ExternalLink, PackageOpen, RefreshCw, Settings } from 'lucide-react'
 import { useI18n } from '../i18n'
 import { useApp } from '../stores/appStore'
 import { Markdown } from './Markdown'
@@ -56,7 +56,11 @@ export function MarketModal() {
     setInstalled(inst)
     const lists = await Promise.all(CONTENT_TABS.map((tp) => listMarket(tp).catch(() => [])))
     const ups = lists.flat().filter((c) => {
-      const e = (inst[c.type] || []).find((x) => x.slug === c.installSlug)
+      // 插件家族跨两目录找(后端可能误标 plugin↔amadeus-plugin),与 installedInfo 同口径:声明类型优先,再回退另一目录。
+      const pools = (c.type === 'plugin' || c.type === 'amadeus-plugin')
+        ? [...(inst[c.type] || []), ...(inst[c.type === 'plugin' ? 'amadeus-plugin' : 'plugin'] || [])]
+        : (inst[c.type] || [])
+      const e = pools.find((x) => x.slug === c.installSlug)
       return !!e && isNewer(c.latestVersion, e.version)
     })
     setUpdatable(ups)
@@ -75,27 +79,57 @@ export function MarketModal() {
       .finally(() => setLoading(false))
   }, [tab, t])
 
-  const installedEntry = (c: MarketCard): InstalledItem | undefined => (installed[c.type] || []).find((x) => x.slug === c.installSlug)
+  // 已装查找:插件家族按**实际安装目录**判真类型(后端可能误标 plugin↔amadeus-plugin,装到哪就是哪类),
+  // 故跨两个插件目录找;非插件类型照常按 c.type。realType 供详情「打开设置」路由到正确的设置页。
+  const installedInfo = (c: MarketCard): { entry: InstalledItem; realType: string } | null => {
+    const find = (tp: string) => (installed[tp] || []).find((x) => x.slug === c.installSlug)
+    // 先按卡片声明的类型找:正确标注时精准命中,两个同 slug 跨类型插件各归各(不互相误配);
+    // 找不到再回退插件家族的另一目录 —— 这才是「后端把 Forsion 插件误标成 plugin」的补救路径。
+    const primary = find(c.type)
+    if (primary) return { entry: primary, realType: c.type }
+    if (c.type === 'plugin' || c.type === 'amadeus-plugin') {
+      const other = c.type === 'plugin' ? 'amadeus-plugin' : 'plugin'
+      const e = find(other)
+      if (e) return { entry: e, realType: other }
+    }
+    return null
+  }
+  const installedEntry = (c: MarketCard): InstalledItem | undefined => installedInfo(c)?.entry
   const isInstalled = (c: MarketCard): boolean => !!installedEntry(c)
   const hasUpdate = (c: MarketCard): boolean => isNewer(c.latestVersion, installedEntry(c)?.version ?? null)
+  // 详情里「打开设置」:按真类型跳到对应设置页(引擎插件→plugins;Forsion 插件→amadeus-plugins)。
+  // 「打开设置」是否可用:插件家族且已装;Forsion 插件需当前产品带 Amadeus(否则 amadeus-plugins 设置页被门禁掉,跳过去是空白)。
+  const canOpenSettings = (c: MarketCard): boolean => {
+    const rt = installedInfo(c)?.realType
+    if (rt === 'amadeus-plugin') return !!window.amadeus
+    return rt === 'plugin'
+  }
+  const openPluginSettings = (c: MarketCard): void => {
+    const info = installedInfo(c)
+    if (!info || !canOpenSettings(c)) return
+    close()
+    useApp.getState().openSettings(info.realType === 'amadeus-plugin' ? 'amadeus-plugins' : 'plugins')
+  }
 
   const onInstall = async (c: MarketCard): Promise<void> => {
     setInstalling(c.id)
     try {
-      await installMarket(c.id)
+      const res = await installMarket(c.id)
+      // 真类型以主进程实测为准(后端 category 可能把 Forsion 插件误标成引擎 'plugin');据此走对应装后流程。
+      const effType = ((res?.type as MarketCard['type']) || c.type)
       track('market.install'); act('market.install', { id: c.id })
-      if (c.type === 'plugin') {
-        // 插件:重扫免重启出现 + 装即启用 + 跳转设置(在 onPluginInstalled 内 toast)。
+      if (effType === 'plugin') {
+        // 引擎插件:重扫免重启出现 + 装即启用 + toast「已安装」(不再自动跳设置)。
         await useApp.getState().onPluginInstalled()
-      } else if (c.type === 'space') {
+      } else if (effType === 'space') {
         // 数据 Space:装完热注册,ribbon 顶部实时出现,无需重启。
         await loadUserSpaces()
         toast(t('market.spaceInstalled', { name: c.name }))
-      } else if (c.type === 'theme') {
+      } else if (effType === 'theme') {
         // 主题:装完热重载磁盘主题,设置 → 主题 里即时可选,无需重启。
         await useTheme.getState().reloadThemes()
         toast(t('market.themeInstalled', { name: c.name }))
-      } else if (c.type === 'amadeus-plugin') {
+      } else if (effType === 'amadeus-plugin') {
         // 笔记插件:落全局目录(~/.tangu/amadeus/plugins),重载外部插件即生效,免 vault。
         if (window.amadeus) {
           installAmadeusPlugins()
@@ -220,7 +254,14 @@ export function MarketModal() {
                     {t('market.author')} {detail.author} · {t('market.downloads', { n: detail.downloads })}
                   </div>
                 </div>
-                {installBtn(detail)}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {canOpenSettings(detail) && (
+                    <button className="btn sm" onClick={() => openPluginSettings(detail)}>
+                      <Settings size={13} /> {t('market.openSettings')}
+                    </button>
+                  )}
+                  {installBtn(detail)}
+                </div>
               </div>
               {detail.githubRepoUrl && (
                 <a className="mk-repo-link" href={detail.githubRepoUrl} target="_blank" rel="noreferrer">

@@ -42,11 +42,13 @@ const RecommendRow: React.FC<{ rec: PluginOnboardingRecommend; preInstalled: boo
     if (!card) return
     setState('installing')
     try {
-      await installMarket(card.id)
-      if (rec.type === 'space') await loadUserSpaces() // 热注册,ribbon 实时出现
-      else if (rec.type === 'theme') await useTheme.getState().reloadThemes()
-      else if (rec.type === 'plugin') await useApp.getState().onPluginInstalled()
-      else if (rec.type === 'amadeus-plugin' && window.amadeus) {
+      const res = await installMarket(card.id)
+      // 真类型以主进程实测为准(后端 category 可能把 Forsion 插件误标成引擎 'plugin');据此走对应装后流程。
+      const effType = res?.type || rec.type
+      if (effType === 'space') await loadUserSpaces() // 热注册,ribbon 实时出现
+      else if (effType === 'theme') await useTheme.getState().reloadThemes()
+      else if (effType === 'plugin') await useApp.getState().onPluginInstalled()
+      else if (effType === 'amadeus-plugin' && window.amadeus) {
         installAmadeusPlugins()
         await usePluginStore.getState().reloadExternal()
       }
@@ -135,7 +137,11 @@ const Card: React.FC<{ plugin: AmadeusPlugin }> = ({ plugin: p }) => {
               <div className="hint" style={{ marginBottom: 6 }}>{t('plugin.onboarding.recommendsTitle')}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {spec.recommends.map((r) => (
-                  <RecommendRow key={`${r.type}:${r.slug}`} rec={r} preInstalled={!!installed[r.type]?.has(r.slug)} />
+                  <RecommendRow key={`${r.type}:${r.slug}`} rec={r} preInstalled={
+                    (r.type === 'plugin' || r.type === 'amadeus-plugin')
+                      ? !!(installed['plugin']?.has(r.slug) || installed['amadeus-plugin']?.has(r.slug)) // 插件家族跨两目录查(后端可能误标)
+                      : !!installed[r.type]?.has(r.slug)
+                  } />
                 ))}
               </div>
             </div>
