@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { conflictCopyPath, decide, type RemoteInfo, type ShadowEntry } from './reconcile'
+import { conflictCopyPath, decide, mergeText3, shouldTripMassDelete, type RemoteInfo, type ShadowEntry } from './reconcile'
 import { isIgnoredName, isUnderFolder, normalizeServerPath, toServerPath } from './syncPaths'
 
 const sh = (seq: number, hash: string): ShadowEntry => ({ seq, hash, size: 1, mtimeMs: 1 })
@@ -115,5 +115,48 @@ describe('syncPaths', () => {
     expect(isIgnoredName('x.md.tmp-123-456-7')).toBe(true)
     expect(isIgnoredName('x.md')).toBe(false)
     expect(isIgnoredName('.amadeus')).toBe(false) // 资产目录参与同步
+  })
+})
+
+describe('mergeText3 — markdown 冲突机会性合并', () => {
+  const base = '# 标题\n\n第一段\n\n第二段\n'
+  it('两端改不同区域 → 干净合并,双方改动都在', () => {
+    const ours = '# 标题\n\n第一段(本地改)\n\n第二段\n'
+    const theirs = '# 标题\n\n第一段\n\n第二段(云端改)\n'
+    const merged = mergeText3(ours, base, theirs)
+    expect(merged).toContain('第一段(本地改)')
+    expect(merged).toContain('第二段(云端改)')
+  })
+  it('两端改同一行且不同 → null(交给冲突副本,绝不出冲突标记)', () => {
+    const ours = base.replace('第一段', '本地版')
+    const theirs = base.replace('第一段', '云端版')
+    expect(mergeText3(ours, base, theirs)).toBeNull()
+  })
+  it('单端追加 → 合并等于追加结果', () => {
+    const ours = base + '\n本地追加\n'
+    expect(mergeText3(ours, base, base)).toBe(ours)
+  })
+  it('两端改同一行、内容相同 → 干净(excludeFalseConflicts)', () => {
+    const both = base.replace('第一段', '同改')
+    expect(mergeText3(both, base, both)).toBe(both)
+  })
+})
+
+describe('shouldTripMassDelete — 删除保护阈值', () => {
+  it('小库半数以上删除 → 拦', () => {
+    expect(shouldTripMassDelete(15, 30)).toBe(true) // 30 个文件删 15
+    expect(shouldTripMassDelete(30, 30)).toBe(true) // 全删
+  })
+  it('大库正常量删除 → 放', () => {
+    expect(shouldTripMassDelete(60, 1000)).toBe(false) // 删个大文件夹
+    expect(shouldTripMassDelete(0, 1000)).toBe(false)
+  })
+  it('绝对上限 → 拦', () => {
+    expect(shouldTripMassDelete(200, 10_000)).toBe(true)
+  })
+  it('空库/极小库不误拦', () => {
+    expect(shouldTripMassDelete(3, 4)).toBe(false) // tracked<5 不触发比例规则
+    expect(shouldTripMassDelete(4, 8)).toBe(false) // 半数=4 但 <5 下限…
+    expect(shouldTripMassDelete(5, 8)).toBe(true)
   })
 })

@@ -1,0 +1,8 @@
+{
+  "id": "sample-plugin",
+  "name": "示例插件",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "dist/index.js",
+  "description": "插件开发模板:演示工具(sample_greet)、设置 schema(text/toggle)与 promptSection 三个贡献点。"
+}

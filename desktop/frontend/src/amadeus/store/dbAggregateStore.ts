@@ -166,6 +166,26 @@ export function deleteAggRow(db: AggDb, rowId: string): void {
   useDbStore.getState().mutate(db.path, (d) => ({ ...d, rows: d.rows.filter((r) => r.id !== rowId) }))
 }
 
+/** 复制一行(键盘粘贴):经典表克隆全部单元格为新行(同日期/时间的原位副本);
+ *  笔记视图新建笔记 + 逐列拷贝属性(page 身份列除外)。返回新 rowId / 笔记路径,失败返回 null。 */
+export async function duplicateAggRow(db: AggDb, rowId: string): Promise<string | null> {
+  if (db.readonly) return null
+  const src = db.rows.find((r) => r.rowId === rowId)
+  if (!src) return null
+  if (db.isNoteView && db.folder !== undefined) {
+    const notePath = await useNoteViewStore.getState().addNote(db.folder)
+    for (const c of db.columns) {
+      if (c.type === 'page') continue // 身份列 = 笔记标题,由 addNote 定,不覆盖
+      const v = src.cells[c.id]
+      if (v !== undefined) useNoteViewStore.getState().setProp(db.folder, notePath, c.id, v, resolveBaseType(c.type))
+    }
+    return notePath
+  }
+  const newId = dbId()
+  useDbStore.getState().mutate(db.path, (d) => ({ ...d, rows: [...d.rows, { id: newId, cells: { ...src.cells } }] }))
+  return newId
+}
+
 /** 写回名称:笔记视图(page 身份列)= 重命名笔记;经典表 = 写首列。 */
 export function setAggName(db: AggDb, rowId: string, value: string): void {
   const nameCol = db.columns[0]

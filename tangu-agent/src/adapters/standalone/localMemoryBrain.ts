@@ -58,6 +58,13 @@ export interface LocalMemoryStore {
   writeMeta(meta: SyncMeta): void;
   memoryLocalUpdatedAt(): number;
   logLocalUpdatedAt(date: string): number;
+  /** 上次同步收敛点的记忆快照(.MEMORY.base.md,三方合并的 base);从未同步 → null。
+   *  可选:测试 mock/旧实现缺位时 memorySync 自动降级为无基线 LWW。 */
+  readMemoryBase?(): string | null;
+  writeMemoryBase?(content: string): void;
+  /** 冲突输方内容存档为 `MEMORY (conflict …).md`(不参与同步)。独占创建、同分钟撞名递增;
+   *  返回是否保住——false 时调用方**必须放弃覆盖**。可选同上。 */
+  archiveMemoryConflict?(content: string): boolean;
 }
 
 /** 当前 active agent 的记忆目录 ~/.tangu/agents/<slug>/(无 run 上下文时落默认 agent)。 */
@@ -124,6 +131,31 @@ export function createLocalMemoryStore(fixedBaseDir?: string): LocalMemoryStore 
     writeMeta,
     memoryLocalUpdatedAt: () => readMeta().memory.localUpdatedAt,
     logLocalUpdatedAt: (date: string) => readMeta().logs[date]?.localUpdatedAt ?? 0,
+    readMemoryBase() {
+      try { return readFileSync(join(base(), '.MEMORY.base.md'), 'utf8'); } catch { return null; }
+    },
+    writeMemoryBase(content: string) {
+      ensureDir(base());
+      try { writeFileSync(join(base(), '.MEMORY.base.md'), content, 'utf8'); } catch { /* best-effort */ }
+    },
+    archiveMemoryConflict(content: string): boolean {
+      ensureDir(base());
+      const d = new Date();
+      const p = (n: number): string => String(n).padStart(2, '0');
+      const stamp = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}${p(d.getMinutes())}`;
+      // 独占创建('wx'):同分钟第二次冲突 → EEXIST → 换 -2/-3… 名,绝不覆盖先前存档;
+      // 其他失败(权限/磁盘)→ false,调用方放弃覆盖。
+      for (let n = 1; n <= 50; n++) {
+        const name = n === 1 ? `MEMORY (conflict ${stamp}).md` : `MEMORY (conflict ${stamp}-${n}).md`;
+        try {
+          writeFileSync(join(base(), name), content, { encoding: 'utf8', flag: 'wx' });
+          return true;
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException)?.code !== 'EEXIST') return false;
+        }
+      }
+      return false;
+    },
   };
 }
 

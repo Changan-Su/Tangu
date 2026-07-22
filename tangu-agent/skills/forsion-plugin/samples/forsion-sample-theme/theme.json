@@ -1,0 +1,20 @@
+{
+  "id": "sample-theme",
+  "name": "Sample · 样例",
+  "description": "结构语言模板:圆角/字体/阴影由本主题定义,颜色由「配色」(data-skin)决定。",
+  "version": "1.0.0",
+  "author": "you",
+  "supportsDarkMode": true,
+  "tags": ["sample", "template"],
+  "panelGap": 0,
+  "preview": {
+    "background": {
+      "light": "linear-gradient(135deg, #f7f4ed 0%, #efe9de 100%)",
+      "dark": "linear-gradient(135deg, #1c1a16 0%, #262219 100%)"
+    },
+    "accent": "#8b7fd6",
+    "title": { "text": "Sample" },
+    "tagline": "结构语言模板",
+    "swatches": ["#8b7fd6", "#f7f4ed", "#5f5f5d", "#efece4"]
+  }
+}

@@ -5,6 +5,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { PRODUCT } from './product'
 import './amadeus/preload' // Amadeus Space:暴露 window.amadeus(vault IPC 桥),副作用导入
+import './remotesyncPreload' // 本地库远程同步:暴露 window.remoteSync,副作用导入
 
 export interface BackendStatus {
   state: 'stopped' | 'starting' | 'ready' | 'crashed'

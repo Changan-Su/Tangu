@@ -1,15 +1,21 @@
 /**
  * 每-agent 云文件镜像(Phase 2,out-of-band,不在 agent 热路径)。把开了 cloudSync 的 agent 的全部文件
  * (config.toml / SOUL.md / MEMORY.md / LOG/<date>.md / Library/*)与 Forsion 云 `tangu_agent_files`
- * **完全镜像**:per-file LWW(本地 fs mtime 为时钟,新者覆盖,含跨设备删除墓碑),LOG 例外用块并集合并
- * (绝不 LWW —— 两端同日离线各加条目不丢)。二进制(头像/图片)走 base64。
+ * **完全镜像**。
+ *
+ * 2026-07 起对账算法升级为 **hash 三方对账 + CAS + 冲突副本**(对齐 Amadeus vault 引擎,时钟无关):
+ *   - 判定核 decide() 移植自 desktop/electron/amadeus/sync/reconcile.ts(正典,改语义两处同改);
+ *   - 基线存 `<agentDir>/.cloudsync.json`(per-file {seq, hash, size, mtimeMs});
+ *   - 双方都动且内容不同 → 本地版本改名冲突副本(`Name (conflict …)`),云端版本落原路径,绝不静默丢;
+ *   - 写云端带 baseSeq(CAS),409 兜并发;删除同理(编辑胜删除:409 → 改拉);
+ *   - 旧服务端(manifest 无 seq)/旧二进制行(hash=null)→ 该文件回退旧 mtime-LWW,写入后自动升级。
+ * LOG 例外仍是块并集合并(绝不 LWW —— 两端同日离线各加条目不丢)。二进制走 base64。
  *
  * 分桶(D6):config/SOUL/Library 落 agent 自己 slug;MEMORY/LOG 落 resolveMemorySlug(def)
  * (共用默认的 agent → 记忆桶是 xyra,多个共用者每趟只同步一次)。
- *
- * 本地同步态 `<agentDir>/.cloudsync.json` = { files:{[relPath]:{lastCloudMtimeMs}}, lastSyncAt } —— prev-state
- * 用来检测「本地删除」(在 prev 里、本地已无 → 传播墓碑)。云端不可达/未登录 → 抛错,调用方 no-op。
+ * 云端不可达/未登录 → 抛错,调用方 no-op。
  */
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import { join, dirname, extname } from 'node:path';
@@ -18,12 +24,14 @@ import { agentsDir, userMdFile } from '../core/tanguHome.js';
 import { getDeviceId } from '../core/deviceId.js';
 import { listAgents, parseAgentConfig, resolveMemorySlug, type NormalAgentDef } from '../agents/agentRegistry.js';
 import { splitLogBlocks, mergeBlocks } from './memorySync.js';
-import type { AgentFilesBrain, AgentFileMeta } from '../seams/cloudBrain.js';
+import { AgentFileConflictError, type AgentFilesBrain, type AgentFileMeta } from '../seams/cloudBrain.js';
 
 const TEXT_EXTS = new Set(['.md', '.toml', '.txt', '.json', '.yaml', '.yml', '.csv', '.html', '.xml', '.js', '.ts', '.py']);
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const USER_SENTINEL = '__user__';
 const LOG_RE = /^LOG\/\d{4}-\d{2}-\d{2}\.md$/;
+
+const sha256 = (data: Buffer | string): string => createHash('sha256').update(data).digest('hex');
 
 type Category = 'DEF' | 'MEM';
 function categoryOf(relPath: string): Category {
@@ -64,7 +72,9 @@ function enumerateLocal(dir: string, categories: Set<Category>): Map<string, Loc
   return out;
 }
 
-interface PrevState { files: Record<string, { lastCloudMtimeMs: number }>; lastSyncAt?: number }
+/** per-file 基线:seq+hash = 三方对账(2026-07+);仅 lastCloudMtimeMs = 旧 mtime-LWW 时代的水位(渐进升级)。 */
+interface PrevEntry { seq?: number; hash?: string; size?: number; mtimeMs?: number; lastCloudMtimeMs?: number }
+interface PrevState { files: Record<string, PrevEntry>; lastSyncAt?: number }
 function prevFile(dir: string): string { return join(dir, '.cloudsync.json'); }
 function readPrev(dir: string): PrevState {
   try {
@@ -82,13 +92,66 @@ function rebuildLog(header: string, blocks: string[]): string {
   return `${h}\n\n${blocks.map((b) => b + '\n').join('\n')}`;
 }
 
-export interface AgentFileSyncResult { ok: boolean; agents: number; pushed: number; pulled: number; deleted: number; skipped: number; error?: string }
+// ── 三方对账判定核(移植自 desktop/electron/amadeus/sync/reconcile.ts,语义正典在那边)────────────
+interface ShadowVer { seq: number; hash: string }
+interface RemoteVer { seq: number; hash: string | null }
+type Decision =
+  | { kind: 'none' } | { kind: 'adopt' } | { kind: 'pull' }
+  | { kind: 'push'; baseSeq: number } | { kind: 'pushCreate' } | { kind: 'pushDelete' }
+  | { kind: 'deleteLocal' } | { kind: 'dropShadow' } | { kind: 'conflict' };
+
+export function decide(local: string | null, shadow: ShadowVer | null, remote: RemoteVer | null): Decision {
+  if (local === null && shadow === null && remote === null) return { kind: 'none' };
+  if (remote === null) {
+    if (local === null) return shadow ? { kind: 'dropShadow' } : { kind: 'none' };
+    if (!shadow) return { kind: 'pushCreate' };
+    return local === shadow.hash ? { kind: 'deleteLocal' } : { kind: 'pushCreate' }; // 本地未动=删除生效;改过=编辑胜删除
+  }
+  if (local === null) {
+    if (!shadow) return { kind: 'pull' };
+    return remote.seq === shadow.seq ? { kind: 'pushDelete' } : { kind: 'pull' }; // 服务端未动=本地删生效;动过=编辑胜删除
+  }
+  if (!shadow) return local === remote.hash ? { kind: 'adopt' } : { kind: 'conflict' };
+  const localDirty = local !== shadow.hash;
+  const remoteMoved = remote.seq !== shadow.seq;
+  if (!localDirty && !remoteMoved) return { kind: 'none' };
+  if (!localDirty) return { kind: 'pull' };
+  if (!remoteMoved) return { kind: 'push', baseSeq: shadow.seq };
+  return local === remote.hash ? { kind: 'adopt' } : { kind: 'conflict' };
+}
+
+/** 取不存在的冲突副本名(同分钟第二次冲突 → `…-2` 递增,绝不覆盖先前副本)。 */
+function uniqueConflictName(baseDir: string, relPath: string): string {
+  const first = conflictCopyName(relPath, new Date());
+  const dot = first.lastIndexOf('.');
+  const hasExt = dot > first.lastIndexOf('/');
+  const stem = hasExt ? first.slice(0, dot) : first;
+  const ext = hasExt ? first.slice(dot) : '';
+  let cand = first;
+  for (let n = 2; existsSync(join(baseDir, cand)); n++) cand = `${stem}-${n}${ext}`;
+  return cand;
+}
+
+/** 冲突副本名:`Library/a.md` → `Library/a (conflict 2026-07-19 1532).md`(与 Amadeus 引擎同款)。 */
+export function conflictCopyName(relPath: string, now: Date): string {
+  const slash = relPath.lastIndexOf('/');
+  const dir = slash < 0 ? '' : relPath.slice(0, slash + 1);
+  const base = slash < 0 ? relPath : relPath.slice(slash + 1);
+  const dot = base.lastIndexOf('.');
+  const stem = dot > 0 ? base.slice(0, dot) : base;
+  const ext = dot > 0 ? base.slice(dot) : '';
+  const p = (n: number): string => String(n).padStart(2, '0');
+  const stamp = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())} ${p(now.getHours())}${p(now.getMinutes())}`;
+  return `${dir}${stem} (conflict ${stamp})${ext}`;
+}
+
+export interface AgentFileSyncResult { ok: boolean; agents: number; pushed: number; pulled: number; deleted: number; skipped: number; conflicts: number; error?: string }
 
 /**
  * 后台跑一次双向镜像(fire-and-forget)。挂两类时机:① run 结束后(推本轮 Historian/工具写的
  * MEMORY/LOG/Library 上云——此前只有下一次 run 的 pre-run sync 或手动同步才推,云端/他端的记忆
  * 视图在窗口期看不到新记忆);② 记忆/日志视图打开时(拉云端 worker 侧写的新记忆下来)。
- * 幂等(mtime 清单比较),未开 cloudSync 的 agent 零开销;仅本地形态(hostExec)有文件可动。
+ * 幂等(hash/清单比较),未开 cloudSync 的 agent 零开销;仅本地形态(hostExec)有文件可动。
  */
 export function scheduleAgentFilesSync(userId: string, slug?: string): void {
   try {
@@ -110,7 +173,7 @@ export async function runAgentFilesSync(
   opts?: { onlySlug?: string },
 ): Promise<AgentFileSyncResult> {
   const deviceId = getDeviceId();
-  const agg: AgentFileSyncResult = { ok: true, agents: 0, pushed: 0, pulled: 0, deleted: 0, skipped: 0 };
+  const agg: AgentFileSyncResult = { ok: true, agents: 0, pushed: 0, pulled: 0, deleted: 0, skipped: 0, conflicts: 0 };
   const onlySlug = typeof opts?.onlySlug === 'string' && opts.onlySlug ? opts.onlySlug : undefined;
 
   // 云端清单一次拉全,按 slug 索引。
@@ -152,7 +215,7 @@ export async function runAgentFilesSync(
     await syncBucket(slug, join(agentsDir(), slug), cats, cloudBySlug.get(slug) ?? [], cloud, userId, deviceId, agg);
   }
 
-  // USER.md(全局,所有同步 agent 可见;单文件 LWW)。
+  // USER.md(全局,所有同步 agent 可见)。基线存 agents/.cloudsync.json(不属于任何 agent 目录)。
   if (agents.length) {
     await syncGlobalFile(USER_SENTINEL, 'USER.md', userMdFile(), cloudBySlug.get(USER_SENTINEL) ?? [], cloud, userId, deviceId, agg);
   }
@@ -187,8 +250,157 @@ async function syncBucket(
   writePrev(localDir, prev);
 }
 
-/** 单文件 LWW + 墓碑。p 非 LOG。 */
+/** 该云端条目是否具备三方对账所需版本信息(旧服务端/迁移前二进制行 → 否,回退 mtime-LWW)。 */
+function casReady(C: AgentFileMeta | undefined): boolean {
+  if (!C) return true; // 无云端行:创建路径,不需要版本信息
+  if (typeof C.seq !== 'number') return false; // 旧服务端
+  if (C.deleted) return true; // 墓碑 → remote=null,不需要 hash
+  return C.hash != null; // 迁移前的二进制行 hash 为 null
+}
+
+/** 单文件三方对账 + CAS + 冲突副本。p 非 LOG。 */
 async function reconcileFile(
+  slug: string, localDir: string, p: string, L: LocalStat | undefined, C: AgentFileMeta | undefined,
+  cloud: AgentFilesBrain, userId: string, deviceId: string, prev: PrevState, agg: AgentFileSyncResult,
+): Promise<void> {
+  if (!casReady(C)) { await reconcileFileLegacy(slug, localDir, p, L, C, cloud, userId, deviceId, prev, agg); return; }
+
+  const abs = join(localDir, p);
+  const pe = prev.files[p];
+
+  // 本地内容 hash(基线 stat 一致 → 免读文件直接用基线 hash)。
+  let buf: Buffer | null = null;
+  let localHash: string | null = null;
+  if (L) {
+    if (pe?.hash != null && pe.size === L.size && pe.mtimeMs === L.mtimeMs) {
+      localHash = pe.hash;
+    } else {
+      try { buf = await fsp.readFile(abs); localHash = sha256(buf); } catch { localHash = null; }
+    }
+  }
+  const readBuf = async (): Promise<Buffer> => buf ?? (buf = await fsp.readFile(abs));
+
+  // 基线:新版 {seq,hash};旧 mtime 水位可安全升格的唯一情形 —— 云端自那次同步后未动
+  // (C.mtimeMs === lastCloudMtimeMs),此时云端内容就是基线。否则视为无基线(诚实进 conflict)。
+  const live = C && !C.deleted ? C : undefined;
+  let shadow: ShadowVer | null = pe?.hash != null && pe.seq != null ? { seq: pe.seq, hash: pe.hash } : null;
+  if (!shadow && pe?.lastCloudMtimeMs != null && live && live.mtimeMs === pe.lastCloudMtimeMs && live.hash != null) {
+    shadow = { seq: live.seq!, hash: live.hash };
+  }
+  const remote: RemoteVer | null = live ? { seq: live.seq!, hash: live.hash ?? null } : null;
+
+  const record = (seq: number | undefined, hash: string | null | undefined, cloudMtime?: number): void => {
+    let st: { size: number; mtimeMs: number } | null = null;
+    try { const s = statSync(abs); st = { size: s.size, mtimeMs: Math.floor(s.mtimeMs) }; } catch { /* absent */ }
+    prev.files[p] = {
+      ...(typeof seq === 'number' && hash != null ? { seq, hash } : {}),
+      ...(st ? { size: st.size, mtimeMs: st.mtimeMs } : {}),
+      ...(cloudMtime != null ? { lastCloudMtimeMs: cloudMtime } : {}),
+    };
+  };
+
+  const pull = async (): Promise<void> => {
+    const f = await cloud.getFile(userId, slug, p); // 以 getFile 为权威(清单快照可能已过时)
+    if (!f || f.deleted) return; // 竞态:下趟收敛
+    const bytes = f.isBinary ? Buffer.from(f.contentBase64 || '', 'base64') : Buffer.from(f.content || '', 'utf8');
+    if (f.hash != null && sha256(bytes) !== f.hash) {
+      // 传输/存储层给了与登记 hash 不符的字节(如损坏/截断):拒收,保住本地。
+      console.warn(`[agentFileSync] ${slug}/${p} 拉取内容 hash 不符,跳过本轮`);
+      agg.skipped++;
+      return;
+    }
+    mkdirSync(dirname(abs), { recursive: true });
+    await fsp.writeFile(abs, bytes);
+    await fsp.utimes(abs, new Date(f.mtimeMs), new Date(f.mtimeMs)).catch(() => {});
+    record(f.seq, f.hash ?? sha256(bytes), f.mtimeMs);
+    agg.pulled++;
+  };
+
+  /** 本地当前内容 → 冲突副本(rename,保留原字节);副本下趟按新文件推上云(Library/*)。
+   *  同分钟撞名递增后缀;非 ENOENT 失败抛错中止本文件(绝不在副本没保住时继续 pull 覆盖)。 */
+  const materializeConflictCopy = async (): Promise<void> => {
+    const copyRel = uniqueConflictName(localDir, p);
+    try {
+      await fsp.rename(abs, join(localDir, copyRel));
+      agg.conflicts++;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') return; // 本地已不在:无可保
+      throw e;
+    }
+  };
+
+  const push = async (baseSeq: number): Promise<void> => {
+    if (!L) return;
+    const bytes = await readBuf();
+    if (bytes.length > MAX_FILE_BYTES) { console.warn(`[agentFileSync] 跳过超限文件 ${slug}/${p} (${bytes.length}B)`); agg.skipped++; return; }
+    const body = L.isBinary
+      ? { contentBase64: bytes.toString('base64'), isBinary: true as const, size: bytes.length, mtimeMs: L.mtimeMs, deviceId, baseSeq }
+      : { content: bytes.toString('utf8'), isBinary: false as const, size: bytes.length, mtimeMs: L.mtimeMs, deviceId, baseSeq };
+    try {
+      const r = await cloud.putFile(userId, slug, p, body);
+      record(r.seq, typeof r.seq === 'number' ? localHash : undefined, r.mtimeMs);
+      agg.pushed++;
+    } catch (e) {
+      if (e instanceof AgentFileConflictError) {
+        if (e.info.hash !== null && e.info.hash === localHash) { record(e.info.seq, localHash, e.info.mtimeMs); return; } // 两端写了相同内容
+        if (e.info.seq === 0) {
+          // 服务端行没了(被删/墓碑):编辑胜删除,按创建重推一次。
+          if (baseSeq !== 0) { delete prev.files[p]; await push(0); }
+          else { console.warn(`[agentFileSync] ${slug}/${p} 创建持续 409,跳过`); agg.skipped++; }
+          return;
+        }
+        await materializeConflictCopy(); // 真并发冲突:本地进副本,云端版本落原路径
+        await pull();
+        return;
+      }
+      throw e;
+    }
+  };
+
+  const d = decide(localHash, shadow, remote);
+  switch (d.kind) {
+    case 'none':
+      if (pe?.hash != null && L) record(pe.seq, pe.hash, pe.lastCloudMtimeMs); // 刷新 stat 缓存
+      break;
+    case 'adopt':
+      record(remote!.seq, localHash, live!.mtimeMs);
+      break;
+    case 'pull':
+      await pull();
+      break;
+    case 'push':
+      await push(d.baseSeq);
+      break;
+    case 'pushCreate':
+      await push(0);
+      break;
+    case 'pushDelete':
+      try {
+        await cloud.deleteFile(userId, slug, p, nowMs(), deviceId, shadow!.seq);
+        delete prev.files[p];
+        agg.deleted++;
+      } catch (e) {
+        if (e instanceof AgentFileConflictError) { await pull(); return; } // 编辑胜删除:拉回
+        throw e;
+      }
+      break;
+    case 'deleteLocal':
+      await fsp.rm(abs, { force: true }).catch(() => {});
+      delete prev.files[p];
+      agg.deleted++;
+      break;
+    case 'dropShadow':
+      delete prev.files[p];
+      break;
+    case 'conflict':
+      await materializeConflictCopy();
+      await pull();
+      break;
+  }
+}
+
+/** 旧 mtime-LWW + 墓碑(仅当云端条目缺 seq/hash:旧服务端或迁移前二进制行)。写入成功即升级三方基线。 */
+async function reconcileFileLegacy(
   slug: string, localDir: string, p: string, L: LocalStat | undefined, C: AgentFileMeta | undefined,
   cloud: AgentFilesBrain, userId: string, deviceId: string, prev: PrevState, agg: AgentFileSyncResult,
 ): Promise<void> {
@@ -198,10 +410,12 @@ async function reconcileFile(
     const buf = await fsp.readFile(abs);
     if (buf.length > MAX_FILE_BYTES) { console.warn(`[agentFileSync] 跳过超限文件 ${slug}/${p} (${buf.length}B)`); agg.skipped++; return; }
     const body = isBinary
-      ? { contentBase64: buf.toString('base64'), isBinary: true, size: buf.length, mtimeMs, deviceId }
-      : { content: buf.toString('utf8'), isBinary: false, size: buf.length, mtimeMs, deviceId };
+      ? { contentBase64: buf.toString('base64'), isBinary: true as const, size: buf.length, mtimeMs, deviceId }
+      : { content: buf.toString('utf8'), isBinary: false as const, size: buf.length, mtimeMs, deviceId };
     const r = await cloud.putFile(userId, slug, p, body);
-    prev.files[p] = { lastCloudMtimeMs: r.mtimeMs };
+    prev.files[p] = typeof r.seq === 'number'
+      ? { seq: r.seq, hash: r.hash ?? sha256(buf), lastCloudMtimeMs: r.mtimeMs } // 新服务端:升级三方基线
+      : { lastCloudMtimeMs: r.mtimeMs };
     agg.pushed++;
   };
   const pull = async (meta: AgentFileMeta): Promise<void> => {
@@ -211,7 +425,9 @@ async function reconcileFile(
     const buf = f.isBinary ? Buffer.from(f.contentBase64 || '', 'base64') : Buffer.from(f.content || '', 'utf8');
     await fsp.writeFile(abs, buf);
     await fsp.utimes(abs, new Date(meta.mtimeMs), new Date(meta.mtimeMs)).catch(() => {}); // 本地 mtime 对齐云端 → 下次 in-sync
-    prev.files[p] = { lastCloudMtimeMs: meta.mtimeMs };
+    prev.files[p] = typeof f.seq === 'number' && f.hash != null
+      ? { seq: f.seq, hash: f.hash, lastCloudMtimeMs: meta.mtimeMs }
+      : { lastCloudMtimeMs: meta.mtimeMs };
     agg.pulled++;
   };
   const rmLocal = async (): Promise<void> => { await fsp.rm(abs, { force: true }).catch(() => {}); delete prev.files[p]; agg.deleted++; };
@@ -282,33 +498,121 @@ async function reconcileLog(
   }
 }
 
-/** 全局单文件(USER.md)的 LWW 镜像(无墓碑,内容简单 LWW)。 */
+/** 全局单文件(USER.md)三方对账镜像(基线存 agents/.cloudsync.json;冲突副本落在同目录)。 */
 async function syncGlobalFile(
   slug: string, relPath: string, absPath: string, cloudFiles: AgentFileMeta[],
   cloud: AgentFilesBrain, userId: string, deviceId: string, agg: AgentFileSyncResult,
 ): Promise<void> {
-  const C = cloudFiles.find((f) => f.relPath === relPath && !f.deleted);
-  const localExists = existsSync(absPath);
-  const L = localExists ? Math.floor(statSync(absPath).mtimeMs) : 0;
+  const C = cloudFiles.find((f) => f.relPath === relPath);
+  const stateDir = agentsDir();
+  const prev = readPrev(stateDir);
+  const key = `${slug}/${relPath}`;
+  const pe = prev.files[key];
   try {
-    if (!C && localExists) {
-      const content = await fsp.readFile(absPath, 'utf8');
-      await cloud.putFile(userId, slug, relPath, { content, isBinary: false, size: Buffer.byteLength(content), mtimeMs: L, deviceId });
-      agg.pushed++;
-    } else if (C && (!localExists || C.mtimeMs > L)) {
+    if (!casReady(C)) {
+      // 旧服务端:维持旧 mtime-LWW(无基线可用)。
+      await syncGlobalFileLegacy(slug, relPath, absPath, C, cloud, userId, deviceId, agg);
+      return;
+    }
+    let buf: Buffer | null = null;
+    let localHash: string | null = null;
+    if (existsSync(absPath)) {
+      try { buf = await fsp.readFile(absPath); localHash = sha256(buf); } catch { localHash = null; }
+    }
+    const live = C && !C.deleted ? C : undefined;
+    let shadow: ShadowVer | null = pe?.hash != null && pe.seq != null ? { seq: pe.seq, hash: pe.hash } : null;
+    if (!shadow && pe?.lastCloudMtimeMs != null && live && live.mtimeMs === pe.lastCloudMtimeMs && live.hash != null) {
+      shadow = { seq: live.seq!, hash: live.hash };
+    }
+    const remote: RemoteVer | null = live ? { seq: live.seq!, hash: live.hash ?? null } : null;
+
+    const pull = async (): Promise<void> => {
       const f = await cloud.getFile(userId, slug, relPath);
-      if (f && !f.deleted) {
-        mkdirSync(dirname(absPath), { recursive: true });
-        await fsp.writeFile(absPath, f.content || '');
-        await fsp.utimes(absPath, new Date(C.mtimeMs), new Date(C.mtimeMs)).catch(() => {});
-        agg.pulled++;
+      if (!f || f.deleted) return;
+      mkdirSync(dirname(absPath), { recursive: true });
+      const bytes = Buffer.from(f.content || '', 'utf8');
+      await fsp.writeFile(absPath, bytes);
+      await fsp.utimes(absPath, new Date(f.mtimeMs), new Date(f.mtimeMs)).catch(() => {});
+      prev.files[key] = { seq: f.seq, hash: f.hash ?? sha256(bytes), lastCloudMtimeMs: f.mtimeMs };
+      agg.pulled++;
+    };
+    const conflictCopy = async (): Promise<void> => {
+      const copyAbs = join(dirname(absPath), uniqueConflictName(dirname(absPath), relPath));
+      try {
+        await fsp.rename(absPath, copyAbs);
+        agg.conflicts++;
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') return; // 本地已不在
+        throw e; // 副本没保住 → 抛错中止,外层 catch 记日志,本轮不 pull
       }
-    } else if (C && localExists && L > C.mtimeMs) {
-      const content = await fsp.readFile(absPath, 'utf8');
-      await cloud.putFile(userId, slug, relPath, { content, isBinary: false, size: Buffer.byteLength(content), mtimeMs: L, deviceId });
-      agg.pushed++;
+    };
+    const push = async (baseSeq: number): Promise<void> => {
+      const bytes = buf ?? (await fsp.readFile(absPath));
+      const content = bytes.toString('utf8');
+      try {
+        const r = await cloud.putFile(userId, slug, relPath, {
+          content, isBinary: false, size: bytes.length, mtimeMs: Math.floor(statSync(absPath).mtimeMs), deviceId, baseSeq,
+        });
+        if (typeof r.seq === 'number') prev.files[key] = { seq: r.seq, hash: localHash ?? sha256(bytes), lastCloudMtimeMs: r.mtimeMs };
+        else prev.files[key] = { lastCloudMtimeMs: r.mtimeMs };
+        agg.pushed++;
+      } catch (e) {
+        if (e instanceof AgentFileConflictError) {
+          if (e.info.hash !== null && e.info.hash === localHash) { prev.files[key] = { seq: e.info.seq, hash: localHash!, lastCloudMtimeMs: e.info.mtimeMs }; return; }
+          if (e.info.seq === 0) { if (baseSeq !== 0) { delete prev.files[key]; await push(0); } return; }
+          await conflictCopy();
+          await pull();
+          return;
+        }
+        throw e;
+      }
+    };
+
+    const d = decide(localHash, shadow, remote);
+    switch (d.kind) {
+      case 'adopt': prev.files[key] = { seq: remote!.seq, hash: localHash!, lastCloudMtimeMs: live!.mtimeMs }; break;
+      case 'pull': await pull(); break;
+      case 'push': await push(d.baseSeq); break;
+      case 'pushCreate': await push(0); break;
+      case 'pushDelete':
+        try { await cloud.deleteFile(userId, slug, relPath, nowMs(), deviceId, shadow!.seq); delete prev.files[key]; agg.deleted++; }
+        catch (e) { if (e instanceof AgentFileConflictError) { await pull(); break; } throw e; }
+        break;
+      case 'deleteLocal': await fsp.rm(absPath, { force: true }).catch(() => {}); delete prev.files[key]; agg.deleted++; break;
+      case 'dropShadow': delete prev.files[key]; break;
+      case 'conflict': await conflictCopy(); await pull(); break;
+      case 'none': break;
     }
   } catch (e: any) {
     console.warn(`[agentFileSync] ${slug}/${relPath} 失败:`, e?.message || e);
+  } finally {
+    writePrev(stateDir, prev);
+  }
+}
+
+/** USER.md 旧路径(mtime-LWW,无墓碑)—— 仅对旧服务端保留。 */
+async function syncGlobalFileLegacy(
+  slug: string, relPath: string, absPath: string, C: AgentFileMeta | undefined,
+  cloud: AgentFilesBrain, userId: string, deviceId: string, agg: AgentFileSyncResult,
+): Promise<void> {
+  const liveC = C && !C.deleted ? C : undefined;
+  const localExists = existsSync(absPath);
+  const L = localExists ? Math.floor(statSync(absPath).mtimeMs) : 0;
+  if (!liveC && localExists) {
+    const content = await fsp.readFile(absPath, 'utf8');
+    await cloud.putFile(userId, slug, relPath, { content, isBinary: false, size: Buffer.byteLength(content), mtimeMs: L, deviceId });
+    agg.pushed++;
+  } else if (liveC && (!localExists || liveC.mtimeMs > L)) {
+    const f = await cloud.getFile(userId, slug, relPath);
+    if (f && !f.deleted) {
+      mkdirSync(dirname(absPath), { recursive: true });
+      await fsp.writeFile(absPath, f.content || '');
+      await fsp.utimes(absPath, new Date(liveC.mtimeMs), new Date(liveC.mtimeMs)).catch(() => {});
+      agg.pulled++;
+    }
+  } else if (liveC && localExists && L > liveC.mtimeMs) {
+    const content = await fsp.readFile(absPath, 'utf8');
+    await cloud.putFile(userId, slug, relPath, { content, isBinary: false, size: Buffer.byteLength(content), mtimeMs: L, deviceId });
+    agg.pushed++;
   }
 }

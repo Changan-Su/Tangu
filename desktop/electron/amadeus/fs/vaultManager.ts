@@ -13,6 +13,9 @@ export class VaultManager {
   private counter = 0
   /** absolutePath -> last content WE wrote, used to suppress echo events in the watcher. */
   private lastWritten = new Map<string, string>()
+  /** 插件声明的文件类型扩展名(小写;经 listPlugins → setPluginFileExtensions 注入)。这些 .md 文件
+   *  是插件的自定义类型(如 `.mindmap.md`)、不是笔记,须排出 listPages 免被 compiler 改写=毁档。 */
+  private pluginExts: string[] = []
   /** 应用侧写盘钩子(云同步推送触发):自写走台账不进 watcher,同步引擎靠它感知应用内改动。 */
   private onMutate: ((rel: string, kind: 'write' | 'remove') => void) | null = null
   private onMove: ((fromRel: string, toRel: string) => void) | null = null
@@ -92,12 +95,24 @@ export class VaultManager {
    *  compiler 当页面解析,一存就把插件的载荷改写成 `<!-- a id -->` 块 + amadeus_* frontmatter
    *  —— 对 Obsidian 侧即毁档。页面侧的消费方(树/索引/搜索/反链/tags)全从这一个口取,挡这里就够。 */
   async listPages(): Promise<string[]> {
-    return this.collectFiles((n) => n.endsWith('.md') && !isDrawingPath(n))
+    return this.collectFiles((n) => n.endsWith('.md') && !isDrawingPath(n) && !this.isPluginFile(n))
   }
 
-  /** All non-page files (attachments/.db/画板/…), vault-relative — for the vault tree. */
+  /** All non-page files (attachments/.db/画板/插件文件类型/…), vault-relative — for the vault tree. */
   async listFiles(): Promise<string[]> {
-    return this.collectFiles((n) => !n.endsWith('.md') || isDrawingPath(n))
+    return this.collectFiles((n) => !n.endsWith('.md') || isDrawingPath(n) || this.isPluginFile(n))
+  }
+
+  /** 由 listPlugins 注入插件声明的文件类型扩展名(见 pluginExts)。 */
+  setPluginFileExtensions(exts: string[]): void {
+    this.pluginExts = exts.map((e) => e.toLowerCase()).filter(Boolean)
+  }
+
+  /** 该文件名是否命中某个插件声明的文件类型扩展名(小写后缀匹配)。 */
+  private isPluginFile(name: string): boolean {
+    if (!this.pluginExts.length) return false
+    const n = name.toLowerCase()
+    return this.pluginExts.some((ext) => n.endsWith(ext))
   }
 
   /** True if `content` matches what we last wrote to `abs` (i.e. not an external edit). */

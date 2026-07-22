@@ -2,12 +2,12 @@
  *  只复用 Amadeus 的数据层(pageStore)与块编辑器内核(PageView/Milkdown)。
  *  左 笔记库 / 主 编辑器 / 右 大纲·反链。除编辑器(块组件用 Amadeus 契约 token,需 .am-app+bridge)外,
  *  外壳直接用 Tangu token/类 → 与 Tangu Desktop 一致,并随其换肤/明暗同步。 */
-import { type ReactNode, type CSSProperties, type DragEvent as RDragEvent, type MouseEvent as RMouseEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, type CSSProperties, type DragEvent as RDragEvent, type MouseEvent as RMouseEvent, type ClipboardEvent as RClipboardEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { create } from 'zustand'
 import {
   SquarePen, FolderOpen, Folder, FolderPlus, Plus, MoreHorizontal, Pencil, Trash2,
   ChevronRight, Search, Code2, Eye, Star, Paperclip, FileDown,
-  Database, ExternalLink, FileText, Share2, Cloud, CloudOff, Pin, PenTool,
+  Database, ExternalLink, FileText, Share2, Cloud, CloudOff, Pin, PenTool, Upload,
 } from 'lucide-react'
 import { useApp } from './stores/appStore'
 import { useTheme } from './stores/themeStore'
@@ -15,13 +15,14 @@ import { usePageStore } from '@amadeus/store/pageStore'
 import { useUiOverlay } from './amadeusOverlayStore'
 import { amadeus } from '@amadeus/api'
 import { getAttachmentPrefs } from '@amadeus/lib/attachments'
-import { usePluginStore } from '@amadeus/plugins/pluginStore'
+import { importToPage, importToFolder, pasteImagesToPage } from './amadeusImport'
+import { usePluginStore, findFileType, fileTypeBaseName } from '@amadeus/plugins/pluginStore'
 import { ensureAmadeusReady } from './amadeusPlugins'
 import { AmadeusPropertiesPanel } from './amadeusProperties'
 import { useAmadeusPrefs } from './amadeusPrefs'
 import type { TrashEntry } from '@amadeus-shared/ipc'
 import type { AmadeusSyncStatus } from './types'
-import { openNote, openDb, openPdf, openDrawing, createDrawing, openSearch } from './amadeusNav'
+import { openNote, openDb, openPdf, openDrawing, openFile, createDrawing, openSearch } from './amadeusNav'
 import { isDrawingPath } from '@amadeus-shared/excalidraw/format'
 import { useSearchSeed } from './amadeusPanels'
 import { askString } from '@amadeus/components/askString'
@@ -621,11 +622,28 @@ export function AmadeusPagesView() {
   const mainTabs = useWorkspace((s) => s.mainTabs)
   const activeViewFile = useMemo(() => {
     const t = mainTabs.find((x) => x.active)
-    const key = t && ({ 'amadeus-drawing': 'drawingPath', 'amadeus-pdf': 'pdfPath', 'amadeus-db': 'dbPath' } as Record<string, string>)[t.type]
+    const key = t && ({ 'amadeus-drawing': 'drawingPath', 'amadeus-pdf': 'pdfPath', 'amadeus-db': 'dbPath', 'amadeus-plugin-file': 'filePath' } as Record<string, string>)[t.type]
     // leafById 两壳皆有;移动单列壳 api 恒 null(getPanel 读法在手机上恒 null→白板/PDF 树行不亮)。
     const v = key ? (useWorkspace.getState().leafById(t!.id)?.params as Record<string, unknown> | undefined)?.[key] : null
     return typeof v === 'string' ? v : null
   }, [mainTabs])
+
+  // 插件声明的文件类型(如 .mindmap.md):订阅后插件加载即重渲,树行随之显示专属图标 + 点击改道文件类型视图。
+  const pluginFileTypes = usePluginStore((s) => s.fileTypes)
+  // 插件贡献的「新建 X」项:进 root/folder 右键菜单,和内置 新建笔记/Base/白板 并列。
+  const pluginFileCreators = usePluginStore((s) => s.fileCreators)
+  /** 点插件「新建 X」:先展开父文件夹,再交给插件 run(parentFolder)(内部 writeFile+openFile,openFile 会 refreshStructure)。
+   *  run 多为异步 → 必须 await 其 promise,否则创建失败只会静默(菜单已关,用户以为建好了)。 */
+  const runFileCreator = (parent: string, label: string, run: (p: string) => void | Promise<void>): void => {
+    setMenu(null)
+    if (parent) setExpanded((prev) => new Set([...prev, ...prefixesOf(parent)]))
+    void Promise.resolve()
+      .then(() => run(parent))
+      .catch((e: unknown) => {
+        console.error('[plugin] file creator failed', e)
+        useApp.getState().toast(`「${label}」失败:${e instanceof Error ? e.message : String(e)}`, true)
+      })
+  }
 
   const toggle = (f: string): void => setExpanded((prev) => {
     const n = new Set(prev); n.has(f) ? n.delete(f) : n.add(f); return n
@@ -635,6 +653,39 @@ export function AmadeusPagesView() {
     if (dragPath && parentOf(dragPath) !== folder) void ps().movePage(dragPath, folder)
     setDragPath(null)
     setDragOver(null)
+  }
+  // ── OS 文件拖入文件树 → 存入库为文件(不嵌入),类似文件管理器导入 ──
+  const hasFilesType = (e: RDragEvent<HTMLElement>): boolean =>
+    Array.from(e.dataTransfer?.types ?? []).includes('Files')
+  /** 悬停:OS 文件(无内部 dragPath)也点亮目标落区并允许 copy。返回 true=已按 Files 处理。 */
+  const filesDragOver = (e: RDragEvent<HTMLElement>, target: string): boolean => {
+    if (!hasFilesType(e)) return false
+    e.preventDefault(); e.stopPropagation()
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+    if (dragOver !== target) setDragOver(target)
+    return true
+  }
+  /** 落下:OS 文件 → 导入到 target 文件夹(空串=库根);否则返回 false 交内部搬动。 */
+  const filesDrop = (e: RDragEvent<HTMLElement>, target: string): boolean => {
+    const files = Array.from(e.dataTransfer?.files ?? [])
+    if (!files.length) return false
+    e.preventDefault(); e.stopPropagation()
+    setDragOver(null)
+    void importToFolder(files, target)
+    return true
+  }
+  // 根/分区空白落区:仅真空白才导入到库根;落在行/组(skip 选择器)上=取消(与内部拖拽语义一致)。
+  // skip 因区而异:外层 t2s-scroll 要排掉分区体 .t2s-group-sessions,而 Vault 段体本身就是
+  // .t2s-group-sessions(它是落区容器,排自己会使自身空白无法接收),故各传各的选择器。
+  const rootFilesOver = (e: RDragEvent<HTMLElement>, skipSel: string): boolean => {
+    if (!hasFilesType(e)) return false
+    if (!(e.target as HTMLElement).closest(skipSel)) filesDragOver(e, '')
+    return true
+  }
+  const rootFilesDrop = (e: RDragEvent<HTMLElement>, skipSel: string): boolean => {
+    if (!hasFilesType(e)) return false
+    if (!(e.target as HTMLElement).closest(skipSel)) filesDrop(e, '')
+    return true
   }
   const commitRename = (): void => {
     const path = renaming
@@ -689,6 +740,7 @@ export function AmadeusPagesView() {
 
   /** 拖拽悬停在「合并笔记节点」上 = 拖进它的 .fd(Notion 语义);守卫拖自己/拖回原处/拖进自己子树。 */
   const mergedDragOver = (e: RDragEvent<HTMLElement>, notePath: string, fd: string): void => {
+    if (filesDragOver(e, fd)) return
     if (!dragPath) return
     e.stopPropagation()
     if (dragPath === notePath || parentOf(dragPath) === fd) return
@@ -716,7 +768,9 @@ export function AmadeusPagesView() {
   const row = (path: string, depth = 0, merged?: { fd: string; open: boolean; count: number }): ReactNode => {
     // 白板(.excalidraw.md)磁盘上也是 .md,必须先于「笔记」判定:进了 openNote 会被 compiler 当页面改写=毁档。
     const isDraw = isDrawingPath(path)
-    const isNote = !isDraw && isNotePath(path)
+    // 插件文件类型(如 .mindmap.md):磁盘是 .md 但归插件管,先于「笔记」判定,免进 openNote 被 compiler 改写=毁档。
+    const ft = !isDraw ? findFileType(pluginFileTypes, path) : undefined
+    const isNote = !isDraw && !ft && isNotePath(path)
     const ctxKind = isNote ? 'page' : 'asset'
     // 无 emoji 时的类型兜底图标(md 笔记也有 —— 用户要求)。尺寸由 CSS .t2s-lead-icon 定,勿传 size。
     const LeadIcon = isDbPath(path) ? Database : isDraw ? PenTool : isNote ? FileText : Paperclip
@@ -726,7 +780,7 @@ export function AmadeusPagesView() {
       ref={(el) => { if (path === flash) flashRef.current = el }}
       className={`t2s-srow${path === (activeViewFile ?? activePage) ? ' active' : ''}${path === flash ? ' amx-flash' : ''}${path === dragPath ? ' dragging' : ''}${merged && dragPath && dragOver === merged.fd ? ' amx-drop-into' : ''}`}
       style={{ paddingLeft: rowPadLeft(depth) }}
-      onClick={(e) => { isNote ? void openNote(path, { newTab: e.metaKey || e.ctrlKey }) : isDraw ? openDrawing(path) : isDbPath(path) ? openDb(path) : isPdfPath(path) ? openPdf(path) : void amadeus.openVaultFile(path).catch(() => {}) }}
+      onClick={(e) => { ft ? openFile(path) : isNote ? void openNote(path, { newTab: e.metaKey || e.ctrlKey }) : isDraw ? openDrawing(path) : isDbPath(path) ? openDb(path) : isPdfPath(path) ? openPdf(path) : void amadeus.openVaultFile(path).catch(() => {}) }}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ kind: ctxKind, path, x: e.clientX, y: e.clientY }) }}
       draggable={renaming !== path}
       onDragStart={(e) => {
@@ -739,7 +793,7 @@ export function AmadeusPagesView() {
       onDragEnd={() => { setDragPath(null); setDragOver(null) }}
       onDragOver={merged ? (e) => mergedDragOver(e, path, merged.fd) : undefined}
       onDragLeave={merged ? () => { if (dragOver === merged.fd) setDragOver(null) } : undefined}
-      onDrop={merged ? (e) => { e.preventDefault(); e.stopPropagation(); dropTo(merged.fd) } : undefined}
+      onDrop={merged ? (e) => { if (filesDrop(e, merged.fd)) return; e.preventDefault(); e.stopPropagation(); dropTo(merged.fd) } : undefined}
       {...tipProps(rowTip(path))}
     >
       {/* 前导槽:**每行都有**(含文件夹行),故所有图标左边缘对齐、尺寸也一致(见 .t2s-lead)。
@@ -747,6 +801,8 @@ export function AmadeusPagesView() {
       <span className="t2s-lead">
         {icons[path]
           ? <span className="amx-page-emoji">{icons[path]}</span>
+          : ft?.icon
+          ? <span className="amx-page-emoji">{ft.icon}</span>
           : <LeadIcon className="t2s-lead-icon t2s-dim" />}
         {merged && (
           <span
@@ -769,7 +825,7 @@ export function AmadeusPagesView() {
         />
       ) : (
         <span className="t2s-srow-title">
-          {isNote || isDraw ? baseName(path) : path.split(/[\\/]/).pop()}
+          {ft ? fileTypeBaseName(path, ft.extensions) : isNote || isDraw ? baseName(path) : path.split(/[\\/]/).pop()}
         </span>
       )}
       {/* 行尾顺序:… 在左、+ 在右(同文件夹头);+ 仅笔记有(附件/.db 没有 .fd)。 */}
@@ -802,7 +858,7 @@ export function AmadeusPagesView() {
               className={`t2s-group-sessions${dragPath && dragOver === fd ? ' amx-drop-into' : ''}`}
               onDragOver={(e) => mergedDragOver(e, node.path, fd)}
               onDragLeave={() => { if (dragOver === fd) setDragOver(null) }}
-              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); dropTo(fd) }}
+              onDrop={(e) => { if (filesDrop(e, fd)) return; e.preventDefault(); e.stopPropagation(); dropTo(fd) }}
             >
               {node.children.map((c) => renderNode(c, depth + 1))}
             </div>
@@ -815,6 +871,7 @@ export function AmadeusPagesView() {
     const fileCount = node.children.filter((c) => c.kind === 'file').length
     const dirCount = node.children.length - fileCount
     const folderDragOver = (e: RDragEvent<HTMLDivElement>): void => {
+      if (filesDragOver(e, folder)) return
       if (!dragPath) return
       e.stopPropagation()
       if (parentOf(dragPath) === folder) return // 拖回原文件夹 = 不可落(且不让祖先接手)
@@ -836,7 +893,7 @@ export function AmadeusPagesView() {
           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ kind: 'folder', path: folder, x: e.clientX, y: e.clientY }) }}
           onDragOver={folderDragOver}
           onDragLeave={() => { if (dragOver === folder) setDragOver(null) }}
-          onDrop={(e) => { e.preventDefault(); e.stopPropagation(); dropTo(folder) }}
+          onDrop={(e) => { if (filesDrop(e, folder)) return; e.preventDefault(); e.stopPropagation(); dropTo(folder) }}
         >
           {/* 与笔记行同构:前导槽(图标 ↔ hover 换箭头)+ 名字。展开态靠 FolderOpen/Folder 表达
               —— 箭头默认不显了(用户拍板),没有它就得由图标担起「展开了没」这个信息。 */}
@@ -856,7 +913,7 @@ export function AmadeusPagesView() {
             className={`t2s-group-sessions${dragPath && dragOver === folder ? ' amx-drop-into' : ''}`}
             onDragOver={folderDragOver}
             onDragLeave={() => { if (dragOver === folder) setDragOver(null) }}
-            onDrop={(e) => { e.preventDefault(); e.stopPropagation(); dropTo(folder) }}
+            onDrop={(e) => { if (filesDrop(e, folder)) return; e.preventDefault(); e.stopPropagation(); dropTo(folder) }}
           >
             {node.children.map((c) => renderNode(c, depth + 1))}
           </div>
@@ -884,6 +941,7 @@ export function AmadeusPagesView() {
             setMenu({ kind: 'root', path: '', x: e.clientX, y: e.clientY })
           }}
           onDragOver={(e) => {
+            if (rootFilesOver(e, '.t2s-srow, .t2s-group, .t2s-group-sessions, .t2s-special-group')) return
             // 根目录落点 = 真空白区。行/组/分区上不 preventDefault → 松手即取消,绝不静默搬到根。
             if (!dragPath || parentOf(dragPath) === '' || q) return
             if ((e.target as HTMLElement).closest('.t2s-srow, .t2s-group, .t2s-group-sessions, .t2s-special-group')) return
@@ -893,6 +951,7 @@ export function AmadeusPagesView() {
           }}
           onDragLeave={() => { if (dragOver === '') setDragOver(null) }}
           onDrop={(e) => {
+            if (rootFilesDrop(e, '.t2s-srow, .t2s-group, .t2s-group-sessions, .t2s-special-group')) return
             if ((e.target as HTMLElement).closest('.t2s-srow, .t2s-group, .t2s-group-sessions, .t2s-special-group')) return
             e.preventDefault()
             dropTo('')
@@ -948,6 +1007,7 @@ export function AmadeusPagesView() {
                     <div
                       className={`t2s-group-sessions${dragPath && dragOver === '' ? ' amx-drop-root' : ''}`}
                       onDragOver={(e) => {
+                        if (rootFilesOver(e, '.t2s-srow, .t2s-group')) return
                         // 根目录落点:分区内真空白(行/文件夹自己的 handler 已 stopPropagation)。
                         if (!dragPath || parentOf(dragPath) === '' || q) return
                         if ((e.target as HTMLElement).closest('.t2s-srow, .t2s-group')) return
@@ -957,6 +1017,7 @@ export function AmadeusPagesView() {
                       }}
                       onDragLeave={() => { if (dragOver === '') setDragOver(null) }}
                       onDrop={(e) => {
+                        if (rootFilesDrop(e, '.t2s-srow, .t2s-group')) return
                         if ((e.target as HTMLElement).closest('.t2s-srow, .t2s-group')) return
                         e.preventDefault()
                         dropTo('')
@@ -1036,6 +1097,11 @@ export function AmadeusPagesView() {
           <button onClick={() => newFolder(menu.path)}><FolderPlus size={13} /> 新建子文件夹</button>
           <button onClick={() => newBase(menu.path)}><Database size={13} /> 新建 Base</button>
           <button onClick={() => newDrawing(menu.path)}><PenTool size={13} /> 新建白板</button>
+          {pluginFileCreators.map((o) => (
+            <button key={o.item.id} onClick={() => runFileCreator(menu.path, o.item.label, o.item.run)}>
+              <span style={{ display: 'inline-block', width: 13, textAlign: 'center', fontSize: 13 }}>{o.item.icon || '📄'}</span> {o.item.label}
+            </button>
+          ))}
           <button onClick={() => { const f = menu.path; setMenu(null); void askString('重命名文件夹', folderName(f)).then((name) => { const n = name?.trim(); if (n) void ps().renameFolder(f, n) }) }}><Pencil size={13} /> 重命名</button>
           <button onClick={() => { void amadeus.revealInFileManager(menu.path); setMenu(null) }}><FolderOpen size={13} /> 在文件管理器中显示</button>
           {window.amadeusSync?.entrySyncEnable && vaultSide === 'local' && (
@@ -1063,6 +1129,11 @@ export function AmadeusPagesView() {
           <button onClick={() => newFolder('')}><FolderPlus size={13} /> 新建文件夹</button>
           <button onClick={() => newBase('')}><Database size={13} /> 新建 Base</button>
           <button onClick={() => newDrawing('')}><PenTool size={13} /> 新建白板</button>
+          {pluginFileCreators.map((o) => (
+            <button key={o.item.id} onClick={() => runFileCreator('', o.item.label, o.item.run)}>
+              <span style={{ display: 'inline-block', width: 13, textAlign: 'center', fontSize: 13 }}>{o.item.icon || '📄'}</span> {o.item.label}
+            </button>
+          ))}
         </div>
       )}
 
@@ -1075,7 +1146,7 @@ export function AmadeusPagesView() {
 
 /** 编辑器需 Amadeus 契约 token → 包 .am-app.tangu-lovable + 镜像 Tangu mode/flat,经 bridge 取色。 */
 function EditorScope({
-  children, dragging, onDrop, onDragOver, onDragLeave, onClick,
+  children, dragging, onDrop, onDragOver, onDragLeave, onClick, onPaste,
 }: {
   children: ReactNode
   dragging?: boolean
@@ -1083,6 +1154,7 @@ function EditorScope({
   onDragOver?: (e: RDragEvent<HTMLDivElement>) => void
   onDragLeave?: (e: RDragEvent<HTMLDivElement>) => void
   onClick?: (e: RMouseEvent<HTMLDivElement>) => void
+  onPaste?: (e: RClipboardEvent<HTMLDivElement>) => void
 }) {
   const mode = useTheme((s) => s.mode)
   const flat = useTheme((s) => s.flat)
@@ -1095,16 +1167,11 @@ function EditorScope({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onClick={onClick}
+      onPaste={onPaste}
     >
       {children}
     </div>
   )
-}
-
-/** 附件链接(关预览时)Markdown 形式;含空格/括号的路径包 `<>` 保证合法。 */
-function mdLink(name: string, rel: string): string {
-  const dest = /[ ()<>]/.test(rel) ? `<${rel}>` : rel
-  return `[${name.replace(/[[\]]/g, '')}](${dest})`
 }
 
 /** 未命名笔记的文件名 sentinel(createPageInFolder=untitled[-N] / createChildNote=未命名[-N]):
@@ -1488,6 +1555,7 @@ export function AmadeusEditorView({ leaf }: ViewProps) {
   const [shareCard, setShareCard] = useState<{ x: number; y: number } | null>(null) // 共享/发布卡片(web/桌面 collab)
   const [shareVer, setShareVer] = useState(0) // ShareCard 关闭后 bump → 状态指示重新拉取
   const printHostRef = useRef<HTMLElement | null>(null) // 本编辑器实例的 EditorScope 根(分屏下导出各自的)
+  const uploadInputRef = useRef<HTMLInputElement>(null) // 「上传文件」按钮的隐藏 <input type=file>
   const starred = useAmadeusPrefs((s) => !!activePage && s.starred.includes(activePage))
   const pinned = useAmadeusPrefs((s) => !!activePage && s.pins.includes(activePage))
   // 云同步按钮(图钉右侧,仅桌面本地侧):点亮=本笔记已是显式同步条目;点击开启走关联勾选弹窗,再点关闭。
@@ -1566,15 +1634,7 @@ export function AmadeusEditorView({ leaf }: ViewProps) {
     setDragging(false)
     const page = ps().activePage
     if (!page) return
-    const { opts, preview } = await getAttachmentPrefs()
-    for (const f of files) {
-      try {
-        const bytes = new Uint8Array(await f.arrayBuffer())
-        const { pageRel, base } = await amadeus.saveAttachment(page, f.name, bytes, opts)
-        ps().insertBlockAfter(null, undefined, preview ? `![[${base}]]` : mdLink(f.name, pageRel))
-      } catch { /* 单个文件失败跳过 */ }
-    }
-    ps().refreshStructure?.() // 新附件出现在左栏结构
+    await importToPage(files, page) // 存到配置的附件位置 + 插入嵌入/链接(本地/云端/web 统一;失败与超限走 toast)
   }
   const onDragOver = (e: RDragEvent<HTMLDivElement>): void => {
     if (!Array.from(e.dataTransfer?.types ?? []).includes('Files')) return
@@ -1594,6 +1654,20 @@ export function AmadeusEditorView({ leaf }: ViewProps) {
     const page = ps().activePage
     if (page) void amadeus.openAttachment(page, href)
   }
+  // 粘贴图片(Cmd/Ctrl+V 截图)→ 存 .amadeus/ 并按页相对路径嵌入。标题/重命名输入框放行,
+  // 某块已自行处理(defaultPrevented)也放行;正文块粘贴图片才拦。
+  const onPaste = (e: RClipboardEvent<HTMLDivElement>): void => {
+    if (e.defaultPrevented) return
+    if ((e.target as HTMLElement).closest('input, textarea, .t2s-rename')) return
+    const imgs = Array.from(e.clipboardData?.items ?? [])
+      .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
+      .map((it) => it.getAsFile())
+      .filter((f): f is File => !!f)
+    if (!imgs.length) return
+    e.preventDefault()
+    const page = ps().activePage
+    if (page) void pasteImagesToPage(imgs, page)
+  }
 
   if (stale) {
     return (
@@ -1609,7 +1683,7 @@ export function AmadeusEditorView({ leaf }: ViewProps) {
   }
 
   return (
-    <EditorScope dragging={dragging} onDrop={(e) => void onDrop(e)} onDragOver={onDragOver} onDragLeave={onDragLeave} onClick={onClick}>
+    <EditorScope dragging={dragging} onDrop={(e) => void onDrop(e)} onDragOver={onDragOver} onDragLeave={onDragLeave} onClick={onClick} onPaste={onPaste}>
       {activePage && (
         // 顶栏与编辑器融为一体:透明浮在纸面上,不是独立的一层(无底色/无分割线;滚动穿过靠 blur,见 CSS)。
         <div className="amx-toolbar">
@@ -1657,6 +1731,25 @@ export function AmadeusEditorView({ leaf }: ViewProps) {
           >
             {mode === 'source' ? <Eye size={14} /> : <Code2 size={14} />}
           </button>
+          <button
+            className="amx-mode-btn"
+            title="上传文件到本页"
+            onClick={() => uploadInputRef.current?.click()}
+          >
+            <Upload size={14} />
+          </button>
+          <input
+            ref={uploadInputRef}
+            type="file"
+            multiple
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const files = Array.from(e.currentTarget.files ?? [])
+              e.currentTarget.value = ''
+              const page = ps().activePage
+              if (page && files.length) void importToPage(files, page)
+            }}
+          />
           <button
             className="amx-mode-btn amx-more-btn"
             title="更多操作"

@@ -14,6 +14,8 @@ import { useDbStore } from '../amadeus/store/dbStore'
 import { useCalendarMembers } from '../amadeus/store/calendarMembers'
 import { useAllDatabases, isDateCol, type AggDb } from '../amadeus/store/dbAggregateStore'
 import { useAgentCalDbs } from '../stores/agentScheduleStore'
+import { useOtherVaultCalDbs } from '../stores/otherVaultCalStore'
+import { calDisplayName } from './calendar/calDisplayName'
 import { useCalendarConfig, colorForDb, isHidden, defaultDbPath, memberOf } from '../amadeus/store/calendarConfigStore'
 import { useCalendarNav } from '../amadeus/store/calendarNavStore'
 import { openDb } from '../amadeusNav'
@@ -102,8 +104,11 @@ function MiniCalendar() {
 
 function ConfigList() {
   const vault = usePageStore((s) => s.vaultRoot) ?? ''
+  const vaultSide = usePageStore((s) => s.vaultSide)
+  const activeLabel = vaultSide === 'cloud' ? '云端' : vault.split(/[\\/]/).pop() || vault // 活动侧默认 Calendar 的后缀标签
   const members = useCalendarMembers()
   const agentDbs = useAgentCalDbs() // agent 日程只读源:进图例(调色/显隐可用,无 ★/⋯)
+  const otherDbs = useOtherVaultCalDbs() // 非活动侧只读日历(任务1:汇总两侧,名字已带 Vault 后缀)
   const byVault = useCalendarConfig((s) => s.byVault)
   const setColor = useCalendarConfig((s) => s.setColor)
   const toggleHidden = useCalendarConfig((s) => s.toggleHidden)
@@ -116,9 +121,10 @@ function ConfigList() {
   const [editing, setEditing] = useState<AggDb | null>(null) // 「Calendar 设置」改列映射
 
   const memberPaths = useMemo(() => new Set(members.map((m) => m.db.path)), [members])
-  const dbs: Array<{ db: AggDb; readonly?: boolean }> = [
+  const dbs: Array<{ db: AggDb; readonly?: boolean; kind?: 'agent' | 'other' }> = [
     ...members.map((m) => ({ db: m.db })),
-    ...agentDbs.map((db) => ({ db, readonly: true })),
+    ...agentDbs.map((db) => ({ db, readonly: true, kind: 'agent' as const })),
+    ...otherDbs.map((db) => ({ db, readonly: true, kind: 'other' as const })),
   ]
   const def = defaultDbPath(vault, byVault)
 
@@ -135,7 +141,7 @@ function ConfigList() {
       <div className="amx-calcfg-head">日历</div>
       {dbs.length === 0 && <div className="amx-calcfg-empty">还没有加入日历的多维表。</div>}
       <div className="amx-calcfg-list">
-        {dbs.map(({ db, readonly }, di) => {
+        {dbs.map(({ db, readonly, kind }, di) => {
           const color = colorForDb(vault, byVault, db.path, di)
           const visible = !isHidden(vault, byVault, db.path)
           const isDefault = def ? def === db.path : di === 0 // 未显式设默认时,首个隐式为默认
@@ -144,7 +150,7 @@ function ConfigList() {
               <span className="amx-calcfg-swatch" style={{ background: visible ? color : 'transparent', borderColor: color }}>
                 <input type="color" value={color} onChange={(e) => setColor(vault, db.path, e.target.value)} title="事件颜色" />
               </span>
-              <span className={`amx-calcfg-name${visible ? '' : ' off'}`} title={db.name}>{readonly ? `⚙ ${db.name}` : db.name}{!readonly && isDefault && ' ★'}</span>
+              <span className={`amx-calcfg-name${visible ? '' : ' off'}`} title={db.name}>{readonly ? (kind === 'agent' ? `⚙ ${db.name}` : db.name) : calDisplayName(db.name, activeLabel)}{!readonly && isDefault && ' ★'}</span>
               <CheckboxInput
                 label="在日历中显示"
                 isLabelHidden

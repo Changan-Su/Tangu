@@ -6,6 +6,7 @@
 import './skins.css';
 import { themeRegistry, getLanguage, DEFAULT_LANG, DEFAULT_SEED } from './registry';
 import { customSkinVars, CUSTOM_SKIN_VAR_KEYS } from './lcl/lovableData';
+import { applyThemeSettings } from './themeSettings';
 
 const LINK_ID_PREFIX = 'forsion-theme-css-';
 const FONT_LINK_ID_PREFIX = 'forsion-theme-font-';
@@ -134,6 +135,9 @@ export function applyTheme(
   }
 
   ensureFontLink(cssId);
+  // 主题自曝参数 → :root 内联 CSS 变量。必须在 currentCssId 改写**之前**取上一个 entry,
+  // 否则切主题时旧主题声明的变量清不掉(会滞留到新主题上)。
+  applyThemeSettings(entry, currentCssId ? getLanguage(currentCssId) : null);
   currentKey = nextKey;
   currentCssId = cssId;
   syncWindowMaterial();

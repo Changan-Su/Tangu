@@ -1,0 +1,20 @@
+{
+  "id": "research-desk",
+  "name": { "zh": "研究台", "en": "Research Desk" },
+  "icon": "book-open",
+  "version": "1.0.0",
+  "layout": {
+    "main": [
+      { "type": "chat", "params": { "followActive": true, "reuseKey": "primary" } }
+    ],
+    "left": [
+      { "type": "workspace", "params": { "mode": "sessions" } }
+    ],
+    "right": [
+      { "type": "workspace", "params": { "mode": "files" } },
+      { "type": "outline" },
+      { "type": "memory" }
+    ]
+  },
+  "requires": { "views": ["chat", "memory"] }
+}

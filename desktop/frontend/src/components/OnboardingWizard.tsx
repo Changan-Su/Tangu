@@ -6,13 +6,13 @@
 import React, { useEffect, useRef, useState } from 'react'
 import {
   ArrowRight, ArrowLeft, Bot, Check, Cloud, History, KeyRound, Loader2, LogIn, ExternalLink,
-  MonitorCheck, Play, Plus, SkipForward, Sparkles, Palette, FolderOpen, Sun, Moon, X, FileText, RefreshCw,
+  MonitorCheck, MonitorCog, Play, Plus, SkipForward, Sparkles, Palette, FolderOpen, Sun, Moon, X, FileText, RefreshCw,
 } from 'lucide-react'
 import { listModels, testProviderConnection, listAgents, saveAgentDef, getSpecialConfig, saveSpecialConfig } from '../services/backendService'
 import type { EnvProbeResult, MirrorTestResult, ModelsResponse, NormalAgentDef, SpecialAgentsConfig, TanguDesktopConfig } from '../types'
 import { useI18n } from '../i18n'
 import { PRODUCT, PRODUCT_DISPLAY_NAME } from '../product'
-import { listLanguages, listSkins } from '../theme/registry'
+import { listLanguages, listSkins, forcedSchemeForLanguage } from '../theme/registry'
 import { applyTheme } from '../theme/loader'
 import { ThemeCard } from './ThemeCard'
 import { BrandLogo } from './BrandLogo'
@@ -48,13 +48,15 @@ export const OnboardingWizard: React.FC<{
   themeLang: string
   themeSkin: string
   themeMode: 'light' | 'dark'
+  /** 用户明暗偏好(可 system);换语言/配色时透传它,不能传落地 mode 否则会把 system 抹成明/暗(codex High-2)。 */
+  themeModePref: 'light' | 'dark' | 'system'
   themeSeed: string
-  onThemeChange: (lang: string, skin: string, mode: 'light' | 'dark') => void
+  onThemeChange: (lang: string, skin: string, pref: 'light' | 'dark' | 'system') => void
   onSeedChange: (hex: string) => void
   /** 向导内动作改变了主配置(登录成功/保存 provider)→ App 重连。 */
   onReconnect: () => void
   onFinish: () => void
-}> = ({ themeLang, themeSkin, themeMode, themeSeed, onThemeChange, onSeedChange, onReconnect, onFinish }) => {
+}> = ({ themeLang, themeSkin, themeMode, themeModePref, themeSeed, onThemeChange, onSeedChange, onReconnect, onFinish }) => {
   const { t } = useI18n()
   const [step, setStep] = useState<Step>('welcome')
   const stepIdx = STEP_ORDER.indexOf(step)
@@ -512,7 +514,7 @@ export const OnboardingWizard: React.FC<{
                       entry={th}
                       mode={themeMode}
                       active={th.manifest.id === themeLang}
-                      onSelect={() => { applyTheme(th.manifest.id, themeSkin, themeMode, { customColor: themeSeed }); onThemeChange(th.manifest.id, themeSkin, themeMode) }}
+                      onSelect={() => onThemeChange(th.manifest.id, themeSkin, themeModePref)}
                     />
                   ))}
                 </div>
@@ -526,7 +528,7 @@ export const OnboardingWizard: React.FC<{
                       type="button"
                       className={`skin-chip${sk.id === themeSkin ? ' active' : ''}`}
                       title={t(`settings.theme.skin.${sk.id}`)}
-                      onClick={() => { applyTheme(themeLang, sk.id, themeMode, { customColor: themeSeed }); onThemeChange(themeLang, sk.id, themeMode) }}
+                      onClick={() => { applyTheme(themeLang, sk.id, themeMode, { customColor: themeSeed }); onThemeChange(themeLang, sk.id, themeModePref) }}
                     >
                       <i className="skin-dot" style={{ background: sk.id === 'custom' ? themeSeed : sk.accent }} />
                       <span>{t(`settings.theme.skin.${sk.id}`)}</span>
@@ -546,18 +548,35 @@ export const OnboardingWizard: React.FC<{
                   />
                 </div>
               )}
-              <div className="field">
-                <label>{t('onboarding.theme.modeLabel')}</label>
-                <div className="seg">
-                  <button className={themeMode === 'light' ? 'active' : ''} onClick={() => { applyTheme(themeLang, themeSkin, 'light', { customColor: themeSeed }); onThemeChange(themeLang, themeSkin, 'light') }}>
-                    <Sun size={13} style={{ verticalAlign: -2, marginRight: 4 }} />{t('onboarding.theme.light')}
-                  </button>
-                  <button className={themeMode === 'dark' ? 'active' : ''} onClick={() => { applyTheme(themeLang, themeSkin, 'dark', { customColor: themeSeed }); onThemeChange(themeLang, themeSkin, 'dark') }}>
-                    <Moon size={13} style={{ verticalAlign: -2, marginRight: 4 }} />{t('onboarding.theme.dark')}
-                  </button>
-                </div>
-                <div className="hint" style={{ marginTop: 6 }}>{t('onboarding.theme.hint')}</div>
-              </div>
+              {(() => {
+                // 与设置页同款三态 + 锁定(主题 colorScheme 强制时禁用)。透传偏好,绝不把 system 抹成明/暗。
+                const forced = forcedSchemeForLanguage(themeLang)
+                const active = forced ?? themeModePref
+                const opts: Array<{ id: 'light' | 'dark' | 'system'; icon: typeof Sun; label: string }> = [
+                  { id: 'light', icon: Sun, label: t('onboarding.theme.light') },
+                  { id: 'dark', icon: Moon, label: t('onboarding.theme.dark') },
+                  { id: 'system', icon: MonitorCog, label: t('settings.theme.system') },
+                ]
+                return (
+                  <div className="field">
+                    <label>{t('onboarding.theme.modeLabel')}</label>
+                    <div className="seg">
+                      {opts.map(({ id, icon: Ic, label }) => (
+                        <button
+                          key={id}
+                          className={active === id ? 'active' : ''}
+                          disabled={!!forced}
+                          title={forced ? t('settings.theme.modeLocked') : undefined}
+                          onClick={() => onThemeChange(themeLang, themeSkin, id)}
+                        >
+                          <Ic size={13} style={{ verticalAlign: -2, marginRight: 4 }} />{label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="hint" style={{ marginTop: 6 }}>{forced ? t('settings.theme.modeLockedHint') : t('onboarding.theme.hint')}</div>
+                  </div>
+                )
+              })()}
             </>
           )}
 

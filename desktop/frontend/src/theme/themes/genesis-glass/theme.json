@@ -1,0 +1,89 @@
+{
+  "id": "genesis-glass",
+  "name": "Genesis Glass · 琉璃",
+  "description": "Genesis 结构 × macOS 原生玻璃。外壳(ribbon/标签栏/侧栏)溶进窗后景深,主视图纸卡保持 96% 实色 —— 正文永远不透背景。不定义任何颜色,任意配色/明暗都成立。",
+  "version": "1.0.0",
+  "author": "Forsion",
+  "supportsDarkMode": true,
+  "windowMaterial": "system-glass",
+  "colorScheme": "system",
+  "tags": ["lcl", "glass", "genesis", "macos"],
+  "panelGap": 0,
+  "settings": [
+    {
+      "key": "--gl-chrome-pct",
+      "label": "外壳浓度",
+      "description": "ribbon 与主区外框。越小越透，壁纸看得越清",
+      "type": "number",
+      "default": 46,
+      "min": 20,
+      "max": 90,
+      "step": 2,
+      "unit": "%"
+    },
+    {
+      "key": "--gl-pane-pct",
+      "label": "侧栏浓度",
+      "description": "侧栏文字密度高，通常要比外壳厚一档才压得住",
+      "type": "number",
+      "default": 58,
+      "min": 20,
+      "max": 95,
+      "step": 2,
+      "unit": "%"
+    },
+    {
+      "key": "--gl-float-pct",
+      "label": "浮层浓度",
+      "description": "菜单 / 弹窗 / toast / 命令面板",
+      "type": "number",
+      "default": 84,
+      "min": 50,
+      "max": 100,
+      "step": 2,
+      "unit": "%"
+    },
+    {
+      "key": "--gl-blur-radius",
+      "label": "浮层模糊",
+      "description": "只影响浮层；外壳的模糊来自窗口原生材质，调不了也不该调",
+      "type": "number",
+      "default": 40,
+      "min": 0,
+      "max": 80,
+      "step": 4,
+      "unit": "px"
+    },
+    {
+      "key": "--gl-saturate",
+      "label": "透色鲜艳度",
+      "description": "不提饱和度，透过来的东西就是一层脏灰",
+      "type": "select",
+      "default": "190%",
+      "options": [
+        { "value": "120%", "label": "克制" },
+        { "value": "190%", "label": "标准" },
+        { "value": "240%", "label": "浓郁" }
+      ]
+    },
+    {
+      "key": "--gl-hairline-width",
+      "label": "浮层描边",
+      "description": "浮层压在壁纸上时，边缘靠这根发丝线交代",
+      "type": "boolean",
+      "default": true,
+      "on": "1px",
+      "off": "0px"
+    }
+  ],
+  "preview": {
+    "background": {
+      "light": "linear-gradient(160deg, rgba(255,255,255,0.72) 0%, rgba(255,255,255,0.18) 100%), linear-gradient(160deg, #cfd8e6 0%, #e3dcec 52%, #dbe6e3 100%)",
+      "dark": "linear-gradient(160deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.015) 100%), linear-gradient(160deg, #202634 0%, #262130 52%, #1b2523 100%)"
+    },
+    "accent": "#1c1c1c",
+    "title": { "text": "Glass" },
+    "tagline": "原生玻璃 · 纸面可读",
+    "swatches": ["#1c1c1c", "#dbe4ee", "#5f5f5d", "#f2f4f7"]
+  }
+}

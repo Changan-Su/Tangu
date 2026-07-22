@@ -11,6 +11,7 @@ import type {
 } from '../../seams/cloudBrain.js';
 import {
   AMADEUS_MAX_FILE_BYTES,
+  AgentFileConflictError,
   AmadeusConflictError,
   AmadeusNotFoundError,
   AmadeusTooLargeError,
@@ -307,6 +308,7 @@ export function createHttpBrain(cfg: HttpBrainConfig): CloudBrainServices {
       deleteItem: async (...args: any[]) => postJson<any>('/api/brain/storage/delete', { fileId: args[0] }),
     },
     // Tangu 每-agent 云文件镜像(Phase 2):跨设备同步 + 云端运行水合。userId 由 token 隐含(忽略入参)。
+    // put/delete 自带 fetch:CAS 409 需要结构化 body(postJson 只留 detail)→ 抛 AgentFileConflictError。
     agentFiles: {
       getManifest: async (_userId: string) => {
         const r = await getJson<{ agents: any[] }>('/api/brain/agents/manifest');
@@ -316,10 +318,38 @@ export function createHttpBrain(cfg: HttpBrainConfig): CloudBrainServices {
         const r = await postJson<any>('/api/brain/agents/file/get', { slug, relPath });
         return !r || r.notFound ? null : r;
       },
-      putFile: async (_userId: string, slug: string, relPath: string, body: any) =>
-        postJson('/api/brain/agents/file/put', { slug, relPath, ...body }),
-      deleteFile: async (_userId: string, slug: string, relPath: string, mtimeMs: number, deviceId?: string) => {
-        await postJson('/api/brain/agents/file/delete', { slug, relPath, mtimeMs, deviceId });
+      putFile: async (_userId: string, slug: string, relPath: string, body: any) => {
+        const r = await fetch(`${base}/api/brain/agents/file/put`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ slug, relPath, ...body }),
+          signal: reqSignal(),
+        });
+        if (r.status === 409) {
+          const j: any = await r.json().catch(() => ({}));
+          throw new AgentFileConflictError({
+            code: String(j?.code || 'CONFLICT'), seq: Number(j?.seq) || 0, hash: j?.hash ?? null,
+            mtimeMs: Number(j?.mtimeMs) || 0, deleted: !!j?.deleted, content: j?.content,
+          });
+        }
+        if (!r.ok) throw new Error(`brain agents/file/put ${r.status}: ${await r.text().catch(() => '')}`);
+        return (await r.json()) as { mtimeMs: number; seq?: number; hash?: string | null };
+      },
+      deleteFile: async (_userId: string, slug: string, relPath: string, mtimeMs: number, deviceId?: string, baseSeq?: number) => {
+        const r = await fetch(`${base}/api/brain/agents/file/delete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ slug, relPath, mtimeMs, deviceId, ...(baseSeq !== undefined ? { baseSeq } : {}) }),
+          signal: reqSignal(),
+        });
+        if (r.status === 409) {
+          const j: any = await r.json().catch(() => ({}));
+          throw new AgentFileConflictError({
+            code: String(j?.code || 'CONFLICT'), seq: Number(j?.seq) || 0, hash: j?.hash ?? null,
+            mtimeMs: Number(j?.mtimeMs) || 0, deleted: !!j?.deleted, content: j?.content,
+          });
+        }
+        if (!r.ok) throw new Error(`brain agents/file/delete ${r.status}: ${await r.text().catch(() => '')}`);
       },
     },
     // ── Amadeus 云笔记库(v1):对端 /api/amadeus/vaults/default/*(契约冻结)。userId 由 token

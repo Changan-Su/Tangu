@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { Suspense, lazy, memo, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useDroppable } from '@dnd-kit/core'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -11,8 +11,16 @@ import { DatabaseEmbed } from '../blocks/database/DatabaseEmbed'
 import { ExcalidrawEmbed } from '../blocks/excalidraw/ExcalidrawEmbed'
 import { BookmarkCard } from './BookmarkCard'
 import { useBlockSelection } from '../store/blockSelection'
+import { useClampedMenu } from '../lib/clampMenu'
 import { usePageStore } from '../store/pageStore'
+import { usePluginStore, findEmbedRenderer } from '../plugins/pluginStore'
+import { PluginEmbed } from '../blocks/plugin/PluginEmbed'
 import { amadeus } from '../api'
+import { resolveFileName } from '../lib/vaultFiles'
+
+// PDF 预览用自家可批注阅读器的只读形态(Chromium 内置 iframe 阅读器观感突兀且不认主题)。
+// 懒加载:pdf.js viewer 较重,chunk 与独立 PDF 视图共用,笔记里真有 PDF 块才拉。
+const PdfEmbedViewer = lazy(() => import('../pdf/PdfAnnotator').then((m) => ({ default: m.PdfAnnotator })))
 
 const noop = (): void => {}
 
@@ -56,7 +64,8 @@ export const BlockHost = memo(function BlockHost({
     (s) => s.dndOverId === blockId && s.dndActiveId !== null && s.dndActiveId !== blockId,
   )
   const pagePath = usePageStore((s) => s.activePage ?? '')
-  const selected = useBlockSelection((s) => s.id === blockId)
+  const embedRenderers = usePluginStore((s) => s.embedRenderers)
+  const selected = useBlockSelection((s) => s.ids.has(blockId))
   // linkGraphVersion 每次 save 都 bump;只有嵌入块(![[...]])需要跟着重解析。
   // 纯文本块订阅恒 0 → 不再「每次保存全页重渲染」(大页高频打字时的隐性卡源)。
   const linkVersion = usePageStore((s) =>
@@ -96,15 +105,34 @@ export const BlockHost = memo(function BlockHost({
     return !t.includes('#') && isDrawingPath(t) ? t : null
   }, [embedTarget, embedImage, embedDb])
 
+  // 插件声明的文件类型嵌入(如 `![[x.mindmap.md]]`)→ 插件自渲染只读预览块。必须先于 embedFile,否则被文件卡吃掉。
+  const embedPlugin = useMemo(() => {
+    if (!embedTarget || embedImage || embedDb || embedDraw) return null
+    // 先拿**完整 target** 问一次插件 matcher:`#` 和 `|` 也可以是文件夹/文件名的一部分
+    // (笔记 `C# 日记.md` → `![[C# 日记.fd/x.mindmap.md]]`),无条件按 `#`/`|` 切断会把它误判成块锚点/别名
+    // 而拒绝渲染(Codex)。完整串仍以插件声明的后缀结尾,足以与真正的 `file#block` 区分。
+    const raw = embedTarget.trim()
+    if (findEmbedRenderer(embedRenderers, raw)) return raw
+    const t = raw.split('|')[0].trim()
+    if (t.includes('#')) return null
+    return findEmbedRenderer(embedRenderers, t) ? t : null
+  }, [embedTarget, embedImage, embedDb, embedDraw, embedRenderers])
+
   // Non-image file (has an extension, no block anchor) → inline preview (pdf/video/audio) or file card.
   const embedFile = useMemo(() => {
-    if (!embedTarget || embedImage || embedDb || embedDraw) return null
+    if (!embedTarget || embedImage || embedDb || embedDraw || embedPlugin) return null
     const t = embedTarget.split('|')[0].trim()
     if (t.includes('#') || !FILE_EXT_RE.test(t)) return null
     const kind = PDF_EXT_RE.test(t) ? 'pdf' : VIDEO_EXT_RE.test(t) ? 'video' : AUDIO_EXT_RE.test(t) ? 'audio' : 'other'
     return { name: t, kind, url: kind === 'other' ? '' : toAssetUrl(t) }
-  }, [embedTarget, embedImage, embedDb, embedDraw])
+  }, [embedTarget, embedImage, embedDb, embedDraw, embedPlugin])
   const [previewOpen, setPreviewOpen] = useState(true)
+  // PDF 嵌入:链接目标(可能是裸文件名)→ vault 路径,给只读阅读器读字节;解析不出退回 iframe。
+  const vaultFiles = usePageStore((s) => s.files)
+  const pdfVaultPath = useMemo(
+    () => (embedFile?.kind === 'pdf' ? resolveFileName(embedFile.name, vaultFiles, pagePath) : null),
+    [embedFile, vaultFiles, pagePath],
+  )
 
   // 整块恰是一条裸 URL → 书签卡(og 元数据/YouTube 嵌入);md 落盘仍是那行 URL,零私有语法。
   const bookmarkUrl = useMemo(() => {
@@ -115,7 +143,7 @@ export const BlockHost = memo(function BlockHost({
   // Resolve a cross-note embed; re-resolve when the link graph changes (source edited externally).
   const [embed, setEmbed] = useState<EmbedResolved | null | 'loading'>('loading')
   useEffect(() => {
-    if (!embedTarget || embedImage || embedDb || embedDraw || embedFile) return
+    if (!embedTarget || embedImage || embedDb || embedDraw || embedPlugin || embedFile) return
     let alive = true
     setEmbed('loading')
     amadeus
@@ -129,7 +157,7 @@ export const BlockHost = memo(function BlockHost({
     return () => {
       alive = false
     }
-  }, [embedTarget, embedImage, embedDb, embedDraw, embedFile, linkVersion])
+  }, [embedTarget, embedImage, embedDb, embedDraw, embedPlugin, embedFile, linkVersion])
 
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } =
     useSortable({ id: blockId })
@@ -162,6 +190,9 @@ export const BlockHost = memo(function BlockHost({
       window.removeEventListener('contextmenu', close, { capture: true })
     }
   }, [blockMenu])
+  // 菜单量真实尺寸后夹进视口(纵向溢出上移、横向溢出收进屏幕)。关闭态哨兵用 -1(非 0),
+  // 否则恰在 (0,0) 打开时 deps 不变、layout effect 不触发 → 菜单不量测(codex P3)。
+  const menuPos = useClampedMenu(blockMenu?.x ?? -1, blockMenu?.y ?? -1)
 
   if (!block) return null
 
@@ -171,7 +202,7 @@ export const BlockHost = memo(function BlockHost({
     setBlockMenu({ x: e.clientX, y: e.clientY })
   }
 
-  const dragHandle = (
+  const gutter = (
     <div className="block-gutter">
       <button
         ref={setActivatorNodeRef}
@@ -189,12 +220,23 @@ export const BlockHost = memo(function BlockHost({
       >
         ⠿
       </button>
+      <button
+        className="block-add"
+        onClick={(e) => {
+          e.stopPropagation()
+          insertBlockAfter(blockId, undefined, '') // 自带 requestFocus,新块聚焦
+        }}
+        title="在下方插入块 / Add block below"
+        aria-label="add block below"
+      >
+        ＋
+      </button>
     </div>
   )
 
   /** 块菜单(fixed .ctx-menu):普通块四个动作;嵌入块只有 移到新列/移除。 */
   const blockMenuNode = blockMenu && (
-    <div className="ctx-menu" style={{ left: Math.min(blockMenu.x, window.innerWidth - 190), top: Math.min(blockMenu.y, window.innerHeight - 170) }} onClick={(e) => e.stopPropagation()}>
+    <div ref={menuPos.ref} className="ctx-menu" style={menuPos.style} onClick={(e) => e.stopPropagation()}>
       {!embedTarget && (
         <button onClick={() => { void navigator.clipboard?.writeText(`![[${stripPageBasename(pagePath)}#${blockId}]]`); setBlockMenu(null) }}>
           ↪ 复制嵌入引用
@@ -223,11 +265,11 @@ export const BlockHost = memo(function BlockHost({
         data-dragging={isDragging || undefined}
         style={{ transform: CSS.Translate.toString(transform), transition }}
         onContextMenu={onCtxMenu}
-        onFocusCapture={() => { if (useBlockSelection.getState().id) useBlockSelection.getState().select(null) }}
+        onFocusCapture={() => { if (useBlockSelection.getState().ids.size) useBlockSelection.getState().clear() }}
       >
         {isDropTarget && <div className="drop-line" />}
         {blockEdges}
-        {dragHandle}
+        {gutter}
         <div className="block-body embed-image-body">
           <img
             className="embed-image"
@@ -255,11 +297,11 @@ export const BlockHost = memo(function BlockHost({
         data-dragging={isDragging || undefined}
         style={{ transform: CSS.Translate.toString(transform), transition }}
         onContextMenu={onCtxMenu}
-        onFocusCapture={() => { if (useBlockSelection.getState().id) useBlockSelection.getState().select(null) }}
+        onFocusCapture={() => { if (useBlockSelection.getState().ids.size) useBlockSelection.getState().clear() }}
       >
         {isDropTarget && <div className="drop-line" />}
         {blockEdges}
-        {dragHandle}
+        {gutter}
         <div className="block-body">
           <BookmarkCard url={bookmarkUrl} onChangeUrl={(next) => setBlockContent(blockId, next)} />
         </div>
@@ -281,11 +323,11 @@ export const BlockHost = memo(function BlockHost({
         data-dragging={isDragging || undefined}
         style={{ transform: CSS.Translate.toString(transform), transition }}
         onContextMenu={onCtxMenu}
-        onFocusCapture={() => { if (useBlockSelection.getState().id) useBlockSelection.getState().select(null) }}
+        onFocusCapture={() => { if (useBlockSelection.getState().ids.size) useBlockSelection.getState().clear() }}
       >
         {isDropTarget && <div className="drop-line" />}
         {blockEdges}
-        {dragHandle}
+        {gutter}
         <div className="block-body">
           <DatabaseEmbed
             target={embedDb.name}
@@ -312,13 +354,39 @@ export const BlockHost = memo(function BlockHost({
         data-dragging={isDragging || undefined}
         style={{ transform: CSS.Translate.toString(transform), transition }}
         onContextMenu={onCtxMenu}
-        onFocusCapture={() => { if (useBlockSelection.getState().id) useBlockSelection.getState().select(null) }}
+        onFocusCapture={() => { if (useBlockSelection.getState().ids.size) useBlockSelection.getState().clear() }}
       >
         {isDropTarget && <div className="drop-line" />}
         {blockEdges}
-        {dragHandle}
+        {gutter}
         <div className="block-body">
           <ExcalidrawEmbed target={embedDraw} pagePath={pagePath} />
+        </div>
+        {blockMenuNode}
+      </div>
+    )
+  }
+
+  // --- 插件文件类型嵌入(`![[x.mindmap.md]]`)→ 插件只读预览块(✕ 只移除块,不删文件) ---
+  if (embedPlugin) {
+    return (
+      <div
+        ref={setNodeRef}
+        className="block-host"
+        data-block-id={blockId}
+        data-selected={selected || undefined}
+        data-embed
+        data-menu={blockMenu ? '' : undefined}
+        data-dragging={isDragging || undefined}
+        style={{ transform: CSS.Translate.toString(transform), transition }}
+        onContextMenu={onCtxMenu}
+        onFocusCapture={() => { if (useBlockSelection.getState().ids.size) useBlockSelection.getState().clear() }}
+      >
+        {isDropTarget && <div className="drop-line" />}
+        {blockEdges}
+        {gutter}
+        <div className="block-body">
+          <PluginEmbed target={embedPlugin} pagePath={pagePath} />
         </div>
         {blockMenuNode}
       </div>
@@ -338,11 +406,11 @@ export const BlockHost = memo(function BlockHost({
         data-dragging={isDragging || undefined}
         style={{ transform: CSS.Translate.toString(transform), transition }}
         onContextMenu={onCtxMenu}
-        onFocusCapture={() => { if (useBlockSelection.getState().id) useBlockSelection.getState().select(null) }}
+        onFocusCapture={() => { if (useBlockSelection.getState().ids.size) useBlockSelection.getState().clear() }}
       >
         {isDropTarget && <div className="drop-line" />}
         {blockEdges}
-        {dragHandle}
+        {gutter}
         <div className="block-body">
           {embedFile.kind === 'other' ? (
             <button
@@ -366,13 +434,26 @@ export const BlockHost = memo(function BlockHost({
                 </button>
                 <button
                   className="embed-media-btn"
-                  onClick={() => pagePath && void amadeus.openAttachment(pagePath, embedFile.name)}
+                  title={embedFile.kind === 'pdf' ? '在 Forsion 标签页中打开(可批注)' : '用系统默认程序打开'}
+                  onClick={() => {
+                    // PDF 在应用内新 tab 打开可批注阅读器(openWikiLink 的 .pdf 分支);音视频仍交给系统播放器。
+                    if (embedFile.kind === 'pdf') openWikiLink(embedFile.name, pagePath)
+                    else if (pagePath) void amadeus.openAttachment(pagePath, embedFile.name)
+                  }}
                 >
                   打开 ↗
                 </button>
               </div>
               {previewOpen && embedFile.kind === 'pdf' && (
-                <iframe className="embed-pdf" src={embedFile.url} title={embedFile.name} />
+                pdfVaultPath ? (
+                  <div className="embed-pdf embed-pdf-live">
+                    <Suspense fallback={<div className="embed-pdf-loading">加载 PDF…</div>}>
+                      <PdfEmbedViewer pdfPath={pdfVaultPath} readOnly />
+                    </Suspense>
+                  </div>
+                ) : (
+                  <iframe className="embed-pdf" src={embedFile.url} title={embedFile.name} />
+                )
               )}
               {previewOpen && embedFile.kind === 'video' && (
                 <video className="embed-video" src={embedFile.url} controls preload="metadata" />
@@ -403,11 +484,11 @@ export const BlockHost = memo(function BlockHost({
         data-dragging={isDragging || undefined}
         style={{ transform: CSS.Translate.toString(transform), transition }}
         onContextMenu={onCtxMenu}
-        onFocusCapture={() => { if (useBlockSelection.getState().id) useBlockSelection.getState().select(null) }}
+        onFocusCapture={() => { if (useBlockSelection.getState().ids.size) useBlockSelection.getState().clear() }}
       >
         {isDropTarget && <div className="drop-line" />}
         {blockEdges}
-        {dragHandle}
+        {gutter}
         <div className="block-body embed-body">
           <div className="embed-head">
             <span className="embed-badge" title="跨笔记嵌入（只读）">
@@ -468,11 +549,11 @@ export const BlockHost = memo(function BlockHost({
       data-dragging={isDragging || undefined}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       onContextMenu={onCtxMenu}
-        onFocusCapture={() => { if (useBlockSelection.getState().id) useBlockSelection.getState().select(null) }}
+        onFocusCapture={() => { if (useBlockSelection.getState().ids.size) useBlockSelection.getState().clear() }}
     >
       {isDropTarget && <div className="drop-line" />}
       {blockEdges /* 七个 embed 分支都有,唯独普通块(text)漏了 → text 块左右分栏从来没有落点(实报根因) */}
-      {dragHandle}
+      {gutter}
       <div className="block-body">
         {Editor ? (
           <Editor

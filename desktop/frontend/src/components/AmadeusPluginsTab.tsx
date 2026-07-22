@@ -217,6 +217,12 @@ const PluginDetail: React.FC<{ plugin: AmadeusPlugin; onBack: () => void }> = ({
           <Markdown content={p.readme} />
         </div>
       )}
+      {p.changelog && (
+        <details style={{ borderTop: 'var(--border-width) solid var(--border)', paddingTop: 12 }}>
+          <summary style={{ cursor: 'pointer', fontWeight: 600, userSelect: 'none' }}>更新日志</summary>
+          <div style={{ paddingTop: 8 }}><Markdown content={p.changelog} /></div>
+        </details>
+      )}
     </div>
   )
 }

@@ -11,7 +11,7 @@ import { PRODUCT } from './product'
 import { useTheme } from './stores/themeStore'
 import { cycleLocale, useI18n } from './i18n'
 import { ChatView } from './views/ChatView'
-import { MemoryPanelView, SubchatsView } from './views/RightViews'
+import { MemoryPanelView, SubchatsView, SessionFilesView } from './views/RightViews'
 import { WorkspaceView, OutlineView } from './views/WorkspaceView'
 import { NewTabView } from './views/NewTabView'
 import { HomeEmptyView } from './views/HomeEmpty'
@@ -19,6 +19,7 @@ import { WeChatSpecialView, AgentsDetailSpecialView, WorkspaceDetailSpecialView 
 import { AmadeusEditorView, AmadeusBacklinksView } from './amadeusViews'
 import { AmadeusDbView } from './views/AmadeusDbView'
 import { AmadeusDrawingView } from './views/AmadeusDrawingView'
+import { AmadeusPluginFileView } from './views/AmadeusPluginFileView'
 import { AmadeusPdfView } from './views/AmadeusPdfView'
 import { AmadeusSearchView, AmadeusTagsView, AmadeusLocalGraphView } from './amadeusPanels'
 import { CalendarView } from './views/CalendarView'
@@ -76,6 +77,7 @@ export function installEngine(): void {
   // 右栏视图(可关,可重开)
   if (PRODUCT.spaces.includes('tangu')) registerView({ type: 'memory', displayName: () => app().tr('panel.tab.memory'), icon: BookOpen, factory: () => <MemoryPanelView />, singleton: true })
   if (PRODUCT.spaces.includes('tangu')) registerView({ type: 'subchats', displayName: () => app().tr('panel.tab.subchats'), icon: MessageCircle, factory: () => <SubchatsView />, singleton: true })
+  if (PRODUCT.spaces.includes('tangu')) registerView({ type: 'session-files', displayName: () => app().tr('panel.tab.workspace'), icon: FolderOpen, factory: () => <SessionFilesView />, singleton: true })
   // 主区特殊视图(按需从侧栏打开,不进默认布局)
   if (PRODUCT.spaces.includes('tangu')) registerView({ type: 'wechat', displayName: () => app().tr('special.wechat.title'), icon: Smartphone, factory: () => <WeChatSpecialView />, singleton: true })
   if (PRODUCT.spaces.includes('tangu')) registerView({ type: 'agents-detail', displayName: () => app().tr('special.agents.title'), icon: Bot, factory: () => <AgentsDetailSpecialView />, singleton: true })
@@ -117,6 +119,9 @@ export function installEngine(): void {
     registerView({ type: 'amadeus-drawing', displayName: () => app().tr('view.drawing'), icon: PenTool, factory: (props) => <AmadeusDrawingView {...props} /> })
     // 独立 PDF 视图(多实例,params.pdfPath 认领文件;树上点 .pdf / 笔记里点 [[x.pdf#page=N]] 打开,见 amadeusNav.openPdf)。
     registerView({ type: 'amadeus-pdf', displayName: () => 'PDF', icon: FileText, factory: (props) => <AmadeusPdfView {...props} /> })
+    // 通用「插件文件类型」视图(多实例,params.filePath 认领文件;树上点插件声明的文件类型 / 笔记里点
+    // ![[x.ext]] 打开,见 amadeusNav.openFile + 插件的 ctx.registerFileType)。一个视图服务所有插件文件类型。
+    registerView({ type: 'amadeus-plugin-file', displayName: () => (document.documentElement.lang.startsWith('zh') ? '插件文件' : 'Plugin File'), icon: FileText, factory: (props) => <AmadeusPluginFileView {...props} /> })
     registerView({ type: 'amadeus-backlinks', displayName: () => app().tr('amadeus.backlinks'), icon: Link2, factory: () => <AmadeusBacklinksView />, singleton: true })
     registerView({ type: 'amadeus-search', displayName: () => app().tr('amadeus.search'), icon: Search, factory: () => <AmadeusSearchView />, singleton: true })
     registerView({ type: 'amadeus-tags', displayName: () => app().tr('amadeus.tags'), icon: Hash, factory: () => <AmadeusTagsView />, singleton: true })
@@ -174,7 +179,8 @@ export function installEngine(): void {
   addRibbonIcon({ id: 'rb-search', side: 'bottom', icon: Search, tooltip: () => '快速查找', onClick: () => useQuickFind.getState().openPalette() })
   if (window.tangu?.marketList) addRibbonIcon({ id: 'rb-market', side: 'bottom', icon: Store, tooltip: () => app().tr('market.title'), onClick: () => app().openMarket() })
   addRibbonIcon({ id: 'rb-achievements', side: 'bottom', icon: Trophy, tooltip: () => app().tr('achievements.title'), onClick: () => app().openAchievements() })
-  addRibbonIcon({ id: 'rb-mode', side: 'bottom', icon: Moon, tooltip: () => app().tr('theme.changeMode'), onClick: () => useTheme.getState().toggleMode() })
+  // 主题锁定明暗时 toggleMode 静默无效 → tooltip 改说明「由主题决定」,悬停即知为何点不动(codex Low-2)。
+  addRibbonIcon({ id: 'rb-mode', side: 'bottom', icon: Moon, tooltip: () => useTheme.getState().modeLocked ? app().tr('settings.theme.modeLocked') : app().tr('theme.changeMode'), onClick: () => useTheme.getState().toggleMode() })
   addRibbonIcon({ id: 'rb-locale', side: 'bottom', icon: Languages, tooltip: () => app().tr('locale.toggleTitle'), onClick: () => cycleLocale() })
   if (window.tangu?.submitFeedback) addRibbonIcon({ id: 'rb-feedback', side: 'bottom', icon: MessageSquare, tooltip: () => app().tr('feedback.title'), onClick: () => app().openFeedback() })
   addRibbonIcon({ id: 'rb-cmd', side: 'bottom', icon: CommandIcon, tooltip: () => app().tr('command.palette'), onClick: openCommandPalette })

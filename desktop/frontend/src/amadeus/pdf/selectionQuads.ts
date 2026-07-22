@@ -37,8 +37,8 @@ export function mergeLineRects(rects: Box[]): Box[] {
   return lines.flatMap((l) => l.segs.map((s) => ({ left: s.left, top: l.top, right: s.right, bottom: l.bottom })))
 }
 
-/** 页内容盒(选区/点击坐标的参考系);页未渲染时返回 null(跳过)。 */
-const frameOf = (pv: any): DOMRect | null => {
+/** 页内容盒(选区/点击/手写坐标的参考系);页未渲染时返回 null(跳过)。 */
+export const frameOf = (pv: any): DOMRect | null => {
   const el: HTMLElement | null = pv?.textLayer?.div ?? pv?.div?.querySelector('.canvasWrapper') ?? null
   return el ? el.getBoundingClientRect() : null
 }

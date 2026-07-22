@@ -75,6 +75,25 @@ export function decide(
   return local === remote.hash ? { kind: 'adopt' } : { kind: 'conflict' }
 }
 
+import { diff3Merge } from 'node-diff3'
+
+/** diff3 行级三方合并;有冲突块 → null(绝不把冲突标记写进笔记)。 */
+export function mergeText3(ours: string, base: string, theirs: string): string | null {
+  const regions = diff3Merge(ours.split('\n'), base.split('\n'), theirs.split('\n'), { excludeFalseConflicts: true })
+  const out: string[] = []
+  for (const r of regions as Array<{ ok?: string[]; conflict?: unknown }>) {
+    if (r.conflict) return null
+    if (r.ok) out.push(...r.ok)
+  }
+  return out.join('\n')
+}
+
+/** 删除保护阈值:全量对账计划里的删除数是否大到必须人工确认。
+ *  ponytail: 双规则(绝对 200 / 已跟踪数的半数且 ≥5);误挡 = 状态条一次「确认删除」。 */
+export function shouldTripMassDelete(delCount: number, tracked: number, absMax = 200): boolean {
+  return delCount >= absMax || (tracked >= 5 && delCount >= Math.max(5, Math.ceil(tracked / 2)))
+}
+
 /** 冲突副本路径:`a/b/Note.md` → `a/b/Note (conflict 2026-07-10 1532).md`。 */
 export function conflictCopyPath(serverPath: string, now: Date): string {
   const slash = serverPath.lastIndexOf('/')

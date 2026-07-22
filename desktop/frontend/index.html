@@ -13,7 +13,16 @@
       // 避免主题/暗色闪烁。合法性由 registry 启动后兜底纠正。双轴 = 语言(lovable/soft) × 配色(cream/coral/teal/lavender/custom)。
       (function () {
         try {
-          var mode = localStorage.getItem('forsion_theme') === 'dark' ? 'dark' : 'light';
+          // 明暗偏好 pref(可 system=跟随系统):forced_scheme(主题锁定值)优先,再 pref,再老键。
+          // 每个候选都校验合法值(与 registry 一致),避免脏值(如 'rainbow')被当成 system 而与 store 解析分叉。
+          var VM = { light: 1, dark: 1, system: 1 };
+          var forced = localStorage.getItem('forsion_theme_forced_scheme');
+          var prefRaw = localStorage.getItem('forsion_theme_pref');
+          var legacy = localStorage.getItem('forsion_theme');
+          var pref = VM[forced] ? forced : (VM[prefRaw] ? prefRaw : ((legacy === 'light' || legacy === 'dark') ? legacy : 'light'));
+          // system → 立刻按系统明暗解析,避免首帧闪(store 合并磁盘 manifest 后会再核一次)。
+          var mode = pref === 'dark' ? 'dark' : pref === 'light' ? 'light'
+            : ((window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light');
           var glass = localStorage.getItem('forsion_glass') === 'off' ? 'off' : 'on';
           var flat = localStorage.getItem('forsion_theme_flat') !== '0' ? '1' : '0';
           // 旧单轴 preset → (语言,配色) 迁移兜底(新键缺失时)。

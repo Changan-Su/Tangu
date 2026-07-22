@@ -27,6 +27,7 @@ import { transcribeViaOpenAI, transcribeViaForsion } from './asr'
 import { localModelReady, localModelSize, downloadLocalModel, removeLocalModel, transcribeLocal } from './asrLocal'
 // Amadeus Space:vendored 笔记后端(vault IPC + 资产协议)。renderImport 别名后保持 verbatim。
 import { registerIpc as registerAmadeusIpc } from './amadeus/ipc'
+import { registerRemoteSync } from './remotesyncIpc'
 import { logActivity, setActivityLogEnabled, pruneActivity, exportActivity, flushAllNoteEdits } from './activityLog'
 import { KNOWN_APPS } from '../shared/knownApps'
 import { registerAssetSchemes as registerAmadeusAssetSchemes, registerAssetProtocol as registerAmadeusAssetProtocol } from './amadeus/assetProtocol'
@@ -560,6 +561,12 @@ function denyExternal({ url }: { url: string }): { action: 'deny' } {
   return { action: 'deny' }
 }
 
+/** 拖入 OS 文件的默认导航会把 SPA 冲掉;SPA 自身从不整页导航到 file:,一律拦下
+ *  (渲染层 fileDropGuard 已兜底,这里主进程各窗再加一道)。 */
+function hardenNav(wc: Electron.WebContents): void {
+  wc.on('will-navigate', (e, url) => { if (url.startsWith('file:')) e.preventDefault() })
+}
+
 function createWindow(): void {
   // Windows/Linux 默认会渲染 File/Edit/View/Window 菜单条;macOS 菜单在系统栏(不在窗口内)。
   // 置空菜单让 Windows/Linux 与 macOS 观感一致(无窗口内菜单条);文本框的复制/粘贴等由 Chromium 原生处理,不依赖菜单。
@@ -582,6 +589,7 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.setWindowOpenHandler(denyExternal)
+  hardenNav(mainWindow.webContents)
 
   // 崩溃自愈:渲染进程被 OOM / GPU 崩溃杀死时,窗口只剩一张白页且不会自己恢复(React ErrorBoundary
   // 只接 JS 渲染异常,接不到进程级死亡)。这里监听进程死亡 + 无响应 + 加载失败,自动 reload 兜底。
@@ -679,6 +687,7 @@ function createDetachedWindow(opts: { id?: string; views?: ViewDesc[]; bounds?: 
   })
   detachedWindows.set(id, win)
   win.webContents.setWindowOpenHandler(denyExternal)
+  hardenNav(win.webContents)
   const persist = (): void => { if (!win.isDestroyed()) upsertDetachedBounds(id, win.getBounds()) }
   win.on('moved', persist)
   win.on('resized', persist)
@@ -730,6 +739,7 @@ function createMiniWindow(): void {
   })
   miniWindow.setAlwaysOnTop(true, 'floating')
   miniWindow.webContents.setWindowOpenHandler(denyExternal)
+  hardenNav(miniWindow.webContents)
   miniWindow.on('moved', onMiniMoved)
   miniWindow.on('closed', () => { console.log('[win] mini closed'); miniWindow = null; miniDock = null; stopMiniPoll() })
   console.log('[win] mini open')
@@ -1714,6 +1724,7 @@ app.whenReady().then(async () => {
   const { getVaultRoot, restartSync } = registerAmadeusIpc(() => mainWindow)
   restartAmadeusSync = restartSync
   registerAmadeusAssetProtocol(getVaultRoot)
+  registerRemoteSync() // 本地库远程同步(remotely-save 式;隔离层见 electron/remotesync/)
   app.on('activate', () => showMainWindow()) // dock/tray 唤起:隐藏则显示,销毁则重建
   // GPU 进程崩溃(Windows 驱动 TDR / 睡眠恢复常见)会级联拖垮渲染器 → 白屏。监听并自愈。
   app.on('child-process-gone', (_e, d) => {

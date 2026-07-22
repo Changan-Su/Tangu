@@ -228,7 +228,7 @@ interface PageState {
   /** Append a cross-note embed cell (`![[target]]`) as a new full-width row. */
   insertEmbed(target: string): void
   duplicateBlock(id: BlockId): void
-  deleteBlock(id: BlockId): void
+  deleteBlock(id: BlockId): Promise<void>
   /** Move a block into a column, before `beforeId` (or to the end when null). */
   moveBlock(id: BlockId, toColId: ColumnId, beforeId: BlockId | null): void
   /** Move a block up/down within its column (keyboard reorder). */

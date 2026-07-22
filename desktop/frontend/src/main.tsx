@@ -4,7 +4,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import './styles/base.css'
 import './amadeus-host.css' // Amadeus Space:vendored 渲染层样式(均 scoped,不碰 Tangu :root)
 import { applyTheme, preloadAllThemes } from './theme/loader'
-import { resolveInitialMode, resolveInitialLang, resolveInitialSkin } from './theme/registry'
+import { resolveInitialEffectiveMode, resolveInitialLang, resolveInitialSkin } from './theme/registry'
 import { useTheme } from './stores/themeStore'
 import { LocaleProvider, resolveInitialLocale } from './i18n'
 import './i18n.generated' // 注册全量翻译字典(渲染前)
@@ -41,7 +41,7 @@ try { persistedLang = localStorage.getItem('forsion_theme_lang') } catch { /* pr
 // 主题/引擎初始化是模块级副作用,跑在 React 挂载之前 —— 任一处抛错都会让 React 永不挂载 = 白屏。
 // 包 try/catch:即便初始化失败也继续挂载(退化样式总好过白屏)。
 try {
-  applyTheme(resolveInitialLang(), resolveInitialSkin(), resolveInitialMode(), { customColor: initSeed })
+  applyTheme(resolveInitialLang(), resolveInitialSkin(), resolveInitialEffectiveMode(), { customColor: initSeed })
   try { document.documentElement.dataset.flat = localStorage.getItem('forsion_theme_flat') !== '0' ? '1' : '0' } catch { /* private mode */ }
   preloadAllThemes()
   document.documentElement.style.removeProperty('background') // 交还给主题 CSS

@@ -1610,6 +1610,47 @@
     {
       "type": "function",
       "function": {
+        "name": "manage_skill",
+        "description": "Create/update/delete/list your OWN local skills — reusable procedural know-how for a CLASS of task (\"how to do X for this user\"). When the user corrects how you work, or you work out a non-obvious technique/workflow worth reusing, capture it with action=\"create\" (or \"update\" an existing one) so future sessions start already knowing; skills load on demand via use_skill. Name at the CLASS level (e.g. \"deploy-forsion-web\"), never a one-off (\"fix-bug-today\"). Do NOT capture environment failures, \"tool X is broken\" claims, or transient errors — they harden into refusals that bite you later. action ∈ create | update | delete | list. create needs name + instructions; update needs slug + instructions. Built-in skills are read-only.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "create",
+                "update",
+                "delete",
+                "list"
+              ],
+              "description": "The operation"
+            },
+            "slug": {
+              "type": "string",
+              "description": "Unique skill id (lowercase alphanumerics and hyphens); required for update/delete, optional for create (derived from name)"
+            },
+            "name": {
+              "type": "string",
+              "description": "Display name (required for create)"
+            },
+            "description": {
+              "type": "string",
+              "description": "One-sentence summary shown in the skill catalog so future-you knows when to load it (recommended)"
+            },
+            "instructions": {
+              "type": "string",
+              "description": "The SKILL.md body — the actual step-by-step how-to (required for create/update)"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "generate_image",
         "description": "Generate an image from a text prompt and show it to the user inline in the chat (rendered as a clickable thumbnail they can enlarge). Use when the user asks to draw, paint, illustrate, render, or generate a picture. Write a vivid, concrete English `prompt`. After the image lands, give a one-sentence caption — do NOT re-describe it in detail, and do NOT call display_file afterwards (it is already shown).",
         "parameters": {
@@ -2007,6 +2048,47 @@
           },
           "required": [
             "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "manage_skill",
+        "description": "Create/update/delete/list your OWN local skills — reusable procedural know-how for a CLASS of task (\"how to do X for this user\"). When the user corrects how you work, or you work out a non-obvious technique/workflow worth reusing, capture it with action=\"create\" (or \"update\" an existing one) so future sessions start already knowing; skills load on demand via use_skill. Name at the CLASS level (e.g. \"deploy-forsion-web\"), never a one-off (\"fix-bug-today\"). Do NOT capture environment failures, \"tool X is broken\" claims, or transient errors — they harden into refusals that bite you later. action ∈ create | update | delete | list. create needs name + instructions; update needs slug + instructions. Built-in skills are read-only.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "create",
+                "update",
+                "delete",
+                "list"
+              ],
+              "description": "The operation"
+            },
+            "slug": {
+              "type": "string",
+              "description": "Unique skill id (lowercase alphanumerics and hyphens); required for update/delete, optional for create (derived from name)"
+            },
+            "name": {
+              "type": "string",
+              "description": "Display name (required for create)"
+            },
+            "description": {
+              "type": "string",
+              "description": "One-sentence summary shown in the skill catalog so future-you knows when to load it (recommended)"
+            },
+            "instructions": {
+              "type": "string",
+              "description": "The SKILL.md body — the actual step-by-step how-to (required for create/update)"
+            }
+          },
+          "required": [
+            "action"
           ]
         }
       }
@@ -4863,6 +4945,47 @@
     {
       "type": "function",
       "function": {
+        "name": "manage_skill",
+        "description": "Create/update/delete/list your OWN local skills — reusable procedural know-how for a CLASS of task (\"how to do X for this user\"). When the user corrects how you work, or you work out a non-obvious technique/workflow worth reusing, capture it with action=\"create\" (or \"update\" an existing one) so future sessions start already knowing; skills load on demand via use_skill. Name at the CLASS level (e.g. \"deploy-forsion-web\"), never a one-off (\"fix-bug-today\"). Do NOT capture environment failures, \"tool X is broken\" claims, or transient errors — they harden into refusals that bite you later. action ∈ create | update | delete | list. create needs name + instructions; update needs slug + instructions. Built-in skills are read-only.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "create",
+                "update",
+                "delete",
+                "list"
+              ],
+              "description": "The operation"
+            },
+            "slug": {
+              "type": "string",
+              "description": "Unique skill id (lowercase alphanumerics and hyphens); required for update/delete, optional for create (derived from name)"
+            },
+            "name": {
+              "type": "string",
+              "description": "Display name (required for create)"
+            },
+            "description": {
+              "type": "string",
+              "description": "One-sentence summary shown in the skill catalog so future-you knows when to load it (recommended)"
+            },
+            "instructions": {
+              "type": "string",
+              "description": "The SKILL.md body — the actual step-by-step how-to (required for create/update)"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "generate_image",
         "description": "Generate an image from a text prompt and show it to the user inline in the chat (rendered as a clickable thumbnail they can enlarge). Use when the user asks to draw, paint, illustrate, render, or generate a picture. Write a vivid, concrete English `prompt`. After the image lands, give a one-sentence caption — do NOT re-describe it in detail, and do NOT call display_file afterwards (it is already shown).",
         "parameters": {
@@ -6318,6 +6441,47 @@
           },
           "required": [
             "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "manage_skill",
+        "description": "Create/update/delete/list your OWN local skills — reusable procedural know-how for a CLASS of task (\"how to do X for this user\"). When the user corrects how you work, or you work out a non-obvious technique/workflow worth reusing, capture it with action=\"create\" (or \"update\" an existing one) so future sessions start already knowing; skills load on demand via use_skill. Name at the CLASS level (e.g. \"deploy-forsion-web\"), never a one-off (\"fix-bug-today\"). Do NOT capture environment failures, \"tool X is broken\" claims, or transient errors — they harden into refusals that bite you later. action ∈ create | update | delete | list. create needs name + instructions; update needs slug + instructions. Built-in skills are read-only.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "create",
+                "update",
+                "delete",
+                "list"
+              ],
+              "description": "The operation"
+            },
+            "slug": {
+              "type": "string",
+              "description": "Unique skill id (lowercase alphanumerics and hyphens); required for update/delete, optional for create (derived from name)"
+            },
+            "name": {
+              "type": "string",
+              "description": "Display name (required for create)"
+            },
+            "description": {
+              "type": "string",
+              "description": "One-sentence summary shown in the skill catalog so future-you knows when to load it (recommended)"
+            },
+            "instructions": {
+              "type": "string",
+              "description": "The SKILL.md body — the actual step-by-step how-to (required for create/update)"
+            }
+          },
+          "required": [
+            "action"
           ]
         }
       }
@@ -9487,6 +9651,47 @@
     {
       "type": "function",
       "function": {
+        "name": "manage_skill",
+        "description": "Create/update/delete/list your OWN local skills — reusable procedural know-how for a CLASS of task (\"how to do X for this user\"). When the user corrects how you work, or you work out a non-obvious technique/workflow worth reusing, capture it with action=\"create\" (or \"update\" an existing one) so future sessions start already knowing; skills load on demand via use_skill. Name at the CLASS level (e.g. \"deploy-forsion-web\"), never a one-off (\"fix-bug-today\"). Do NOT capture environment failures, \"tool X is broken\" claims, or transient errors — they harden into refusals that bite you later. action ∈ create | update | delete | list. create needs name + instructions; update needs slug + instructions. Built-in skills are read-only.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "create",
+                "update",
+                "delete",
+                "list"
+              ],
+              "description": "The operation"
+            },
+            "slug": {
+              "type": "string",
+              "description": "Unique skill id (lowercase alphanumerics and hyphens); required for update/delete, optional for create (derived from name)"
+            },
+            "name": {
+              "type": "string",
+              "description": "Display name (required for create)"
+            },
+            "description": {
+              "type": "string",
+              "description": "One-sentence summary shown in the skill catalog so future-you knows when to load it (recommended)"
+            },
+            "instructions": {
+              "type": "string",
+              "description": "The SKILL.md body — the actual step-by-step how-to (required for create/update)"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "generate_image",
         "description": "Generate an image from a text prompt and show it to the user inline in the chat (rendered as a clickable thumbnail they can enlarge). Use when the user asks to draw, paint, illustrate, render, or generate a picture. Write a vivid, concrete English `prompt`. After the image lands, give a one-sentence caption — do NOT re-describe it in detail, and do NOT call display_file afterwards (it is already shown).",
         "parameters": {
@@ -10942,6 +11147,47 @@
           },
           "required": [
             "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "manage_skill",
+        "description": "Create/update/delete/list your OWN local skills — reusable procedural know-how for a CLASS of task (\"how to do X for this user\"). When the user corrects how you work, or you work out a non-obvious technique/workflow worth reusing, capture it with action=\"create\" (or \"update\" an existing one) so future sessions start already knowing; skills load on demand via use_skill. Name at the CLASS level (e.g. \"deploy-forsion-web\"), never a one-off (\"fix-bug-today\"). Do NOT capture environment failures, \"tool X is broken\" claims, or transient errors — they harden into refusals that bite you later. action ∈ create | update | delete | list. create needs name + instructions; update needs slug + instructions. Built-in skills are read-only.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "create",
+                "update",
+                "delete",
+                "list"
+              ],
+              "description": "The operation"
+            },
+            "slug": {
+              "type": "string",
+              "description": "Unique skill id (lowercase alphanumerics and hyphens); required for update/delete, optional for create (derived from name)"
+            },
+            "name": {
+              "type": "string",
+              "description": "Display name (required for create)"
+            },
+            "description": {
+              "type": "string",
+              "description": "One-sentence summary shown in the skill catalog so future-you knows when to load it (recommended)"
+            },
+            "instructions": {
+              "type": "string",
+              "description": "The SKILL.md body — the actual step-by-step how-to (required for create/update)"
+            }
+          },
+          "required": [
+            "action"
           ]
         }
       }

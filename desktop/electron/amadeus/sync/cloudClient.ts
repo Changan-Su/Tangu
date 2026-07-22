@@ -132,8 +132,11 @@ export function createCloudClient(cfg: CloudClientConfig) {
       })
     },
 
-    async deleteFile(vaultId: string, path: string): Promise<void> {
-      await request('DELETE', `${api}/vaults/${vaultId}/file?${q({ path })}`)
+    /** 条件删(baseSeq 不符 → 409 {code, seq};旧服务端忽略参数 = 原无条件语义)。 */
+    async deleteFile(vaultId: string, path: string, baseSeq?: number): Promise<void> {
+      const params: Record<string, string> = { path }
+      if (baseSeq !== undefined) params.baseSeq = String(baseSeq)
+      await request('DELETE', `${api}/vaults/${vaultId}/file?${q(params)}`)
     },
 
     move(vaultId: string, from: string, to: string): Promise<{ seq: number }> {
@@ -152,12 +155,31 @@ export function createCloudClient(cfg: CloudClientConfig) {
       await request('DELETE', `${api}/vaults/${vaultId}/folders?${q({ path })}`)
     },
 
-    putBinary(vaultId: string, path: string, bytes: Buffer, ifAbsent = false): Promise<{ path: string; size: number; seq: number }> {
+    /** CAS 写二进制(baseSeq 同文本契约)。409 → CloudHttpError,body = {code, seq, hash}(无字节)。
+     *  不带 baseSeq = 旧无条件覆盖(仅限明知无并发的场合)。 */
+    putBinary(
+      vaultId: string,
+      path: string,
+      bytes: Buffer,
+      opts?: { ifAbsent?: boolean; baseSeq?: number },
+    ): Promise<{ path: string; size: number; seq: number }> {
       const form = new FormData()
       form.set('path', path)
-      if (ifAbsent) form.set('ifAbsent', 'true')
+      if (opts?.ifAbsent) form.set('ifAbsent', 'true')
+      if (opts?.baseSeq !== undefined) form.set('baseSeq', String(opts.baseSeq))
       form.set('file', new Blob([new Uint8Array(bytes)]), path.split('/').pop() || 'file')
       return request('POST', `${api}/vaults/${vaultId}/binary`, { form, timeoutMs: 120_000 })
+    },
+
+    /** 文本版本快照列表(新→旧)。冲突合并用它按 seq 找 base。 */
+    async listVersions(vaultId: string, path: string): Promise<Array<{ id: string; seq: number }>> {
+      const j = await request('GET', `${api}/vaults/${vaultId}/file/versions?${q({ path })}`)
+      return (j.versions ?? []).map((v: any) => ({ id: String(v.id), seq: Number(v.seq ?? 0) }))
+    },
+
+    async getVersion(vaultId: string, versionId: string): Promise<string> {
+      const j = await request('GET', `${api}/vaults/${vaultId}/file/versions/${versionId}`)
+      return String(j.content ?? '')
     },
 
     /** 精确路径取资产字节(ref=vault 相对路径,不传 page → 命中 exact 候选)。 */

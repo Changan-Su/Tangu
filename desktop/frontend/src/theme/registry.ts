@@ -150,10 +150,46 @@ export function resolveInitialSkin(): string {
   return DEFAULT_SKIN;
 }
 
-export function resolveInitialMode(): 'light' | 'dark' {
+/** 明暗偏好(用户可选 system=跟随系统);真源 forsion_theme_pref,回退老键 forsion_theme(纯明暗)。 */
+export function resolveInitialModePref(): 'light' | 'dark' | 'system' {
   try {
-    const raw = localStorage.getItem('forsion_theme');
-    if (raw === 'dark' || raw === 'light') return raw;
+    const p = localStorage.getItem('forsion_theme_pref');
+    if (p === 'light' || p === 'dark' || p === 'system') return p;
+    const legacy = localStorage.getItem('forsion_theme'); // 老用户显式明暗,平滑迁移为等价偏好
+    if (legacy === 'light' || legacy === 'dark') return legacy;
   } catch { /* private mode */ }
   return 'light';
+}
+
+/** system 偏好解析为当前系统明暗;非浏览器环境兜底 light。 */
+export function systemMode(): 'light' | 'dark' {
+  try { return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
+  catch { return 'light'; }
+}
+
+/** 用户偏好解析后的明暗(偏好=system 时取系统值)。不含主题强制。 */
+export function resolveInitialMode(): 'light' | 'dark' {
+  const pref = resolveInitialModePref();
+  return pref === 'system' ? systemMode() : pref;
+}
+
+/**
+ * 首屏**落地**明暗:forced_scheme(上次会话锁定主题的强制值)> 用户偏好 > 老键。
+ * bootstrap 与 store 初始 mode 都用它 —— 否则会先按用户偏好(忽略强制)渲染一帧,
+ * 待磁盘 manifest 异步合并后才被 initThemes 纠回强制值 → 慢盘下可见闪(codex High-1)。
+ * 与 index.html 首屏脚本同一优先级,保持一致。
+ */
+export function resolveInitialEffectiveMode(): 'light' | 'dark' {
+  try {
+    const forced = localStorage.getItem('forsion_theme_forced_scheme');
+    if (forced === 'light' || forced === 'dark') return forced;
+    if (forced === 'system') return systemMode();
+  } catch { /* private mode */ }
+  return resolveInitialMode();
+}
+
+/** 主题 manifest 锁定的 colorScheme(校验后;磁盘 manifest 不可信)。store 与设置面板共用,避免各判各的。 */
+export function forcedSchemeForLanguage(lang: string): 'light' | 'dark' | 'system' | undefined {
+  const cs = getLanguage(lang)?.manifest.colorScheme;
+  return cs === 'system' || cs === 'light' || cs === 'dark' ? cs : undefined;
 }

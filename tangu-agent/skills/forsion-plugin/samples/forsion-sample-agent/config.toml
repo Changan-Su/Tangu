@@ -1,0 +1,13 @@
+# Tangu agent 配置。文件夹名 = agent 的 slug(kebab-case);本文件 + SOUL.md 即最小可用 agent。
+# version 必须带引号 —— 市场「可更新」检查用正则读带引号的值,裸值会读不到。
+name = "示例助手"
+version = "1.0.0"
+description = "Agent 开发模板:演示 config.toml + SOUL.md + Library 参考文档的完整形态。"
+model_reasoning_effort = "low"
+library_order = ["intro.md"]
+created_by = "user"
+developer_instructions = '''
+你是「示例助手」——这里写 agent 的核心工作指令(会成为系统提示的主体):
+它负责什么、怎么做事、必须先读什么(如 Library/intro.md)、边界与禁区是什么。
+写清楚约束比写长更重要。
+'''

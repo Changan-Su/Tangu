@@ -22,6 +22,7 @@ import { hostProcessProvider } from './builtin/hostProcess.js';
 import { delegateProvider } from './builtin/delegate.js';
 import { interactionProvider } from './builtin/interaction.js';
 import { manageAgentProvider } from './builtin/manageAgent.js';
+import { manageSkillProvider } from './builtin/manageSkill.js';
 import { museTodoProvider } from './builtin/museTodo.js';
 import { wechatToolsProvider } from './builtin/wechatTools.js';
 import { applyPatchProvider } from './builtin/applyPatch.js';
@@ -128,6 +129,7 @@ registerToolProvider(wechatToolsProvider); // host-only:微信远程会话里发
 registerToolProvider(applyPatchProvider); // both:结构化补丁编辑(云端+host 共用,append 末尾,保前缀缓存)
 registerToolProvider(discussProvider); // host-only:start_discussion/wait_discussion(分身进后台群聊讨论;append 末尾,保前缀缓存)
 registerToolProvider(displayFileProvider); // both:display_file 在桌面对话区展示文件给用户(append 末尾,保前缀缓存)
+registerToolProvider(manageSkillProvider); // host-only:把「这类活怎么干」沉淀成本地技能(append 末尾,保前缀缓存)
 registerToolProvider(imageGenProvider); // both:generate_image 文生图→落盘+对话区展示(append 末尾,保前缀缓存)
 registerToolProvider(inboxSendProvider); // 本地限定:inbox_send 发消息进用户收件箱、可定时(append 末尾,保前缀缓存)
 registerToolProvider(browserUseProvider); // host-only:browser_task 委派整包网页任务给 browser-use 自主 agent(真实 Chrome;append 末尾,保前缀缓存)

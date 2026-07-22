@@ -6,6 +6,7 @@ import { useWorkspace, activeMainPanel } from '@lcl/engine'
 import { amadeus } from '@amadeus/api'
 import { askString } from '@amadeus/components/askString'
 import { BLANK_SCENE_JSON, blankDrawing, isDrawingPath } from '@amadeus-shared/excalidraw/format'
+import { matchFileType } from '@amadeus/plugins/pluginStore'
 import { act, actThrottled } from './activity/log'
 import { track } from './achievements/store'
 
@@ -15,6 +16,11 @@ export async function openNote(path: string, opts?: { newTab?: boolean }): Promi
   // 画板文件绝不进笔记编辑器(compiler 会把插件载荷改写成块 = 在 Obsidian 那边毁档)→ 一律改道白板视图。
   if (isDrawingPath(path)) {
     openDrawing(path)
+    return
+  }
+  // 插件声明的文件类型(如 .mindmap.md)同理:磁盘是 .md 但绝不进笔记编辑器 → 改道其专属文件类型视图。
+  if (matchFileType(path)) {
+    openFile(path)
     return
   }
   actThrottled('view.open', { f: path }, `view.open|${path}`)
@@ -81,6 +87,32 @@ export function openDrawing(drawingPath: string): void {
     return
   }
   ws.openView('amadeus-drawing', { drawingPath }, 'main')
+}
+
+/** 打开一个「插件文件类型」文件(如 .mindmap.md)到通用 amadeus-plugin-file 视图:已有认领该文件的 tab
+ *  → 激活;否则主区打开。新建后打开时该文件可能还没进结构 → 先刷新树再开。非插件文件类型回落系统默认程序。 */
+export function openFile(path: string): void {
+  if (!matchFileType(path)) {
+    void amadeus.openVaultFile(path).catch(() => {})
+    return
+  }
+  const ps = usePageStore.getState()
+  const norm = path.replace(/\\/g, '/')
+  const known =
+    ps.files.some((f) => f.replace(/\\/g, '/') === norm) || ps.pages.some((p) => p.replace(/\\/g, '/') === norm)
+  const go = (): void => {
+    actThrottled('view.open', { f: path }, `view.open|${path}`)
+    const ws = useWorkspace.getState()
+    const api = (ws as unknown as { api?: { panels: PanelLike[] } }).api
+    const hit = api?.panels.find((p) => p.params?.__type === 'amadeus-plugin-file' && p.params?.filePath === path)
+    if (hit) {
+      ws.activateLeaf(hit.id)
+      return
+    }
+    ws.openView('amadeus-plugin-file', { filePath: path }, 'main')
+  }
+  if (known) go()
+  else void ps.refreshStructure().then(go)
 }
 
 /** 新建白板(.excalidraw.md),建成即打开;返回 vault 相对路径(取消/失败 null)。

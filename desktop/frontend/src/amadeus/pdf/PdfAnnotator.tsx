@@ -3,8 +3,9 @@
  * 所有批注写进 PDF 本身(原生注释对象)→ 任何阅读器可见。两条写入路径,单一串行队列防双写:
  *  - pdf.js 原生编辑器:高亮(HIGHLIGHT)/添加文字(FREETEXT)→ 防抖 saveDocument() 覆盖写回;
  *  - pdf-lib(pdfMarkup.ts):下划线/波浪线/删除线(选区 QuadPoints)、便签(/Text)、书签(Outline)、
- *    形状(/Square /Circle /Line + /AP)→ 先 flush pdf.js 待存内容,再改字节,写回后【必须】swapDoc 重载
- *    (否则 pdf.js 基线过期,下次 saveDocument 会把 pdf-lib 写的内容丢掉)。
+ *    形状(/Square /Circle /Line + /AP)、手写(/Ink,Excalidraw 手感)→ 先 flush pdf.js 待存内容,
+ *    再改字节,写回后【必须】swapDoc 重载(否则 pdf.js 基线过期,下次 saveDocument 会把 pdf-lib 写的内容丢掉)。
+ *    手写为免每笔一次重载打断连续书写,笔画先攒在预览层,防抖/切工具/卸载时整批入队。
  */
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 // ⚠️必须用 legacy 构建:pdf.js 5.7 用了 TC39 `Map.prototype.getOrInsertComputed`(upsert 提案),
@@ -21,14 +22,19 @@ import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
 import pdfViewerCss from 'pdfjs-dist/legacy/web/pdf_viewer.css?inline'
 import './pdfAnnotator.css'
 import {
-  BookmarkPlus, Circle, Highlighter, Minus, MousePointer2, MoveUpRight, PanelLeft, Square,
+  BookmarkPlus, Circle, Eraser, Highlighter, Minus, MousePointer2, MoveUpRight, PanelLeft, PenLine, Square,
   StickyNote, Strikethrough, Type, Underline as UnderlineIcon, Waves,
 } from 'lucide-react'
 import { buildPdfLink } from '@amadeus-shared/pdfLink'
 import { askString } from '../components/askString'
 import { amadeus } from '../api'
-import { addBookmark, addNote, addShape, addTextMarkup, type MarkupKind, type ShapeKind, type ShapeStyle } from './pdfMarkup'
-import { pageAt, pointOnPage, selectionToQuads } from './selectionQuads'
+import {
+  addBookmark, addInk, addNote, addShape, addTextMarkup,
+  EDITABLE_SUBTYPES, INK_ONLY, MOVABLE_SUBTYPES, removeAnnots, setAnnotContents, translateAnnots,
+  type InkStroke, type MarkupKind, type ShapeKind, type ShapeStyle,
+} from './pdfMarkup'
+import { frameOf, pageAt, pointOnPage, selectionToQuads } from './selectionQuads'
+import { distToFlatSq, distToPointsSq, outlineToSvgPath, strokeOutline } from './inkStroke'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
@@ -52,10 +58,13 @@ function ensureScopedCss(): void {
 /** 调色板(名→色);annotationEditorHighlightColors 需 `k=#hex,` 串。高亮/标记/便签/形状共用。 */
 const PALETTE: ReadonlyArray<readonly [string, string]> = [
   ['黄', '#ffe14d'], ['绿', '#8ce99a'], ['蓝', '#74c0fc'], ['粉', '#ffa8c5'], ['橙', '#ffc078'], ['红', '#ff6b6b'],
+  ['黑', '#1e1e1e'], // Excalidraw 默认墨色,主要给手写笔用
 ]
 const HIGHLIGHT_COLORS = PALETTE.map(([, hex], i) => `c${i}=${hex}`).join(',')
 
-type Tool = 'mouse' | 'highlight' | 'underline' | 'squiggly' | 'strikeout' | 'text' | 'note' | ShapeKind
+type Tool = 'mouse' | 'highlight' | 'underline' | 'squiggly' | 'strikeout' | 'text' | 'note' | 'pen' | 'eraser' | ShapeKind
+/** 手写/橡皮是一对:在两者间切换不触发落盘(待写笔画留在预览层,橡皮可即时擦);切出这一对才提交。 */
+const INK_PAIR: ReadonlySet<Tool> = new Set<Tool>(['pen', 'eraser'])
 const MARKUP_TOOLS: ReadonlySet<Tool> = new Set<Tool>(['underline', 'squiggly', 'strikeout'])
 const SHAPE_TOOLS: ReadonlySet<Tool> = new Set<Tool>(['rect', 'circle', 'line', 'arrow'])
 /** 工具 → pdf.js 编辑器模式(标记/便签/形状走自建管线,编辑器保持 NONE)。 */
@@ -73,6 +82,8 @@ const TOOLS: ReadonlyArray<{ id: Tool; tip: string; Icon: typeof MousePointer2; 
   { id: 'strikeout', tip: '删除线(选中文本即标)', Icon: Strikethrough },
   { id: 'text', tip: '添加文字(点击页面输入)', Icon: Type },
   { id: 'note', tip: '便签评论(点击页面放置)', Icon: StickyNote },
+  { id: 'pen', tip: '手写笔(压感笔迹写进 PDF;支持数位笔)', Icon: PenLine, gap: true },
+  { id: 'eraser', tip: '橡皮(拖过手写笔迹即擦除)', Icon: Eraser },
   { id: 'rect', tip: '矩形(在页面上拖拽)', Icon: Square, gap: true },
   { id: 'circle', tip: '圆形/椭圆(在页面上拖拽)', Icon: Circle },
   { id: 'line', tip: '直线(在页面上拖拽)', Icon: Minus },
@@ -85,6 +96,8 @@ const ZOOMS: ReadonlyArray<{ v: string; label: string }> = [
 ]
 const fmtZoom = (v: string): string => (Number.isNaN(parseFloat(v)) ? v : `${Math.round(parseFloat(v) * 100)}%`)
 const WIDTHS = [1, 2, 3, 5, 8]
+/** 手写笔独立粗细档(pt,视觉宽 ≈ ×4.25):比形状线宽细得多——写小字要极细的档。 */
+const PEN_WIDTHS = [0.35, 0.5, 0.75, 1, 1.5, 2, 3, 5]
 const OPACITIES = [1, 0.75, 0.5, 0.25]
 
 const baseName = (p: string): string => p.split(/[\\/]/).pop() || p
@@ -101,10 +114,48 @@ interface Engine {
   timer: ReturnType<typeof setTimeout> | null
   dirty: boolean
   chain: Promise<void>
+  /** 最近一次成功写盘的字节。卸载时若 dead 挡掉了 swapDoc,doc 会落后于磁盘——尾部兜底必须以它为基线。 */
+  lastBytes: Uint8Array | null
+  /** doc 落后于磁盘(op 写盘成功但 swapDoc 没跑成):尾部兜底禁用 doc.saveDocument() 当基线。 */
+  docStale: boolean
 }
-type WriteOp = (bytes: Uint8Array) => Promise<Uint8Array>
+/** 返回 null = 本步放弃(轮到执行时发现无事可做,例如撤销栈已空):一个字节都不写。 */
+type WriteOp = (bytes: Uint8Array) => Promise<Uint8Array | null>
 
-export function PdfAnnotator({ pdfPath, initialPage }: { pdfPath: string; initialPage?: number }) {
+/** 选中的注释条目;raw = pdf.js 解析的注释对象(拖动实时替身要读 inkLists/lineCoordinates/color)。 */
+interface SelItem { id: string; pageIndex: number; rect: number[]; subtype: string; contents?: string; raw: any }
+
+/** pdf.js 的 inkLists 形态随版本变([{x,y}] 或平铺数组)→ 统一成平铺。 */
+const inkListsOf = (a: any): number[][] => {
+  if (!Array.isArray(a?.inkLists)) return []
+  return a.inkLists
+    .map((l: any) => {
+      if (!l?.length) return []
+      if (typeof l[0] === 'object' && l[0] !== null) return l.flatMap((pt: any) => [pt.x, pt.y])
+      return Array.from(l as ArrayLike<number>)
+    })
+    .filter((l: number[]) => l.length >= 2)
+}
+
+const rgbOf = (c: any): string => (c && c.length >= 3 ? `rgb(${c[0]} ${c[1]} ${c[2]})` : 'rgb(30 30 30)')
+
+/** 页内容盒 → 滚动容器内容坐标系(随内容滚动;叠加层挂在容器里就天然跟手,零滞后)。 */
+function pageBox(viewer: any, container: HTMLElement, pageIndex: number): { left: number; top: number; width: number; height: number; t: number[] } | null {
+  const pv = viewer.getPageView(pageIndex)
+  const frame = pv?.viewport ? frameOf(pv) : null
+  if (!frame) return null
+  const c = container.getBoundingClientRect()
+  return {
+    left: frame.left - c.left + container.scrollLeft,
+    top: frame.top - c.top + container.scrollTop,
+    width: frame.width,
+    height: frame.height,
+    t: pv.viewport.transform as number[],
+  }
+}
+
+/** readOnly:笔记内嵌预览形态——无工具栏/无侧栏/无选中编辑,绝不写盘(防与已打开的批注 tab 双实例互踩)。 */
+export function PdfAnnotator({ pdfPath, initialPage, readOnly }: { pdfPath: string; initialPage?: number; readOnly?: boolean }) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const eng = useRef<Engine | null>(null)
@@ -117,10 +168,31 @@ export function PdfAnnotator({ pdfPath, initialPage }: { pdfPath: string; initia
   const toolRef = useRef<Tool>('mouse')
   const [shape, setShape] = useState<{ fill: boolean; width: number; opacity: number }>({ fill: false, width: 2, opacity: 1 })
   const shapeRef = useRef(shape)
+  const [penOpt, setPenOpt] = useState<{ width: number; opacity: number }>({ width: 0.75, opacity: 1 })
+  const penOptRef = useRef(penOpt)
   const [drag, setDrag] = useState<Drag | null>(null)
-  const [side, setSide] = useState<'thumbs' | 'outline' | null>('thumbs')
+  // 手写笔画三桶记账(高频 push 走 ref 不走 setState,inkTick 只催预览层重画):
+  //   pending    未提交,可 ⌘Z 撤销,卸载时尾部兜底写入;
+  //   committing 已被某次在途写入捕获——不可撤、不可重复提交;失败/中止会退回 pending;
+  //   ghost      已落盘,只在预览层撑到该页 canvas 重画出笔迹(防闪没),谁也不再写它。
+  // ⚠️这些 ref 只是预览层的取景窗:真正的数组每轮 effect 各建各的(见 effect 内 myPending 等),
+  //   pdfPath 切换后旧链的退回/收尾都落在旧数组上,旧档笔画与新档互不可见。
+  const pendingInk = useRef<InkStroke[]>([])
+  const committingInk = useRef<InkStroke[]>([])
+  const ghostInk = useRef<InkStroke[]>([])
+  const liveInk = useRef<InkStroke | null>(null)
+  const commitInkRef = useRef<(() => void) | null>(null)
+  const warmAnnsRef = useRef<(() => void) | null>(null)
+  // 鼠标模式的注释选中(可多选):sel={页, items[]},selDrag=拖动中的位移(PDF 单位),
+  // selMarq=框选矩形(PDF 页坐标),selApi=浮条按钮的回调。
+  const selRef = useRef<{ pageIndex: number; items: SelItem[] } | null>(null)
+  const selDragRef = useRef<{ dx: number; dy: number } | null>(null)
+  const selMarqRef = useRef<{ pageIndex: number; ax: number; ay: number; bx: number; by: number } | null>(null)
+  const selApiRef = useRef<{ del: () => void; edit: () => void; clear: () => void } | null>(null)
+  const [, setInkTick] = useState(0)
+  const [side, setSide] = useState<'thumbs' | 'outline' | null>(readOnly ? null : 'thumbs')
   const [zoomSel, setZoomSel] = useState('page-width')
-  const [docVersion, setDocVersion] = useState(0)
+  const [, setDocVersion] = useState(0) // swapDoc 后催重渲染拿新 doc;不作 key——重挂会把缩略图清白闪一下
   const [copied, setCopied] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [reloadNonce, setReloadNonce] = useState(0) // 重试:重建 viewer 重新读字节(自愈瞬时失败)
@@ -138,14 +210,16 @@ export function PdfAnnotator({ pdfPath, initialPage }: { pdfPath: string; initia
       container,
       eventBus,
       linkService,
-      annotationEditorMode: AnnotationEditorType.NONE, // 默认鼠标模式,工具栏切换
+      // 只读嵌入直接 DISABLE 编辑器机器:NONE 下选中文本仍会弹 pdf.js 浮动「高亮」按钮,
+      // 点了看似成功、实则被 readOnly 的 enqueue 丢弃 = 假编辑入口(codex)。
+      annotationEditorMode: readOnly ? AnnotationEditorType.DISABLE : AnnotationEditorType.NONE,
       annotationEditorHighlightColors: HIGHLIGHT_COLORS,
-      enableHighlightFloatingButton: true, // 选中文本 → 浮动「高亮」按钮
+      enableHighlightFloatingButton: !readOnly, // 选中文本 → 浮动「高亮」按钮(只读不给)
       imageResourcesPath: 'pdfjs-annot/', // /Text 便签图标(public/pdfjs-annot/annotation-*.svg)
       // 以上几项在 v5.7 运行时被读取(pdf_viewer.mjs),.d.mts 类型未收录 → 断言。
     } as any)
     linkService.setViewer(viewer)
-    const state: Engine = { viewer, linkService, eventBus, uiManager: null, doc: null, timer: null, dirty: false, chain: Promise.resolve() }
+    const state: Engine = { viewer, linkService, eventBus, uiManager: null, doc: null, timer: null, dirty: false, chain: Promise.resolve(), lastBytes: null, docStale: false }
     eng.current = state
 
     const flash = (msg: string): void => {
@@ -153,21 +227,74 @@ export function PdfAnnotator({ pdfPath, initialPage }: { pdfPath: string; initia
       window.setTimeout(() => setNotice(null), 2600)
     }
 
-    /** 串行写队列:pdf.js 存档与 pdf-lib 写入互斥排队。op 缺省 = 纯 flush(防抖保存)。 */
-    const enqueue = (op?: WriteOp): Promise<void> => {
+    // 撤销/恢复 = 字节快照栈:每次 pdf-lib 写入把写入前的整份 PDF 入栈,撤销即回放旧字节——
+    // 手写/擦除/形状/标记/便签/书签/移动/改文全覆盖,不用给每种操作写逆操作。
+    // 高亮/添加文字走 pdf.js 编辑器,有它自己的 ⌘Z,不进这套(双系统抢快捷键会乱)。
+    const undoBytes: Uint8Array[] = []
+    const redoBytes: Uint8Array[] = []
+    const redoInk: InkStroke[] = [] // 逐笔撤销出来的待写笔画,⌘⇧Z 逐笔放回
+    const pushHistory = (stack: Uint8Array[], b: Uint8Array): void => {
+      stack.push(b)
+      // ponytail: 每栈按字节总量封顶 ~150MB(大扫描件一份就几十 MB),超了丢最老的;
+      // 写盘失败的恢复不找回被挤掉的旧条目(挤出×失败双重罕见,不值得为它做事务)。
+      let total = stack.reduce((s, x) => s + x.byteLength, 0)
+      while (stack.length > 1 && total > 150 * 1024 * 1024) total -= stack.shift()!.byteLength
+    }
+
+    /** 串行写队列:pdf.js 存档与 pdf-lib 写入互斥排队。op 缺省 = 纯 flush(防抖保存)。
+     *  after(ok) 恰好调一次、无论成败/中止、**且在链内**(尾部兜底排在其后)——手写记账靠它:
+     *  ok=true 字节已在磁盘(哪怕 dead/异常挡了 swapDoc);ok=false 完全没写(退回待写桶)。
+     *  history=true 表示本次 op 是撤销/恢复的回放,不再入撤销栈(否则撤销自己会吃掉栈)。 */
+    const enqueue = (op?: WriteOp, after?: (ok: boolean) => void, history = false): Promise<void> => {
+      if (readOnly) { after?.(false); return Promise.resolve() } // 只读预览:绝不写盘
+      let written = false
+      let fired = false
+      const fire = (ok: boolean): void => {
+        if (fired) return
+        fired = true
+        after?.(ok)
+      }
       const run = state.chain.then(async () => {
-        if (dead || !state.doc) return
-        if (!op && !state.dirty) return
+        if (dead || !state.doc) { fire(false); return }
+        // docStale=上次 swapDoc 没跑成,doc 落后于磁盘:纯 flush 必须压掉(旧 doc+脏内容会盖掉磁盘上
+        // 更新的字节);op 写入则改以磁盘字节为基线。该窗内编辑器未存改动本就随换档丢(既有语义)。
+        if (!op && (!state.dirty || state.docStale)) return
         if (state.timer) { clearTimeout(state.timer); state.timer = null }
+        const wasDirty = state.dirty
         state.dirty = false // 编辑器待存内容随本次 flush 一并落盘
-        const base: Uint8Array = await state.doc.saveDocument()
+        const before = state.lastBytes // 本次写之前的磁盘状态(flush 的撤销快照:base 已含编辑器新内容)
+        const base: Uint8Array = state.docStale && state.lastBytes ? state.lastBytes : await state.doc.saveDocument()
         const next = op ? await op(base) : base
+        if (next === null) { // 历史类 op 轮到时发现无事可做:什么都不动,编辑器脏标还回去(只升不降:await 期间可能又脏了)
+          if (wasDirty) state.dirty = true
+          fire(true)
+          return
+        }
         await amadeus.saveVaultBytes(pdfPath, next)
-        if (op && !dead) await swapDoc(next)
+        state.lastBytes = next
+        written = true
+        if (!history) {
+          // pdf-lib 写入:入栈 base(写前状态);写入时若编辑器有脏内容,before 先单独占一步,
+          // 否则那次高亮/文字改动会并进相邻步一起被撤掉。纯 flush:入栈 before。
+          if (op) {
+            if (wasDirty && before) pushHistory(undoBytes, before)
+            pushHistory(undoBytes, base)
+          } else if (before) {
+            pushHistory(undoBytes, before)
+          }
+          if (op || before) redoBytes.length = 0 // 新写入作废恢复分支(标准撤销语义)
+        }
+        if (op) state.docStale = true // 磁盘领先 doc,直到 swapDoc 追平
+        if (op && !dead) {
+          await swapDoc(next)
+          if (!dead) state.docStale = false // dead 早退时 swapDoc 没装新 doc,stale 必须留着
+        }
+        fire(true)
       }).catch((e: unknown) => {
         state.dirty = true // 失败留脏,下次编辑再试
         console.error('[pdf] 写入失败', e)
         if (!dead) flash('写入失败:此 PDF 可能受保护或已损坏')
+        fire(written) // 写盘成功只是 swap/回调环节炸了 → 对记账而言就是「已落盘」,绝不能退回去重写一遍
       })
       state.chain = run
       return run
@@ -178,7 +305,7 @@ export function PdfAnnotator({ pdfPath, initialPage }: { pdfPath: string; initia
       if (state.timer) clearTimeout(state.timer)
       state.timer = setTimeout(() => void enqueue(), 1500)
     }
-    const markDirty = (): void => { state.dirty = true; scheduleSave() }
+    const markDirty = (): void => { if (readOnly) return; state.dirty = true; scheduleSave() }
 
     // 组件包不监听 switchannotationeditorparams(那是 Firefox 完整版 app.js 的活),
     // 必须自己抓住 uiManager 直接 updateParams,否则高亮调色板点了没反应。
@@ -186,48 +313,156 @@ export function PdfAnnotator({ pdfPath, initialPage }: { pdfPath: string; initia
     const applyHighlightColor = (): void => {
       try { state.uiManager?.updateParams(AnnotationEditorParamsType.HIGHLIGHT_COLOR, colorRef.current) } catch { /* ignore */ }
     }
+    let curScale = 'page-width' // 用户当前缩放(scalechanging 维护);换档恢复只信它,不读 viewer(见 swapDoc 注释)
 
-    /** 挂载文档 + 恢复视图(初载与 pdf-lib 写后重载共用)。 */
-    const attach = (doc: any, keep: { page: number; scale: string; top: number; left: number }): void => {
+    /** 挂载文档(初载与 pdf-lib 写后重载共用)。
+     *  keep='preserve'(写后重载):滚动位置全程**物理保留**——快照层的撑高垫片让内容不塌缩,
+     *  scrollTop 从头到尾没变过,一个坐标都不写回。写回才是偏移/回跳的来源:塌缩把 scrollTop 钳到 0,
+     *  惯性滚动又从 0 接着滚,这时「恢复」与「不恢复」都错(拽回=偏移,放着=回到首页)。
+     *  只在 pagesloaded 后补一个合成 scroll 让 pdf.js 按真实 scrollTop 重算页码
+     *  (setDocument 会把内部页码直写回 1,不广播;scroll 监听是它自己绑在 container 上的)。
+     *  keep={page}(初载):跳到目标页;pagesloaded 且用户没翻页时再钉一次(pagesinit 的页高还是占位值)。 */
+    let offAttach: (() => void) | null = null
+    const attach = (doc: any, keep: { page: number } | 'preserve'): void => {
+      annCache.clear() // 换了文档,橡皮/选择的注释缓存全部作废
+      eraseTrail = [] // 旧文档的擦除轨迹不许重放到新文档上(会误擦轨迹经过处新写的笔画)
+      pendingMarq = null // 未结算的框选同理:旧文档的框不许在新缓存上结算
+      offAttach?.() // 连续换档时上一轮 attach 的 once 监听可能还没触发,不摘会拿着旧 keep 在新文档上乱跳
       viewer.setDocument(doc)
       linkService.setDocument(doc, null)
       ;(doc.annotationStorage as any).onSetModified = markDirty
-      const restore = (): void => {
+      const target = keep === 'preserve' ? 0 : Math.min(doc.numPages, Math.max(1, keep.page))
+      const onInit = (): void => {
         if (dead) return
-        viewer.currentPageNumber = Math.min(doc.numPages, Math.max(1, keep.page))
-        if (keep.top || keep.left) { container.scrollTop = keep.top; container.scrollLeft = keep.left }
-      }
-      eventBus.on('pagesinit', () => {
-        if (dead) return
-        viewer.currentScaleValue = keep.scale
-        try { viewer.annotationEditorMode = { mode: modeOf(toolRef.current) } } catch { /* ignore */ }
+        viewer.currentScaleValue = curScale
+        if (!readOnly) try { viewer.annotationEditorMode = { mode: modeOf(toolRef.current) } } catch { /* ignore */ }
         applyHighlightColor()
-        if (keep.page > 1 || keep.top) restore()
-      }, { once: true })
-      // pagesinit 时页面高度还是占位值,pagesloaded 后再校正一次页码/滚动。
-      eventBus.on('pagesloaded', restore, { once: true })
-      setInfo({ page: Math.min(doc.numPages, Math.max(1, keep.page)), total: doc.numPages })
+        if (target > 1) viewer.currentPageNumber = target
+      }
+      const onLoaded = (): void => {
+        if (dead) return
+        if (keep === 'preserve') container.dispatchEvent(new Event('scroll'))
+        else if (target > 1 && viewer.currentPageNumber === target) viewer.currentPageNumber = target // 占位高→真实高,再钉一次;用户已翻页则不打扰
+      }
+      eventBus.on('pagesinit', onInit, { once: true })
+      eventBus.on('pagesloaded', onLoaded, { once: true })
+      offAttach = () => { eventBus.off('pagesinit', onInit); eventBus.off('pagesloaded', onLoaded) }
+      setInfo((p) => (keep === 'preserve'
+        ? { page: Math.min(p.page, doc.numPages) || 1, total: doc.numPages }
+        : { page: target, total: doc.numPages }))
       setDocVersion((v) => v + 1)
     }
 
-    /** pdf-lib 写后重载:保留页码/缩放/滚动,换新字节的文档(旧 doc 销毁)。 */
-    const swapDoc = async (bytes: Uint8Array): Promise<void> => {
-      const old = state.doc
-      const keep = {
-        page: viewer.currentPageNumber || 1,
-        scale: String(viewer.currentScaleValue || 'page-width'),
-        top: container.scrollTop,
-        left: container.scrollLeft,
+    /** 写后重载防闪:把当前可见页的 canvas 拷成静态快照压在上面,新文档哪页重画完成就撤哪页的快照——
+     *  没有它,setDocument 会先清空再异步重画,每次 pdf-lib 写入(批注/手写/擦除)都白闪一下。
+     *  返回 arm:attach 装上新文档后才调用——旧文档迟到的 pagerendered 不许撤快照(否则闪回);
+     *  连续提交时,还没重画完的页复用上一张快照的像素(此刻活 canvas 可能是半张白纸)。 */
+    let dropHold: (() => void) | null = null
+    let holdOverlay: HTMLDivElement | null = null
+    const holdPages = (): { arm: () => void; cancel: () => void } => {
+      const prev = holdOverlay
+      const cRect = container.getBoundingClientRect()
+      const overlay = document.createElement('div')
+      overlay.className = 'pdfa-hold'
+      // 撑住滚动区:setDocument 清空页面的瞬间内容塌缩,scrollTop 被浏览器钳回 0——用户的惯性滚动
+      // 会从 0 接着滚,事后怎么恢复都两难(见 attach 注释)。垫片把旧文档的滚动尺寸原样撑到新文档
+      // 排版完成,scrollTop 全程连续,换档后一个坐标都不用恢复。
+      const spacer = document.createElement('div')
+      spacer.className = 'pdfa-hold-spacer'
+      spacer.style.width = `${container.scrollWidth}px`
+      spacer.style.height = `${container.scrollHeight}px`
+      overlay.append(spacer)
+      for (let p = 0; p < (viewer.pagesCount ?? 0); p++) {
+        const src: HTMLCanvasElement | undefined = viewer.getPageView(p)?.canvas
+        if (!src) continue
+        const r = src.getBoundingClientRect()
+        if (r.bottom < cRect.top - 200 || r.top > cRect.bottom + 200) continue // 只快照视口附近
+        const source = prev?.querySelector<HTMLCanvasElement>(`[data-hold-page="${p + 1}"]`) ?? src
+        const copy = document.createElement('canvas')
+        copy.width = source.width
+        copy.height = source.height
+        try { copy.getContext('2d')?.drawImage(source, 0, 0) } catch { continue }
+        copy.dataset.holdPage = String(p + 1)
+        copy.style.top = `${r.top - cRect.top + container.scrollTop}px`
+        copy.style.left = `${r.left - cRect.left + container.scrollLeft}px`
+        copy.style.width = `${r.width}px`
+        copy.style.height = `${r.height}px`
+        overlay.append(copy)
       }
-      const doc = await pdfjsLib.getDocument({ data: bytes }).promise
-      if (dead) { void doc.destroy(); return }
+      // 上一张快照里还没被重画掉的页(连续提交时活 canvas 可能整个不在)原节点搬过来,像素和位置都还对。
+      if (prev) {
+        for (const c of Array.from(prev.children) as HTMLElement[]) {
+          const n = c.dataset.holdPage
+          if (n && !overlay.querySelector(`[data-hold-page="${n}"]`)) overlay.append(c)
+        }
+      }
+      dropHold?.() // 旧快照的像素已拷进/搬进新层,才撤旧层
+      container.append(overlay) // 垫片必须挂上(哪怕一页快照都没有):滚动区不许塌缩
+      holdOverlay = overlay
+      let armed = false
+      let docLoaded = false
+      let timer: ReturnType<typeof setTimeout> | null = null
+      const drop = (): void => {
+        if (timer) clearTimeout(timer)
+        eventBus.off('pagerendered', onRendered)
+        eventBus.off('pagesloaded', onDocLoaded)
+        overlay.remove()
+        if (holdOverlay === overlay) holdOverlay = null
+        if (dropHold === drop) dropHold = null
+      }
+      const maybeDrop = (): void => {
+        // 快照页全重画完 **且** 新文档 pagesloaded(所有页真实尺寸就位)才撤:早撤垫片,混合页高的
+        // 文档还按首页占位尺寸排版,scrollHeight 临时缩水又会把深处的 scrollTop 钳掉(codex)。
+        if (docLoaded && !overlay.querySelector('[data-hold-page]')) drop()
+      }
+      const onRendered = (e: { pageNumber: number }): void => {
+        if (!armed) return // 新文档还没装上:这是旧文档迟到的重画,不算数
+        overlay.querySelector(`[data-hold-page="${e.pageNumber}"]`)?.remove()
+        maybeDrop()
+      }
+      const onDocLoaded = (): void => { docLoaded = true; maybeDrop() }
+      eventBus.on('pagerendered', onRendered)
+      dropHold = drop
+      return {
+        arm: () => {
+          armed = true
+          eventBus.on('pagesloaded', onDocLoaded, { once: true })
+          // ponytail: 4s 兜底从**装上新文档**起算(解析再慢也不许提前撤垫片,否则塌缩回跳复活);
+          // 被滚出视口的页可能永不重画,快照不能悬着,换档异常也靠它收尾。
+          timer = setTimeout(drop, 4000)
+        },
+        cancel: drop, // 解析失败/中止:快照与垫片立刻收掉(此时旧文档还活着,没有塌缩可防)
+      }
+    }
+
+    /** pdf-lib 写后重载:换新字节的文档(旧 doc 销毁)。滚动/缩放的保持见 attach('preserve')——
+     *  这里**不采集也不恢复**任何视图坐标:采集时机永远不可靠(await 期间用户在滚动;连续换档时
+     *  viewer 可能正处于上一轮 setDocument 的重置窗,读到 page=1/scale=null 的假值 → 实报「莫名回到首页」)。 */
+    const swapDoc = async (bytes: Uint8Array): Promise<void> => {
+      const hold = holdPages()
+      const old = state.doc
+      let doc: any
+      try {
+        // ⚠️必须给 getDocument 复制件:pdf.js 会把 buffer **转移**进 worker(detach)——
+        // 同一份字节还躺在 lastBytes/撤销栈里,直接传原件等于把快照掏空(写盘/撤销全烂)。
+        doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise
+      } catch (e) {
+        hold.cancel() // 4s 兜底在 arm 后才起算,失败必须显式收快照
+        throw e
+      }
+      if (dead) { hold.cancel(); void doc.destroy(); return }
       state.doc = doc
-      attach(doc, keep)
+      attach(doc, 'preserve')
+      hold.arm() // 新文档已装上:此后的 pagerendered 才有资格撤快照,pagesloaded 才有资格撤垫片
       try { void old?.destroy() } catch { /* ignore */ }
     }
 
     eventBus.on('pagechanging', (e: { pageNumber: number }) => setInfo((p) => ({ ...p, page: e.pageNumber })))
-    eventBus.on('scalechanging', (e: { scale: number; presetValue?: string }) => setZoomSel(e.presetValue || String(e.scale)))
+    eventBus.on('scalechanging', (e: { scale: number; presetValue?: string }) => {
+      // curScale 是换档时缩放的唯一真源:重置窗里读 viewer.currentScaleValue 会拿到 null(丢用户缩放)。
+      curScale = e.presetValue || String(e.scale)
+      setZoomSel(curScale)
+    })
     // 两路脏信号取并集(表单存储 + 编辑器状态),防某一路在高亮场景不触发。
     eventBus.on('annotationeditorstateschanged', markDirty)
 
@@ -293,6 +528,550 @@ export function PdfAnnotator({ pdfPath, initialPage }: { pdfPath: string; initia
       void enqueue((by) => addShape(by, d.pageIndex, t, a, b, style))
     }
 
+    // 手写笔:pointer 采点(压感 + getCoalescedEvents 高频轨迹)→ 预览层实时画 Excalidraw 轮廓 →
+    // 笔画攒进待写桶,防抖 2.5s / 切工具 / 卸载时整批写 /Ink(每笔一次 swapDoc 会打断连续书写)。
+    // 三桶数组本轮 effect 私有(ref 只是取景窗),增删一律**原地**——不换数组,身份即所有权。
+    const myPending: InkStroke[] = []
+    const myCommitting: InkStroke[] = []
+    const myGhost: InkStroke[] = []
+    pendingInk.current = myPending
+    committingInk.current = myCommitting
+    ghostInk.current = myGhost
+    const removeAll = (arr: InkStroke[], gone: readonly InkStroke[]): void => {
+      for (const s of gone) {
+        const i = arr.indexOf(s)
+        if (i >= 0) arr.splice(i, 1)
+      }
+    }
+    const bumpInk = (): void => { if (!dead) setInkTick((t) => t + 1) }
+    const hasInk = (): boolean =>
+      myPending.length > 0 || myCommitting.length > 0 || myGhost.length > 0 || !!liveInk.current
+    let inkTimer: ReturnType<typeof setTimeout> | null = null
+    let inkLast: { x: number; y: number } | null = null // 客户区坐标,亚像素抖动滤点
+    let inkPointer: number | null = null // 正在书写的 pointerId:第二根手指/手掌不得抢笔、不得收笔
+    const commitInk = (): void => {
+      if (inkTimer) { clearTimeout(inkTimer); inkTimer = null }
+      const batch = myPending.splice(0) // 移出待写桶:在途批次不可再被提交/撤销(防双写)
+      if (!batch.length) return
+      myCommitting.push(...batch)
+      void enqueue((b) => addInk(b, batch), (ok) => {
+        removeAll(myCommitting, batch)
+        if (ok) {
+          // 已落盘。幽灵桶把笔迹在预览层撑到该页 canvas 重画出来为止(立刻撤会闪没半秒)。
+          // ponytail: 半透明墨在重画完成前有一瞬双重叠加;不透明度 1(默认)看不出来。
+          myGhost.push(...batch)
+        } else {
+          myPending.unshift(...batch) // 没写成:退回待写桶,随下次提交/尾部兜底重试
+        }
+        bumpInk()
+      })
+    }
+    commitInkRef.current = commitInk
+    const scheduleInkCommit = (): void => {
+      if (inkTimer) clearTimeout(inkTimer)
+      inkTimer = setTimeout(commitInk, 2500)
+    }
+    const inkSample = (live: InkStroke, e: { clientX: number; clientY: number; pressure: number }): boolean => {
+      if (inkLast) {
+        const dx = e.clientX - inkLast.x, dy = e.clientY - inkLast.y
+        if (dx * dx + dy * dy < 1) return false
+      }
+      const pt = pointOnPage(state.viewer, live.pageIndex, e.clientX, e.clientY)
+      if (!pt) return false
+      live.pts.push([pt[0], pt[1], e.pressure || 0.5])
+      inkLast = { x: e.clientX, y: e.clientY }
+      return true
+    }
+    const onInkDown = (ev: PointerEvent): void => {
+      if (toolRef.current !== 'pen' || ev.button !== 0 || liveInk.current) return
+      const hit = pageAt(state.viewer, ev.clientX, ev.clientY)
+      if (!hit) return
+      ev.preventDefault() // 防拖出文字选区
+      if (inkTimer) { clearTimeout(inkTimer); inkTimer = null } // 笔尖落着的时候绝不提交(swapDoc 会把正在写的页抽走)
+      const s = penOptRef.current
+      liveInk.current = {
+        pageIndex: hit.pageIndex,
+        pts: [[hit.x, hit.y, ev.pressure || 0.5]],
+        simulate: ev.pressure === 0.5, // Excalidraw 同款判定:鼠标恒报 0.5 → 按速度模拟压感
+        color: colorRef.current,
+        width: s.width,
+        opacity: s.opacity,
+      }
+      inkPointer = ev.pointerId
+      inkLast = { x: ev.clientX, y: ev.clientY }
+      container.setPointerCapture(ev.pointerId)
+      bumpInk()
+    }
+    const onInkMove = (ev: PointerEvent): void => {
+      const live = liveInk.current
+      if (!live || ev.pointerId !== inkPointer) return
+      const co = typeof ev.getCoalescedEvents === 'function' ? ev.getCoalescedEvents() : []
+      const evs = co.length ? co : [ev]
+      let added = false
+      for (const e of evs) added = inkSample(live, e) || added
+      if (added) bumpInk()
+    }
+    const onInkUp = (ev: PointerEvent): void => {
+      const live = liveInk.current
+      if (!live || ev.pointerId !== inkPointer) return
+      inkSample(live, ev) // 抬笔点也采進去:快速收笔时最后一段 move 可能没来得及发
+      liveInk.current = null
+      inkPointer = null
+      inkLast = null
+      try { container.releasePointerCapture(ev.pointerId) } catch { /* ignore */ }
+      myPending.push(live)
+      redoInk.length = 0 // 新笔作废逐笔恢复分支
+      bumpInk()
+      scheduleInkCommit()
+    }
+    /** 字节级撤销/恢复。⚠️不做「栈空就不入队」的快进检查,目标也必须在 **op 内**(轮到自己时)才出栈:
+     *  排在前面的写入/撤销会改栈(撤销→立刻恢复 就靠撤销执行时才补进 redo 栈),提前判断/提前出栈都会乱序。
+     *  轮到时真没事可做 → op 返 null,enqueue 一个字节都不写。失败把栈复原。 */
+    const doUndo = (): void => {
+      clearSel() // 撤销可能让选中的注释消失,别留个空框
+      redoInk.length = 0 // 字节级历史动了,逐笔恢复的语义随之作废
+      let prev: Uint8Array | null = null
+      void enqueue(async (cur) => {
+        prev = undoBytes.pop() ?? null
+        if (!prev) return null
+        pushHistory(redoBytes, cur)
+        return prev
+      }, (ok) => {
+        if (!ok && prev) { undoBytes.push(prev); redoBytes.pop() }
+      }, true)
+    }
+    const doRedo = (): void => {
+      clearSel()
+      redoInk.length = 0
+      let next: Uint8Array | null = null
+      void enqueue(async (cur) => {
+        next = redoBytes.pop() ?? null
+        if (!next) return null
+        pushHistory(undoBytes, cur)
+        return next
+      }, (ok) => {
+        if (!ok && next) { redoBytes.push(next); undoBytes.pop() }
+      }, true)
+    }
+    // 键盘:⌘Z/⌘⇧Z(或 Ctrl+Y)撤销/恢复——待写笔画逐笔撤(手写的自然粒度),其余走字节快照栈(按写入批)。
+    // 只在非 pdf.js 编辑器模式接管(高亮/添加文字让 pdf.js 自己的撤销来);Delete/Esc 作用于选中的注释。
+    // ⚠️监听在 window 上,必须验「事件来自本实例」:dockview 里非活动 tab 的实例仍然挂着,
+    // 不验的话一次 ⌘Z/Delete 会打到所有 PDF(误删后台文档)。container 有 tabIndex,
+    // 在页面上按过下(focusSelf)之后按键 target 落在 container;点了工具栏/侧栏按钮则落在
+    // 按钮上——都在 .pdfa-root 里,按根判归属。
+    const rootEl = container.closest('.pdfa-root') ?? container
+    const onPdfKey = (ev: KeyboardEvent): void => {
+      if (!(ev.target instanceof Node) || !rootEl.contains(ev.target)) return
+      const t = ev.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      if (toolRef.current === 'mouse' && selRef.current && (ev.key === 'Delete' || ev.key === 'Backspace')) { ev.preventDefault(); deleteSel(); return }
+      // Escape 取消:已选中 / 拖动中 / 框选中 / 冷缓存框选待结算(框选开始前 selRef 已被清空,只看它会漏)。
+      if (ev.key === 'Escape' && (selRef.current || selDragRef.current || selMarqRef.current || pendingMarq)) { clearSel(); return }
+      const tool = toolRef.current
+      if (modeOf(tool) !== AnnotationEditorType.NONE) return
+      if (!(ev.metaKey || ev.ctrlKey)) return
+      const k = ev.key.toLowerCase()
+      if (k !== 'z' && k !== 'y') return
+      ev.preventDefault()
+      if (k === 'y' || ev.shiftKey) {
+        if (INK_PAIR.has(tool) && redoInk.length) { myPending.push(redoInk.pop()!); bumpInk(); scheduleInkCommit(); return }
+        doRedo()
+      } else {
+        if (INK_PAIR.has(tool) && myPending.length) { redoInk.push(myPending.pop()!); bumpInk(); scheduleInkCommit(); return }
+        doUndo()
+      }
+    }
+    // 滚动/缩放/页面重画会挪动页面框 → 预览层跟着重投影;页面重画完还负责清幽灵(按页,双页视口互不误伤)。
+    const onInkViewChange = (): void => { if (hasInk()) bumpInk() }
+    const onInkPageRendered = (e: { pageNumber: number }): void => {
+      fetchAnns(e.pageNumber - 1) // 页面一渲染就预取注释:鼠标点选/橡皮命中都靠这份缓存
+      let cleared = false
+      for (let i = myGhost.length - 1; i >= 0; i--) {
+        if (myGhost[i].pageIndex === e.pageNumber - 1) { myGhost.splice(i, 1); cleared = true }
+      }
+      if (cleared) { bumpInk(); return }
+      onInkViewChange()
+    }
+    eventBus.on('scalechanging', onInkViewChange)
+    eventBus.on('pagerendered', onInkPageRendered)
+
+    // 橡皮:拖过即擦。命中=采样点到笔迹中心线的距离 <(笔宽×4.25/2 + 橡皮半径)。
+    // 预览层里的待写笔画直接删;已写进 PDF 的 /Ink 收集注释 id,抬手一次性摘除(只动 Ink,
+    // 高亮/形状/便签不归橡皮管)。ponytail: 在途批次(≤~1s 写入窗)擦不到,落盘后再擦即可;擦除无撤销。
+    let erasing = false
+    let erasePointer: number | null = null
+    const eraseHits = new Set<string>()
+    const pendingErase: string[] = [] // 已请求未确认落盘的擦除 id(本轮私有;卸载时尾部兜底补擦)
+    const annCache = new Map<number, any[] | null>() // pageIndex → 该页全部注释(橡皮/选择共用);null=拉取中。attach 时清。
+    // 缓存冷启动时擦过的采样点先记轨迹,注释一到就重放——否则快擦一下(缓存还没回来)会落空。
+    let eraseTrail: { page: number; x: number; y: number; r: number }[] = []
+    /** 对一页注释跑一个橡皮采样点的命中判定(只认 Ink),命中进 eraseHits。 */
+    const hitDisk = (anns: any[], x: number, y: number, r: number): void => {
+      for (const a of anns) {
+        if (a.subtype !== 'Ink' || eraseHits.has(a.id)) continue
+        // 4.25 是自家墨迹的视觉系数;外来 Ink 的 /BS W 是真实线宽,语义不同 → 视觉宽封顶防误伤。
+        const rr = r + Math.min((a.borderStyle?.width || 1) * 4.25, 18) / 2
+        for (const flat of inkListsOf(a)) {
+          if (distToFlatSq([x, y], flat) <= rr * rr) { eraseHits.add(a.id); break }
+        }
+      }
+    }
+    const fetchAnns = (pageIndex: number): void => {
+      if (annCache.has(pageIndex)) return
+      annCache.set(pageIndex, null)
+      const docAt = state.doc // 代际守卫:swapDoc 后旧文档的迟到结果不得污染新缓存
+      void docAt?.getPage(pageIndex + 1)
+        .then((pg: any) => pg.getAnnotations())
+        .then((list: any[]) => {
+          if (state.doc !== docAt) return
+          const anns = list.filter((a) => a.id && a.subtype)
+          annCache.set(pageIndex, anns)
+          // 重放这页冷启动期间的擦除轨迹(重放完按页出账,别的手势的未决轨迹不受影响);
+          // 若手已抬,补检出的命中立刻入队。
+          const mine = eraseTrail.filter((t) => t.page === pageIndex)
+          if (mine.length) {
+            eraseTrail = eraseTrail.filter((t) => t.page !== pageIndex)
+            for (const t of mine) hitDisk(anns, t.x, t.y, t.r)
+            if (!erasing) flushErase()
+          }
+          // 冷缓存期间抬手的框选:注释到了才能结算(工具已切走就作废)。
+          if (pendingMarq?.pageIndex === pageIndex) {
+            const pm = pendingMarq
+            pendingMarq = null
+            if (toolRef.current === 'mouse') settleMarquee(pm.pageIndex, pm.l, pm.r, pm.b, pm.t)
+          }
+        })
+        .catch(() => { if (state.doc === docAt) annCache.delete(pageIndex) }) // 拉挂了下次采样重试
+    }
+    /** 把攒下的命中 id 入队删除;确认落盘才出账,失败/中止留给尾部兜底(removeAnnots 幂等)。 */
+    const flushErase = (): void => {
+      if (!eraseHits.size) return
+      const ids = [...eraseHits]
+      eraseHits.clear()
+      pendingErase.push(...ids)
+      void enqueue((b) => removeAnnots(b, ids, INK_ONLY), (ok) => {
+        if (ok) for (const id of ids) { const i = pendingErase.indexOf(id); if (i >= 0) pendingErase.splice(i, 1) }
+      })
+    }
+    /** 预热可见页的注释缓存(橡皮命中/鼠标选中共用)——否则第一下操作会在缓存冷启动里落空。 */
+    const warmAnns = (): void => {
+      for (let p = 0; p < (state.viewer.pagesCount ?? 0); p++) {
+        if (frameOf(state.viewer.getPageView(p))) fetchAnns(p)
+      }
+    }
+    warmAnnsRef.current = warmAnns
+    const eraseSample = (clientX: number, clientY: number): void => {
+      const hit = pageAt(state.viewer, clientX, clientY)
+      if (!hit) return
+      const pv = state.viewer.getPageView(hit.pageIndex)
+      const t = pv?.viewport?.transform as number[] | undefined
+      const r = 8 / ((t ? Math.hypot(t[0], t[1]) : 1) || 1) // 橡皮半径:客户区 8px 折算成 PDF 单位
+      for (let i = myPending.length - 1; i >= 0; i--) {
+        const s = myPending[i]
+        if (s.pageIndex !== hit.pageIndex) continue
+        const rr = r + (s.width * 4.25) / 2
+        if (distToPointsSq([hit.x, hit.y], s.pts) <= rr * rr) {
+          myPending.splice(i, 1)
+          bumpInk()
+        }
+      }
+      const cached = annCache.get(hit.pageIndex)
+      if (cached) hitDisk(cached, hit.x, hit.y, r)
+      else {
+        if (cached === undefined) fetchAnns(hit.pageIndex)
+        eraseTrail.push({ page: hit.pageIndex, x: hit.x, y: hit.y, r }) // 注释还没到:记轨迹待重放
+      }
+    }
+    const onEraseDown = (ev: PointerEvent): void => {
+      if (toolRef.current !== 'eraser' || ev.button !== 0 || erasing) return
+      ev.preventDefault()
+      if (inkTimer) { clearTimeout(inkTimer); inkTimer = null } // 擦的过程中别让防抖提交来捣乱
+      erasing = true
+      erasePointer = ev.pointerId
+      redoInk.length = 0 // 擦过之后「恢复那笔」语义已乱,作废
+      // eraseTrail 故意不在这里清:上个手势可能还有冷缓存页没重放完,清了那次擦除就丢了(按页消费,attach 全清)。
+      container.setPointerCapture(ev.pointerId)
+      warmAnns() // 兜冷缓存(通常 selectTool 已预热过)
+      eraseSample(ev.clientX, ev.clientY)
+    }
+    const onEraseMove = (ev: PointerEvent): void => {
+      if (!erasing || ev.pointerId !== erasePointer) return
+      const co = typeof ev.getCoalescedEvents === 'function' ? ev.getCoalescedEvents() : []
+      for (const e of co.length ? co : [ev]) eraseSample(e.clientX, e.clientY)
+    }
+    const onEraseUp = (ev: PointerEvent): void => {
+      if (!erasing || ev.pointerId !== erasePointer) return
+      erasing = false
+      erasePointer = null
+      try { container.releasePointerCapture(ev.pointerId) } catch { /* ignore */ }
+      flushErase() // 冷缓存页迟到的命中由 fetchAnns 的轨迹重放补队
+      if (myPending.length) scheduleInkCommit() // 擦剩下的待写笔画恢复正常防抖节奏
+    }
+
+    // 注释选中/移动/删除/编辑(鼠标模式):点击几何命中(注释层 section 已被 pointer-events:none 掉,
+    // 不能靠 DOM 命中)→ 选中框+浮条;可移动类(手写/形状/便签/文字框)按住即拖,文本标记类(钉在字上)只选不挪。
+    // ponytail: 缓存来自 worker 解析的字节——pdf.js 编辑器**刚**建的高亮/文字要等下一次 pdf-lib 写入
+    // 重载后才能被选中(编辑它们本就该走对应编辑器模式);要即时得把 annotationStorage 也并进命中,不值。
+    const clearSel = (): void => {
+      // 拖动/框选进行中被清(Escape/撤销):连手势一起取消,便签图标的临时位移必须复位——
+      // 只清 selRef 的话,抬手走 !sel 分支时已无从知道该复位哪些 section(codex:transform 永久残留)。
+      if (selDrag) { shiftTextSections(selDrag.items, 0, 0); selDrag = null }
+      selMarq = null
+      pendingMarq = null // 未结算的冷缓存框选一并作废(否则迟到结算会盖掉之后的操作)
+      if (!selRef.current && !selDragRef.current && !selMarqRef.current) return
+      selRef.current = null
+      selDragRef.current = null
+      selMarqRef.current = null
+      bumpInk()
+    }
+    const deleteSel = (): void => {
+      const sel = selRef.current
+      if (!sel) return
+      const ids = sel.items.map((it) => it.id)
+      clearSel()
+      void enqueue((b) => removeAnnots(b, ids))
+    }
+    const editSel = (): void => {
+      const sel = selRef.current
+      const it = sel && sel.items.length === 1 ? sel.items[0] : null
+      if (!it || it.subtype !== 'Text') return
+      void askString('编辑便签', it.contents || '', { confirmLabel: '保存' }).then((text) => {
+        if (dead || text === null) return
+        const trimmed = text.trim()
+        if (!trimmed || trimmed === it.contents) return
+        it.contents = trimmed // sel 里存的就是这个对象引用,已清选时改到孤儿上也无害
+        void enqueue((b) => setAnnotContents(b, it.id, trimmed))
+      })
+    }
+    selApiRef.current = { del: deleteSel, edit: editSel, clear: clearSel }
+    /** 精确命中:先粗筛 Rect,再按子类型细判——大空框/斜线的包围盒不能整块吞掉框内的文字选择(codex 实锤)。 */
+    const hitAnnot = (a: any, x: number, y: number, pad: number): boolean => {
+      const r = a.rect
+      if (!(x >= r[0] - pad && x <= r[2] + pad && y >= r[1] - pad && y <= r[3] + pad)) return false
+      switch (a.subtype) {
+        case 'Ink': {
+          const rr = pad + Math.min((a.borderStyle?.width || 1) * 4.25, 18) / 2
+          for (const flat of inkListsOf(a)) if (distToFlatSq([x, y], flat) <= rr * rr) return true
+          return false
+        }
+        case 'Line': {
+          const l = a.lineCoordinates
+          if (!l) return true
+          const rr = pad + (a.borderStyle?.width || 1) / 2 + 2
+          return distToFlatSq([x, y], l) <= rr * rr
+        }
+        case 'Square': {
+          // ponytail: pdf.js 不暴露 /IC,分不清空心实心 → 一律按边框带命中(实心的也只在边上能选),
+          // 换来大框内部的文字选择不被吞。
+          const band = (a.borderStyle?.width || 1) + pad + 4
+          return !(x >= r[0] + band && x <= r[2] - band && y >= r[1] + band && y <= r[3] - band)
+        }
+        case 'Circle': {
+          // 椭圆带:包围盒四角离椭圆很远,不算命中(否则角上的文字选择被吞)。
+          const band = (a.borderStyle?.width || 1) + pad + 4
+          const cx = (r[0] + r[2]) / 2, cy = (r[1] + r[3]) / 2
+          const rx = Math.max(1, (r[2] - r[0]) / 2), ry = Math.max(1, (r[3] - r[1]) / 2)
+          const n = Math.hypot((x - cx) / rx, (y - cy) / ry)
+          return Math.abs(n - 1) * Math.min(rx, ry) <= band
+        }
+        default:
+          return true // 便签图标/文字框/文本标记:整框即本体
+      }
+    }
+    const toItem = (a: any, pageIndex: number): SelItem =>
+      ({ id: a.id, pageIndex, rect: [...a.rect], subtype: a.subtype, contents: a.contentsObj?.str, raw: a })
+    /** 该页缓存里坐标命中的最上层可编辑注释(/Annots 顺序=绘制顺序,后者在上 → 取最后命中)。 */
+    const annotAt = (pageIndex: number, x: number, y: number): any => {
+      const cached = annCache.get(pageIndex)
+      let found: any = null
+      if (cached) {
+        for (const a of cached) {
+          if (!a.id || !a.rect || !EDITABLE_SUBTYPES.has(a.subtype)) continue
+          if (hitAnnot(a, x, y, 3)) found = a
+        }
+      }
+      return found
+    }
+    /** 便签图标是注释层里的真 DOM(其余类型的可见像素都烙在页 canvas 里)→ 拖动时直接位移它即时跟手;
+     *  提交成功不清位移(section 随 swapDoc 整树换掉,清了反而闪回旧位置一下)。
+     *  items 显式传入(拖动手势自己的快照):selRef 可能已被 Escape/撤销清掉,复位不能依赖它。 */
+    const shiftTextSections = (items: SelItem[], dx: number, dy: number): void => {
+      if (!items.length) return
+      const t = state.viewer.getPageView(items[0].pageIndex)?.viewport?.transform as number[] | undefined
+      if (!t) return
+      for (const it of items) {
+        if (it.subtype !== 'Text') continue
+        const el = container.querySelector<HTMLElement>(`section[data-annotation-id="${it.id}"]`)
+        if (el) el.style.transform = dx || dy ? `translate(${t[0] * dx + t[2] * dy}px, ${t[1] * dx + t[3] * dy}px)` : ''
+      }
+    }
+    /** 拖动落定后把 raw 缓存里的几何一并平移:annCache 要到 swapDoc 后才重建,期间的再拖/替身/悬停
+     *  用的还是这批对象。浅拷贝不碰 pdf.js 原对象,再把 annCache 里的原对象原位换成新引用——
+     *  否则点选/橡皮在换档前那 ~1s 仍按旧位置命中(codex)。 */
+    const shiftRaw = (it: SelItem, dx: number, dy: number): void => {
+      const a = it.raw
+      if (!a?.rect) return
+      const patch: any = { rect: [a.rect[0] + dx, a.rect[1] + dy, a.rect[2] + dx, a.rect[3] + dy] }
+      if (Array.isArray(a.inkLists)) patch.inkLists = inkListsOf(a).map((flat) => flat.map((v, i) => v + (i % 2 ? dy : dx)))
+      if (Array.isArray(a.lineCoordinates)) patch.lineCoordinates = a.lineCoordinates.map((v: number, i: number) => v + (i % 2 ? dy : dx))
+      it.raw = { ...a, ...patch }
+      const arr = annCache.get(it.pageIndex)
+      const i = arr ? arr.indexOf(a) : -1
+      if (arr && i >= 0) arr[i] = it.raw
+    }
+    /** 整组乐观平移(rect + raw 缓存);写失败按 -dx/-dy 原样回滚。 */
+    const applyShift = (items: SelItem[], dx: number, dy: number): void => {
+      for (const it of items) {
+        if (!MOVABLE_SUBTYPES.has(it.subtype)) continue
+        it.rect = [it.rect[0] + dx, it.rect[1] + dy, it.rect[2] + dx, it.rect[3] + dy]
+        shiftRaw(it, dx, dy)
+      }
+    }
+    let selDrag: { pageIndex: number; pid: number; sx: number; sy: number; dx: number; dy: number; moved: boolean; solo: SelItem | null; items: SelItem[] } | null = null
+    let selMarq: { pid: number } | null = null
+    let pendingMarq: { pageIndex: number; l: number; r: number; b: number; t: number } | null = null
+    /** 框选结算:该页缓存里包围盒与框相交的可编辑注释全部入选。 */
+    const settleMarquee = (pageIndex: number, l: number, r: number, b: number, t: number): void => {
+      const items = (annCache.get(pageIndex) ?? [])
+        .filter((a: any) => a?.id && a.rect && EDITABLE_SUBTYPES.has(a.subtype)
+          && a.rect[0] <= r && a.rect[2] >= l && a.rect[1] <= t && a.rect[3] >= b)
+        .map((a: any) => toItem(a, pageIndex))
+      selRef.current = items.length ? { pageIndex, items } : null
+      bumpInk()
+    }
+    const onSelDown = (ev: PointerEvent): void => {
+      if (readOnly || toolRef.current !== 'mouse' || ev.button !== 0 || selDrag || selMarq) return
+      const target = ev.target as HTMLElement | null
+      if (target?.closest?.('.pdfa-selbar')) return // 浮条按钮自己处理
+      pendingMarq = null // 新的选择手势开始:上一个冷缓存框选若还没结算,作废(后发先至会盖掉本次选中)
+      const hit = pageAt(state.viewer, ev.clientX, ev.clientY)
+      if (!hit) { clearSel(); return }
+      fetchAnns(hit.pageIndex)
+      const found = annotAt(hit.pageIndex, hit.x, hit.y)
+      if (!found) {
+        clearSel()
+        if (target?.closest?.('.textLayer span')) return // 文字上让位给原生文本选区
+        ev.preventDefault() // 空白处按下 → 框选
+        selMarq = { pid: ev.pointerId }
+        selMarqRef.current = { pageIndex: hit.pageIndex, ax: hit.x, ay: hit.y, bx: hit.x, by: hit.y }
+        container.setPointerCapture(ev.pointerId)
+        bumpInk()
+        return
+      }
+      const cur = selRef.current
+      const already = cur?.pageIndex === hit.pageIndex ? cur.items.find((it) => it.id === found.id) : undefined
+      if (!already) selRef.current = { pageIndex: hit.pageIndex, items: [toItem(found, hit.pageIndex)] }
+      bumpInk()
+      if (MOVABLE_SUBTYPES.has(found.subtype)) {
+        ev.preventDefault() // 拖动注释,不是拖出文字选区
+        selDrag = {
+          pageIndex: hit.pageIndex, pid: ev.pointerId, sx: hit.x, sy: hit.y, dx: 0, dy: 0, moved: false,
+          solo: already ?? null,
+          items: [...(selRef.current?.items ?? [])], // 手势自己的快照:Escape 清选后仍要能复位/结算
+        }
+        container.setPointerCapture(ev.pointerId)
+      }
+    }
+    const onSelMove = (ev: PointerEvent): void => {
+      if (selMarq && ev.pointerId === selMarq.pid) {
+        const m = selMarqRef.current
+        const pt = m && pointOnPage(state.viewer, m.pageIndex, ev.clientX, ev.clientY)
+        if (m && pt) { m.bx = pt[0]; m.by = pt[1]; bumpInk() }
+        return
+      }
+      if (selDrag && ev.pointerId === selDrag.pid) {
+        const pt = pointOnPage(state.viewer, selDrag.pageIndex, ev.clientX, ev.clientY)
+        if (!pt) return
+        selDrag.dx = pt[0] - selDrag.sx
+        selDrag.dy = pt[1] - selDrag.sy
+        if (!selDrag.moved && Math.hypot(selDrag.dx, selDrag.dy) > 1) selDrag.moved = true
+        if (selDrag.moved) {
+          selDragRef.current = { dx: selDrag.dx, dy: selDrag.dy }
+          shiftTextSections(selDrag.items, selDrag.dx, selDrag.dy)
+          bumpInk()
+        }
+        return
+      }
+      // 悬停在可编辑注释上 → 手型光标。section 被 pointer-events:none 掉(否则挡文字选区),
+      // CSS :hover 到不了 → 几何命中打 data 标,样式表按标切光标。事件 target 一定在某 .page 里,
+      // 用它反查页号是 O(1);挨页 getBoundingClientRect 的 pageAt 在几百页文档上会拖垮 pointermove。
+      if (readOnly || toolRef.current !== 'mouse') return
+      let over = false
+      const pn = Number((ev.target as HTMLElement | null)?.closest?.('.page')?.getAttribute('data-page-number')) || 0
+      if (pn) {
+        const pv = state.viewer.getPageView(pn - 1)
+        const frame = frameOf(pv)
+        if (frame) {
+          const [x, y] = pv.viewport.convertToPdfPoint(ev.clientX - frame.left, ev.clientY - frame.top)
+          fetchAnns(pn - 1)
+          over = !!annotAt(pn - 1, x, y)
+        }
+      }
+      if (over !== (container.dataset.annhover === '1')) {
+        if (over) container.dataset.annhover = '1'
+        else delete container.dataset.annhover
+      }
+    }
+    const onSelUp = (ev: PointerEvent): void => {
+      if (selMarq && ev.pointerId === selMarq.pid) {
+        selMarq = null
+        try { container.releasePointerCapture(ev.pointerId) } catch { /* ignore */ }
+        const m = selMarqRef.current
+        selMarqRef.current = null
+        if (!m) { bumpInk(); return }
+        const L = Math.min(m.ax, m.bx), R = Math.max(m.ax, m.bx), B = Math.min(m.ay, m.by), T = Math.max(m.ay, m.by)
+        if (R - L < 2 && T - B < 2) { bumpInk(); return } // 误点不算框
+        // 框选按包围盒相交收人(框选本来就是粗粒度手势,不做子类型精判)。
+        if (annCache.get(m.pageIndex)) settleMarquee(m.pageIndex, L, R, B, T)
+        else {
+          // 冷缓存(刚换档/新页):注释还在路上,记下框等 fetchAnns 回来再结算,否则首次框选必空(codex)
+          fetchAnns(m.pageIndex)
+          pendingMarq = { pageIndex: m.pageIndex, l: L, r: R, b: B, t: T }
+          bumpInk()
+        }
+        return
+      }
+      const d = selDrag
+      if (!d || ev.pointerId !== d.pid) return
+      selDrag = null
+      try { container.releasePointerCapture(ev.pointerId) } catch { /* ignore */ }
+      selDragRef.current = null
+      const sel = selRef.current
+      if (!d.moved) {
+        // 原地点击多选集里的某一条 → 收敛为单选(标准多选交互)
+        if (d.solo && sel && sel.items.length > 1) { selRef.current = { pageIndex: sel.pageIndex, items: [d.solo] }; bumpInk() }
+        return
+      }
+      const moves = d.items.filter((it) => MOVABLE_SUBTYPES.has(it.subtype)).map((it) => ({ id: it.id, dx: d.dx, dy: d.dy }))
+      if (!moves.length) { bumpInk(); return }
+      applyShift(d.items, d.dx, d.dy) // 乐观:选框/缓存立刻按新位置走,替身消失后不闪回
+      bumpInk()
+      void enqueue((b) => translateAnnots(b, moves), (ok) => {
+        if (!ok) { // 一个字节都没写(失败/中止):乐观位置整组回滚,便签图标位移复位
+          applyShift(d.items, -d.dx, -d.dy)
+          shiftTextSections(d.items, 0, 0)
+          bumpInk()
+        }
+      })
+    }
+    const onSelCancel = (ev: PointerEvent): void => {
+      // 系统级取消(窗口失焦/手势打断)= 回滚这次拖动/框选,绝不落盘半截位移。
+      if (selMarq && ev.pointerId === selMarq.pid) {
+        selMarq = null
+        selMarqRef.current = null
+        try { container.releasePointerCapture(ev.pointerId) } catch { /* ignore */ }
+        bumpInk()
+        return
+      }
+      const d = selDrag
+      if (!d || ev.pointerId !== d.pid) return
+      selDrag = null
+      try { container.releasePointerCapture(ev.pointerId) } catch { /* ignore */ }
+      selDragRef.current = null
+      shiftTextSections(d.items, 0, 0)
+      bumpInk()
+    }
+
     // ⌘/Ctrl+滚轮 与 触控板捏合(macOS 捏合 = ctrlKey 的 wheel 事件)缩放:
     // pdf.js **组件包不含**滚轮缩放(那是 Firefox 完整 viewer 的 webViewerWheel)→ 必须自己接。
     const onWheel = (ev: WheelEvent): void => {
@@ -314,6 +1093,30 @@ export function PdfAnnotator({ pdfPath, initialPage }: { pdfPath: string; initia
     container.addEventListener('pointerdown', onShapeDown)
     container.addEventListener('pointermove', onShapeMove)
     container.addEventListener('pointerup', onShapeUp)
+    container.addEventListener('pointerdown', onInkDown)
+    container.addEventListener('pointermove', onInkMove)
+    container.addEventListener('pointerup', onInkUp)
+    container.addEventListener('pointercancel', onInkUp)
+    container.addEventListener('pointerdown', onEraseDown)
+    container.addEventListener('pointermove', onEraseMove)
+    container.addEventListener('pointerup', onEraseUp)
+    container.addEventListener('pointercancel', onEraseUp)
+    container.addEventListener('pointerdown', onSelDown)
+    container.addEventListener('pointermove', onSelMove)
+    container.addEventListener('pointerup', onSelUp)
+    container.addEventListener('pointercancel', onSelCancel)
+    // 滚动不用重绘预览层:叠加层挂在滚动容器里按内容坐标定位,滚动天然跟随(缩放/重画才动矩阵)。
+    // 在阅读器里按下 → 焦点收进 container(div 点击不改焦点,快捷键 target 会一直留在别处);
+    // 让位给真输入目标:FreeText 编辑框等 contenteditable 要拿焦点打字。
+    const focusSelf = (ev: PointerEvent): void => {
+      const t = ev.target as HTMLElement | null
+      if (t?.closest?.('[contenteditable], input, textarea, .annotationEditorLayer')) return
+      if (document.activeElement !== container) container.focus({ preventScroll: true })
+    }
+    if (!readOnly) { // 只读内嵌不抢宿主(笔记编辑器)的快捷键/焦点
+      window.addEventListener('keydown', onPdfKey)
+      container.addEventListener('pointerdown', focusSelf)
+    }
     container.addEventListener('wheel', onWheel, { passive: false })
 
     // 容器尺寸变化(侧栏开合/分栏拖动)时,预设缩放(适宽/适页)重排。
@@ -330,10 +1133,12 @@ export function PdfAnnotator({ pdfPath, initialPage }: { pdfPath: string; initia
         // http://localhost 源,XHR 到自定义 scheme 被 Chromium 跨源拦(内联 iframe 走导航才不受限)。
         const bytes = await amadeus.readVaultBytes(pdfPath)
         if (dead) return
-        const doc = await pdfjsLib.getDocument({ data: bytes }).promise
+        // slice:getDocument 会把 buffer 转移进 worker(detach),原件要留给 lastBytes 当快照。
+        const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise
         if (dead) { void doc.destroy(); return }
         state.doc = doc
-        attach(doc, { page: initialPage || 1, scale: 'page-width', top: 0, left: 0 })
+        state.lastBytes = bytes // 初始磁盘状态:首次编辑器 flush 的撤销快照从这里来
+        attach(doc, { page: initialPage || 1 })
         setStatus('ready')
       } catch (e) {
         if (!dead) { console.error('[pdf] 加载失败', e); setStatus('error') }
@@ -343,32 +1148,79 @@ export function PdfAnnotator({ pdfPath, initialPage }: { pdfPath: string; initia
     return () => {
       dead = true
       enqueueRef.current = null
+      commitInkRef.current = null
+      warmAnnsRef.current = null
+      selApiRef.current = null
+      selRef.current = null
+      selDragRef.current = null
+      selMarqRef.current = null
       if (state.timer) clearTimeout(state.timer)
+      if (inkTimer) clearTimeout(inkTimer)
       ro.disconnect()
       container.removeEventListener('pointerup', onPointerUp)
       container.removeEventListener('click', onNoteClick)
       container.removeEventListener('pointerdown', onShapeDown)
       container.removeEventListener('pointermove', onShapeMove)
       container.removeEventListener('pointerup', onShapeUp)
+      container.removeEventListener('pointerdown', onInkDown)
+      container.removeEventListener('pointermove', onInkMove)
+      container.removeEventListener('pointerup', onInkUp)
+      container.removeEventListener('pointercancel', onInkUp)
+      container.removeEventListener('pointerdown', onEraseDown)
+      container.removeEventListener('pointermove', onEraseMove)
+      container.removeEventListener('pointerup', onEraseUp)
+      container.removeEventListener('pointercancel', onEraseUp)
+      container.removeEventListener('pointerdown', onSelDown)
+      container.removeEventListener('pointermove', onSelMove)
+      container.removeEventListener('pointerup', onSelUp)
+      container.removeEventListener('pointercancel', onSelCancel)
+      if (!readOnly) {
+        window.removeEventListener('keydown', onPdfKey)
+        container.removeEventListener('pointerdown', focusSelf)
+      }
       container.removeEventListener('wheel', onWheel)
+      dropHold?.()
       try { viewer.setDocument(null as any); linkService.setDocument(null as any) } catch { /* ignore */ }
+      // 手写收尾:画到一半的笔并进待写桶;幽灵桶纯展示(已落盘)直接倒掉。
+      // 三桶是本轮私有数组,新档(下一轮 effect)另起炉灶——链内收到的必然全是本档笔画。
+      if (liveInk.current) { myPending.push(liveInk.current); liveInk.current = null }
+      myGhost.length = 0
+      // 擦到一半关掉:已命中未入队的也并进待擦账本,随尾部兜底补擦。
+      // ponytail: 卸载瞬间还没拉回注释的冷缓存轨迹就不追了(要在 teardown 里做异步命中,窗口 ~百 ms)。
+      pendingErase.push(...eraseHits)
+      eraseHits.clear()
       // 尾部落盘:排在既有写队列后(串行),完成后统一销毁当前 doc——
       // destroy 必须等 save 完成,否则 saveDocument() 读到一半 doc 被销毁 → 快速关 tab 丢最后一次批注。
-      void state.chain.then(async () => {
+      // 待写桶必须在链**内**才收(在途批次的 after 回调可能把没写成的退回来;链后收才一个不漏不重)。
+      void (readOnly ? state.chain : state.chain.then(async () => {
+        const inkTail = myPending.splice(0)
+        const eraseTail = pendingErase.splice(0) // 没确认落盘的擦除也要兜(removeInkAnnots 幂等,补擦无害)
         const doc = state.doc
-        if (doc && state.dirty) {
-          try {
-            const b: Uint8Array = await doc.saveDocument()
-            await amadeus.saveVaultBytes(pdfPath, b)
-          } catch { /* ignore */ }
-        }
-      }).finally(() => {
+        if (!state.dirty && !inkTail.length && !eraseTail.length) return
+        try {
+          let b: Uint8Array | null
+          if (state.docStale && state.lastBytes) {
+            // dead/异常挡了 swapDoc:磁盘比 doc 新,必须以磁盘为基线——用旧 doc.saveDocument()
+            // 会把链尾刚写盘的批注/书签盖掉。此窗内编辑器未存改动本就随换档丢(同在途写入的既有语义)。
+            b = state.lastBytes
+          } else if (doc && (state.dirty || !state.lastBytes)) {
+            b = await doc.saveDocument()
+          } else {
+            b = state.lastBytes
+          }
+          if (!b) return
+          if (eraseTail.length) b = await removeAnnots(b, eraseTail, INK_ONLY)
+          if (inkTail.length) b = await addInk(b, inkTail)
+          await amadeus.saveVaultBytes(pdfPath, b)
+        } catch { /* ignore */ }
+      })).finally(() => {
+        myCommitting.length = 0
         try { state.doc?.destroy() } catch { /* ignore */ }
         state.doc = null
         if (eng.current === state) eng.current = null
       })
     }
-  }, [pdfPath, reloadNonce]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pdfPath, reloadNonce, readOnly]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 已开着的 tab 被要求跳页:openPdf 激活既有 tab 后广播 amadeus:pdf-goto(避免 remount 重下 PDF)。
   useEffect(() => {
@@ -383,6 +1235,13 @@ export function PdfAnnotator({ pdfPath, initialPage }: { pdfPath: string; initia
   }, [pdfPath])
 
   const selectTool = (t: Tool): void => {
+    // 切出 手写/橡皮 这一对 → 立即落盘攒着的笔画;笔↔橡皮之间切换不落盘(橡皮可即时擦预览层)。
+    if (INK_PAIR.has(toolRef.current) && !INK_PAIR.has(t)) commitInkRef.current?.()
+    if (t === 'eraser' || t === 'mouse') warmAnnsRef.current?.() // 预热可见页注释缓存(橡皮命中/点选/框选都要)
+    if (t !== 'mouse') { // 隐形选中还能被 Delete 删=事故;冷缓存框选待结算的槽、悬停手型标一并清
+      selApiRef.current?.clear() // 走 effect 内的 clearSel:refs + 手势局部态 + pendingMarq + 便签位移复位
+      if (containerRef.current) delete containerRef.current.dataset.annhover
+    }
     setTool(t)
     toolRef.current = t
     const e = eng.current
@@ -403,6 +1262,11 @@ export function PdfAnnotator({ pdfPath, initialPage }: { pdfPath: string; initia
     const next = { ...shapeRef.current, ...patch }
     shapeRef.current = next
     setShape(next)
+  }
+  const setPen = (patch: Partial<typeof penOpt>): void => {
+    const next = { ...penOptRef.current, ...patch }
+    penOptRef.current = next
+    setPenOpt(next)
   }
   const zoom = (dir: 1 | -1): void => {
     const v = eng.current?.viewer
@@ -437,9 +1301,11 @@ export function PdfAnnotator({ pdfPath, initialPage }: { pdfPath: string; initia
   const ready = status === 'ready'
   const doc = eng.current?.doc
   const isShape = SHAPE_TOOLS.has(tool)
+  const isPen = tool === 'pen'
 
   return (
     <div className="pdfa-root">
+      {!readOnly && (
       <div className="pdfa-toolbar">
         <button
           className={`pdfa-btn pdfa-tool${side ? ' on' : ''}`}
@@ -486,6 +1352,17 @@ export function PdfAnnotator({ pdfPath, initialPage }: { pdfPath: string; initia
             </select>
           </>
         )}
+        {isPen && (
+          <>
+            <span className="pdfa-sep" />
+            <select className="pdfa-mini" value={penOpt.width} onChange={(e) => setPen({ width: Number(e.target.value) })} title="笔迹粗细">
+              {PEN_WIDTHS.map((w) => <option key={w} value={w}>{w} pt</option>)}
+            </select>
+            <select className="pdfa-mini" value={penOpt.opacity} onChange={(e) => setPen({ opacity: Number(e.target.value) })} title="不透明度">
+              {OPACITIES.map((o) => <option key={o} value={o}>{Math.round(o * 100)}%</option>)}
+            </select>
+          </>
+        )}
         <span className="pdfa-sep" />
         <button className="pdfa-btn pdfa-tool" title="添加书签(写进 PDF 目录,任何阅读器可见)" onClick={() => void addBm()}>
           <BookmarkPlus size={15} />
@@ -495,6 +1372,7 @@ export function PdfAnnotator({ pdfPath, initialPage }: { pdfPath: string; initia
           {copied ? '已复制' : '复制本页链接'}
         </button>
       </div>
+      )}
       <div className="pdfa-body">
         {side && (
           <div className="pdfa-side">
@@ -505,15 +1383,38 @@ export function PdfAnnotator({ pdfPath, initialPage }: { pdfPath: string; initia
             <div className="pdfa-sidebody">
               {ready && doc ? (
                 side === 'thumbs'
-                  ? <Thumbs key={`t${docVersion}`} doc={doc} current={info.page} onPick={goTo} />
-                  : <Outline key={`o${docVersion}`} doc={doc} onGo={(dest) => void eng.current?.linkService.goToDestination(dest)} />
+                  ? <Thumbs doc={doc} current={info.page} onPick={goTo} />
+                  : <Outline doc={doc} onGo={(dest) => void eng.current?.linkService.goToDestination(dest)} />
               ) : null}
             </div>
           </div>
         )}
         <div className="pdfa-viewport" ref={viewportRef}>
-          <div ref={containerRef} className="pdfa-container" data-tool={tool}>
+          {/* 叠加层(手写预览/选中/框选)挂在滚动容器**里**按内容坐标定位:滚动零重绘零滞后。
+              pdf.js 只认 container.firstElementChild(.pdfViewer)当页面宿主,后头的兄弟它不碰。 */}
+          <div ref={containerRef} className="pdfa-container" data-tool={tool} tabIndex={readOnly ? undefined : -1}>
             <div className="pdfViewer" />
+            {ready && containerRef.current && eng.current
+              && (pendingInk.current.length > 0 || committingInk.current.length > 0 || ghostInk.current.length > 0 || liveInk.current) && (
+              <InkPreview
+                viewer={eng.current.viewer}
+                container={containerRef.current}
+                strokes={[...ghostInk.current, ...committingInk.current, ...pendingInk.current]}
+                live={liveInk.current}
+              />
+            )}
+            {ready && containerRef.current && eng.current && selRef.current && tool === 'mouse' && (
+              <SelOverlay
+                viewer={eng.current.viewer}
+                container={containerRef.current}
+                sel={selRef.current}
+                drag={selDragRef.current}
+                api={selApiRef.current}
+              />
+            )}
+            {ready && containerRef.current && eng.current && selMarqRef.current && tool === 'mouse' && (
+              <MarqueeBox viewer={eng.current.viewer} container={containerRef.current} m={selMarqRef.current} />
+            )}
           </div>
           {drag && viewportRef.current && (
             <ShapePreview drag={drag} kind={tool as ShapeKind} color={color} shape={shape} host={viewportRef.current} />
@@ -588,6 +1489,138 @@ function ShapePreview({ drag, kind, color, shape, host }: {
   )
 }
 
+/** 手写预览层:未落盘笔画 + 正在画的一笔,Excalidraw 同款填充轮廓。
+ *  挂在滚动容器里、每页一个 svg 按内容坐标定位 → 滚动零重绘零滞后(在容器外按视口坐标挂,
+ *  重绘慢一帧,快滚时笔迹肉眼可见地漂移——实报)。
+ *  笔迹点存 PDF 用户空间,经 viewport.transform(PDF→页面 css px)整组投影,缩放/旋转全靠这一个矩阵。 */
+function InkPreview({ viewer, container, strokes, live }: {
+  viewer: any; container: HTMLElement; strokes: InkStroke[]; live: InkStroke | null
+}) {
+  const byPage = new Map<number, InkStroke[]>()
+  for (const s of live ? [...strokes, live] : strokes) {
+    const arr = byPage.get(s.pageIndex)
+    if (arr) arr.push(s)
+    else byPage.set(s.pageIndex, [s])
+  }
+  return (
+    <div className="pdfa-inkov">
+      {[...byPage.entries()].map(([p, list]) => {
+        const box = pageBox(viewer, container, p)
+        if (!box) return null
+        return (
+          <svg key={p} width={box.width} height={box.height} style={{ left: box.left, top: box.top }}>
+            <g transform={`matrix(${box.t.join(' ')})`}>
+              {list.map((s, i) => {
+                const d = outlineToSvgPath(strokeOutline(s.pts, s.width, s.simulate, s !== live))
+                return d ? <path key={i} d={d} fill={s.color} fillOpacity={s.opacity} /> : null
+              })}
+            </g>
+          </svg>
+        )
+      })}
+    </div>
+  )
+}
+
+/** 拖动中的注释替身:按 raw 几何在 matrix 组里重画一份跟手(本体像素烙在页 canvas 里挪不动,
+ *  落盘重载后才跳到新位置)。矩形/圆只描边(pdf.js 不暴露 /IC 分不清实心);Ink 用中心线描边近似
+ *  (视觉宽=自家 4.25 系数,外来真线宽 Ink 会偏粗——只是拖动预览,落点不受影响);
+ *  便签图标是真 DOM 由 shiftTextSections 位移;FreeText 只有虚线框跟随。 */
+function DragGhost({ items, drag, t }: { items: SelItem[]; drag: { dx: number; dy: number }; t: number[] }) {
+  return (
+    <svg className="pdfa-selghost" width={0} height={0}>
+      <g transform={`matrix(${t.join(' ')}) translate(${drag.dx} ${drag.dy})`}>
+        {items.map((it) => {
+          const a = it.raw
+          if (!a) return null
+          const col = rgbOf(a.color)
+          const w = a.borderStyle?.width || 1
+          if (it.subtype === 'Ink') {
+            return inkListsOf(a).map((flat, i) => {
+              let d = ''
+              for (let k = 0; k + 1 < flat.length; k += 2) d += `${k ? 'L' : 'M'}${flat[k]} ${flat[k + 1]}`
+              return <path key={`${it.id}-${i}`} d={d} fill="none" stroke={col} strokeWidth={w * 4.25} strokeLinecap="round" strokeLinejoin="round" opacity={0.85} />
+            })
+          }
+          if (it.subtype === 'Line' && Array.isArray(a.lineCoordinates)) {
+            const l = a.lineCoordinates
+            return <line key={it.id} x1={l[0]} y1={l[1]} x2={l[2]} y2={l[3]} stroke={col} strokeWidth={w} opacity={0.85} />
+          }
+          if (it.subtype === 'Square' || it.subtype === 'Circle') {
+            const r = a.rect
+            const x0 = Math.min(r[0], r[2]), y0 = Math.min(r[1], r[3])
+            const rw = Math.abs(r[2] - r[0]), rh = Math.abs(r[3] - r[1])
+            return it.subtype === 'Square'
+              ? <rect key={it.id} x={x0 + w / 2} y={y0 + w / 2} width={Math.max(1, rw - w)} height={Math.max(1, rh - w)} fill="none" stroke={col} strokeWidth={w} opacity={0.85} />
+              : <ellipse key={it.id} cx={x0 + rw / 2} cy={y0 + rh / 2} rx={Math.max(1, rw / 2 - w / 2)} ry={Math.max(1, rh / 2 - w / 2)} fill="none" stroke={col} strokeWidth={w} opacity={0.85} />
+          }
+          return null
+        })}
+      </g>
+    </svg>
+  )
+}
+
+/** 选中注释的覆盖层:每条一个虚线框(可移动类拖动中跟随位移,钉在文字上的不动)+ 一个浮条
+ *  (删除;单选便签多「编辑」)。挂在滚动容器里按内容坐标定位(同 InkPreview)。 */
+function SelOverlay({ viewer, container, sel, drag, api }: {
+  viewer: any
+  container: HTMLElement
+  sel: { pageIndex: number; items: SelItem[] }
+  drag: { dx: number; dy: number } | null
+  api: { del: () => void; edit: () => void } | null
+}) {
+  const box = pageBox(viewer, container, sel.pageIndex)
+  if (!box) return null
+  const t = box.t
+  const proj = (x: number, y: number): [number, number] => [t[0] * x + t[2] * y + t[4], t[1] * x + t[3] * y + t[5]]
+  let minL = Infinity, minT = Infinity, maxB = -Infinity
+  const boxes = sel.items.map((it) => {
+    const movable = MOVABLE_SUBTYPES.has(it.subtype)
+    const dx = drag && movable ? drag.dx : 0
+    const dy = drag && movable ? drag.dy : 0
+    const [ax, ay] = proj(it.rect[0] + dx, it.rect[1] + dy)
+    const [bx, by] = proj(it.rect[2] + dx, it.rect[3] + dy)
+    const l = Math.min(ax, bx), tp = Math.min(ay, by), h = Math.abs(by - ay)
+    minL = Math.min(minL, l)
+    minT = Math.min(minT, tp)
+    maxB = Math.max(maxB, tp + h)
+    return { key: it.id, left: l, top: tp, width: Math.abs(bx - ax), height: h }
+  })
+  const single = sel.items.length === 1 ? sel.items[0] : null
+  return (
+    <div className="pdfa-selov" style={{ left: box.left, top: box.top }}>
+      {drag && <DragGhost items={sel.items.filter((it) => MOVABLE_SUBTYPES.has(it.subtype) && it.subtype !== 'Text')} drag={drag} t={t} />}
+      {boxes.map((b) => <div key={b.key} className="pdfa-selbox" style={{ left: b.left, top: b.top, width: b.width, height: b.height }} />)}
+      {!drag && (
+        <div className="pdfa-selbar" style={{ left: minL, top: minT < 34 ? maxB + 6 : minT - 30 }}>
+          {single?.subtype === 'Text' && <button className="pdfa-btn" onClick={() => api?.edit()}>编辑</button>}
+          <button className="pdfa-btn" onClick={() => api?.del()}>
+            {sel.items.length > 1 ? `删除 ${sel.items.length} 条` : '删除'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 框选矩形(鼠标模式空白处拖出):端点存 PDF 页坐标,渲染时投影——滚动/缩放中框都贴住页面。 */
+function MarqueeBox({ viewer, container, m }: {
+  viewer: any; container: HTMLElement; m: { pageIndex: number; ax: number; ay: number; bx: number; by: number }
+}) {
+  const box = pageBox(viewer, container, m.pageIndex)
+  if (!box) return null
+  const t = box.t
+  const proj = (x: number, y: number): [number, number] => [t[0] * x + t[2] * y + t[4], t[1] * x + t[3] * y + t[5]]
+  const [ax, ay] = proj(m.ax, m.ay)
+  const [bx, by] = proj(m.bx, m.by)
+  return (
+    <div className="pdfa-selov" style={{ left: box.left, top: box.top }}>
+      <div className="pdfa-marquee" style={{ left: Math.min(ax, bx), top: Math.min(ay, by), width: Math.abs(bx - ax), height: Math.abs(by - ay) }} />
+    </div>
+  )
+}
+
 const THUMB_W = 128
 
 /** 页面缩略图栏:懒渲染(进入视口才画),点击跳页,当前页高亮。 */
@@ -608,11 +1641,19 @@ function Thumbs({ doc, current, onPick }: { doc: any; current: number; onPick: (
           if (!alive) return
           const base = page.getViewport({ scale: 1 })
           const vp = page.getViewport({ scale: (THUMB_W / base.width) * 2 }) // 2x 清晰度
-          el.width = vp.width
-          el.height = vp.height
-          const task = page.render({ canvasContext: el.getContext('2d'), viewport: vp })
+          // 画进离屏 canvas,完成后同帧一次贴回——pdf.js 渲染开场就整块刷白,
+          // 直接画在可见 canvas 上,swapDoc 后每张缩略图都要白闪一下。
+          const off = document.createElement('canvas')
+          off.width = vp.width
+          off.height = vp.height
+          const task = page.render({ canvasContext: off.getContext('2d'), viewport: vp })
           tasks.add(task)
-          task.promise.catch(() => { /* cancelled */ }).finally(() => tasks.delete(task))
+          task.promise.then(() => {
+            if (!alive) return
+            el.width = off.width
+            el.height = off.height
+            el.getContext('2d')?.drawImage(off, 0, 0)
+          }).catch(() => { /* cancelled */ }).finally(() => tasks.delete(task))
         }).catch(() => { /* doc destroyed */ })
       }
     }, { root: wrap.parentElement, rootMargin: '400px' })

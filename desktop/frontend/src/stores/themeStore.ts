@@ -8,12 +8,23 @@ import { create } from 'zustand'
 import { track } from '../achievements/store'
 import { applyTheme, removeInjectedThemeStyles, syncWindowMaterial } from '../theme/loader'
 import {
-  resolveInitialLang, resolveInitialSkin, resolveInitialMode, listSkins, listLanguages,
-  hasLanguage, mergeDiskThemes, clearDiskThemes, DEFAULT_SEED, DEFAULT_LANG,
+  resolveInitialLang, resolveInitialSkin, resolveInitialEffectiveMode, resolveInitialModePref, systemMode,
+  forcedSchemeForLanguage, listSkins, listLanguages, hasLanguage, mergeDiskThemes, clearDiskThemes,
+  DEFAULT_SEED, DEFAULT_LANG,
 } from '../theme/registry'
 
 type Mode = 'light' | 'dark'
+type ModePref = 'light' | 'dark' | 'system'
 const SKIN_IDS: string[] = listSkins().map((s) => s.id)
+
+/** 主题锁定的 colorScheme(校验版,store 与设置面板共用同一判定)。 */
+const langForcedScheme = forcedSchemeForLanguage
+
+/** 持久化用户明暗偏好。**只在用户显式动作里调**(setModePref/setTheme)——启动/重载/换语言不写,
+ * 否则新装机会把默认 light 写成「看似用户选过」,且多窗口初始化互相盖(codex Medium-1)。 */
+function persistPref(pref: ModePref): void {
+  try { localStorage.setItem('forsion_theme_pref', pref) } catch { /* private mode */ }
+}
 
 /** 明暗切换走 View Transition(整页交叉淡入,连 logo 明暗也一起淡);不支持/reduced-motion 时直接执行。 */
 function withModeTransition(fn: () => void): void {
@@ -26,7 +37,12 @@ function withModeTransition(fn: () => void): void {
 interface ThemeState {
   lang: string
   skin: string
+  /** 落地明暗(偏好=system 时=系统当前值);Shell/组件消费这个,语义不变。 */
   mode: Mode
+  /** 用户明暗偏好(可为 system);被主题 colorScheme 强制时=强制值。设置面板据此高亮。 */
+  modePref: ModePref
+  /** 当前语言是否锁定了明暗(colorScheme);锁定时明暗切换禁用。 */
+  modeLocked: boolean
   seed: string
   /** custom 配色的独立背景色 seed(''=未设,背景跟随强调色微染——旧单色行为)。 */
   bgSeed: string
@@ -36,8 +52,10 @@ interface ThemeState {
   themesVersion: number
   setLang(lang: string): void
   setSkin(skin: string): void
-  setMode(mode: Mode): void
-  setTheme(lang: string, skin: string, mode: Mode): void
+  /** 设明暗偏好(light|dark|system);主题锁定 colorScheme 时忽略。 */
+  setModePref(pref: ModePref): void
+  /** lang+skin+偏好一次设定;第三参是**偏好**(可 system),非落地明暗。 */
+  setTheme(lang: string, skin: string, pref: ModePref): void
   setSeed(seed: string): void
   setSeedValue(seed: string): void
   /** 设/清 custom 背景色(''=清除恢复跟随);当前为 custom 时即时重应用。 */
@@ -73,25 +91,63 @@ async function fetchDiskThemes(): Promise<Array<{ id: string; manifest: Record<s
 }
 
 export const useTheme = create<ThemeState>((set, get) => {
-  const apply = (lang: string, skin: string, mode: Mode, seed: string): void => {
+  // 纯「应用视觉 + 派生状态」:userPref 原样保留在 state;主题锁定 colorScheme 则**落地明暗**取强制值。
+  // 只写派生的 forced_scheme hint(给 index.html 首屏脚本防闪);**不写 forsion_theme_pref**——
+  // 那是用户偏好,仅由 setModePref/setTheme 经 persistPref 写(见 Medium-1)。
+  const apply = (lang: string, skin: string, userPref: ModePref, seed: string): void => {
+    const forced = langForcedScheme(lang)
+    const eff = forced ?? userPref
+    const mode: Mode = eff === 'system' ? systemMode() : eff
     applyTheme(lang, skin, mode, { customColor: skin === 'custom' ? seed : undefined })
-    set({ lang, skin, mode, seed })
+    try {
+      if (forced) localStorage.setItem('forsion_theme_forced_scheme', forced)
+      else localStorage.removeItem('forsion_theme_forced_scheme')
+    } catch { /* private mode */ }
+    set({ lang, skin, mode, modePref: userPref, modeLocked: forced !== undefined, seed })
   }
+  // 偏好=system(或被主题强制 system)时,跟随 OS 明暗实时切换。监听器只装一次(store 工厂只跑一次)。
+  try {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const onSysChange = (): void => {
+      const s = get()
+      const eff = langForcedScheme(s.lang) ?? s.modePref
+      if (eff !== 'system') return
+      const next = systemMode()
+      if (next === s.mode) return
+      withModeTransition(() => {
+        applyTheme(s.lang, s.skin, next, { customColor: s.skin === 'custom' ? s.seed : undefined })
+        set({ mode: next })
+      })
+    }
+    if (mq.addEventListener) mq.addEventListener('change', onSysChange)
+    else mq.addListener(onSysChange) // 老 WebKit 兜底
+  } catch { /* 无 matchMedia:system 偏好退化为首屏解析后固定 */ }
+
+  const initialLang = resolveInitialLang()
   return {
-    lang: resolveInitialLang(),
+    lang: initialLang,
     skin: resolveInitialSkin(),
-    mode: resolveInitialMode(),
+    mode: resolveInitialEffectiveMode(), // 含 forced_scheme hint,与首屏一致(codex High-1)
+    modePref: resolveInitialModePref(),  // 用户偏好(不含强制),换走锁定主题后恢复它
+    modeLocked: langForcedScheme(initialLang) !== undefined,
     seed: readSeed(),
     bgSeed: readBgSeed(),
     glass: readGlass(),
     flat: readFlat(),
     themesVersion: 0,
-    setLang: (lang) => apply(lang, get().skin, get().mode, get().seed),
+    setLang: (lang) => apply(lang, get().skin, get().modePref, get().seed),
     // 成就打点只在用户显式换主题/配色的动作里(setTheme/setSkin);严禁挪进 apply——启动初始化也走 apply 会误计。
-    setSkin: (skin) => { track('theme.change'); apply(get().lang, skin, get().mode, get().seed) },
-    setMode: (mode) => withModeTransition(() => apply(get().lang, get().skin, mode, get().seed)),
-    setTheme: (lang, skin, mode) => { track('theme.change'); apply(lang, skin, mode, get().seed) },
-    setSeed: (seed) => apply(get().lang, 'custom', get().mode, seed),
+    setSkin: (skin) => { track('theme.change'); apply(get().lang, skin, get().modePref, get().seed) },
+    // 主题锁定 colorScheme 时,用户改不动明暗(setModePref 忽略);过渡动画仅在真正切换时放。
+    // 用户显式动作 → persistPref 写入偏好(apply 不写,见 Medium-1)。
+    setModePref: (pref) => {
+      if (langForcedScheme(get().lang)) return
+      if (pref === get().modePref) return
+      persistPref(pref)
+      withModeTransition(() => apply(get().lang, get().skin, pref, get().seed))
+    },
+    setTheme: (lang, skin, pref) => { track('theme.change'); persistPref(pref); apply(lang, skin, pref, get().seed) },
+    setSeed: (seed) => apply(get().lang, 'custom', get().modePref, seed),
     // 只更新 seed 值 + 持久化(若当前是 custom 则即时重应用);不强行切到 custom——对齐 App.tsx onSeedChange。
     setSeedValue: (seed) => {
       try { localStorage.setItem('forsion_theme_seed', seed) } catch { /* ignore */ }
@@ -120,7 +176,8 @@ export const useTheme = create<ThemeState>((set, get) => {
       try { localStorage.setItem('forsion_theme_flat', on ? '1' : '0') } catch { /* ignore */ }
       set({ flat: on })
     },
-    toggleMode: () => get().setMode(get().mode === 'dark' ? 'light' : 'dark'),
+    // 快捷明暗(ribbon/命令面板/插件):主题锁定时静默无效;否则翻到当前落地明暗的反面(显式覆盖 system)。
+    toggleMode: () => { if (get().modeLocked) return; get().setModePref(get().mode === 'dark' ? 'light' : 'dark') },
     cycleSkin: () => {
       const i = SKIN_IDS.indexOf(get().skin)
       get().setSkin(SKIN_IDS[(i + 1) % SKIN_IDS.length])
@@ -135,11 +192,10 @@ export const useTheme = create<ThemeState>((set, get) => {
       const list = await fetchDiskThemes()
       if (list.length) mergeDiskThemes(list)
       // 承接首屏:持久化语言若是刚合并的磁盘主题(首屏被回退到 lovable),现重应用其结构。
-      const want = persistedLang && hasLanguage(persistedLang) ? persistedLang : null
-      if (want && want !== get().lang) {
-        applyTheme(want, get().skin, get().mode, { customColor: get().skin === 'custom' ? get().seed : undefined })
-        set({ lang: want })
-      }
+      // 走 apply(而非裸 applyTheme):磁盘 manifest 此刻才可见,借它按 colorScheme 强制/解锁明暗
+      //(如 genesis-glass 首屏还不知道要锁 system,合并后这里才补上——配合 forced_scheme 首屏 hint 防闪)。
+      const want = persistedLang && hasLanguage(persistedLang) ? persistedLang : get().lang
+      apply(want, get().skin, get().modePref, get().seed)
       set({ themesVersion: get().themesVersion + 1 })
     },
     reloadThemes: async () => {
@@ -148,8 +204,9 @@ export const useTheme = create<ThemeState>((set, get) => {
       const list = await fetchDiskThemes()
       if (list.length) mergeDiskThemes(list)
       const target = hasLanguage(get().lang) ? get().lang : DEFAULT_LANG // 当前语言被删 → 回退默认
-      applyTheme(target, get().skin, get().mode, { customColor: get().skin === 'custom' ? get().seed : undefined })
-      set({ lang: target, themesVersion: get().themesVersion + 1 })
+      // 同样走 apply:用户编辑了 theme.json 的 colorScheme 后重载即生效。
+      apply(target, get().skin, get().modePref, get().seed)
+      set({ themesVersion: get().themesVersion + 1 })
     },
   }
 })

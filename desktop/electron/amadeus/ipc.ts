@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs'
+import { promises as fs, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { app, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import { IPC, gatePluginManifest, sanitizeOnboarding, type DbReadResult, type DrawingReadResult, type ExternalPluginSource, type PageProps } from '@amadeus-shared/ipc'
@@ -113,7 +113,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
   }
   const engineDeps = {
     loadCreds: () => loadTanguCreds(),
-    onStatus: (s: unknown) => getWindow()?.webContents.send(SYNC_IPC.status, { ...(s as object), side: onCloudSide() ? 'cloud' : 'local' }),
+    // pendingDeletions 恒发全引擎合计:设置页整包替换状态,若只带本引擎计数,别的引擎持有的
+    // 待确认删除会被一条无关事件顶掉 → 确认按钮消失、删除卡死。
+    onStatus: (s: unknown) =>
+      getWindow()?.webContents.send(SYNC_IPC.status, {
+        ...(s as object),
+        pendingDeletions: totalPendingDeletions(),
+        side: onCloudSide() ? 'cloud' : 'local',
+      }),
     onPresence: (_vaultId: string, d: unknown) => {
       const p = d as { userId?: string; username?: string; page?: string | null; at?: number } | null
       if (!p?.userId) return
@@ -204,7 +211,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
   const entryEngineDeps = (vaultRoot: string): typeof engineDeps & { onRemoteApplied: (ev: CloudChange) => void } => ({
     ...engineDeps,
     onStatus: (s: unknown) =>
-      getWindow()?.webContents.send(SYNC_IPC.status, { ...(s as object), side: 'local', binding: vaultRoot }),
+      getWindow()?.webContents.send(SYNC_IPC.status, {
+        ...(s as object),
+        pendingDeletions: totalPendingDeletions(),
+        side: 'local',
+        binding: vaultRoot,
+      }),
     onRemoteApplied: (ev) => onEntryRemote(vaultRoot, ev),
   })
   const refreshEntryBindings = async (): Promise<void> => {
@@ -358,7 +370,18 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
     }
   }
 
-  ipcMain.handle(SYNC_IPC.get, () => ({ ...sync.getStatus(), side: onCloudSide() ? 'cloud' : 'local' }))
+  /** 全部引擎(主镜像+共享+按条目)待确认删除合计:设置页据此显示删除保护提示。 */
+  const totalPendingDeletions = (): number => {
+    let n = sync.getStatus().pendingDeletions
+    for (const { engine } of sharedEngines.values()) n += engine.getStatus().pendingDeletions
+    for (const { engine } of entryEngines.values()) n += engine.getStatus().pendingDeletions
+    return n
+  }
+  ipcMain.handle(SYNC_IPC.get, () => ({
+    ...sync.getStatus(),
+    pendingDeletions: totalPendingDeletions(),
+    side: onCloudSide() ? 'cloud' : 'local',
+  }))
   ipcMain.handle(SYNC_IPC.setEnabled, (_e, on: boolean) => sync.setEnabled(on))
   // 踢一遍所有同步引擎(主镜像 + 共享 + 按条目):auth-required/停摆的引擎会经 syncNow 内部转 restart
   // 重读凭据并拉起双向同步。手动「立即同步」与「登录后自动拉起」(main.ts auth:forsionLogin)共用此函数。
@@ -369,11 +392,55 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
     return sync.syncNow()
   }
   ipcMain.handle(SYNC_IPC.syncNow, () => kickAllSync())
+  // 删除保护放行:对所有引擎生效(有待确认删除的才会真正动作)。
+  ipcMain.handle(SYNC_IPC.confirmDeletions, () => {
+    for (const { engine } of sharedEngines.values()) engine.confirmMassDeletions()
+    for (const { engine } of entryEngines.values()) engine.confirmMassDeletions()
+    const st = sync.confirmMassDeletions()
+    return { ...st, pendingDeletions: totalPendingDeletions(), side: onCloudSide() ? 'cloud' : 'local' }
+  })
 
   // ── 按条目云同步 IPC 面 ────────────────────────────────────────────────────
   ipcMain.handle(SYNC_IPC.entryGet, async () => {
     const cfg = await readConfig()
     return { vaults: cfg.entrySync ?? [], activeRoot: vault.getRoot(), cloudRoot: cloudVaultDir() }
+  })
+  // 非活动侧(Local↔Cloud 另一侧)的日历只读快照:递归读该侧根下所有 .db 源文本,供 Calendar 汇总两侧。
+  // 只读(不建 watcher/不写回);另一侧的编辑仍须切到那一侧。两侧物理是分开的两个磁盘根。
+  ipcMain.handle(SYNC_IPC.otherSideDbs, async () => {
+    const active = vault.getRoot()
+    if (!active) return null
+    const cloud = cloudVaultDir()
+    const cfg = await readConfig()
+    // 活动侧是云 → 另一侧是本地(localVault);活动侧是本地 → 另一侧是云镜像目录。
+    const otherRoot = active === cloud ? (cfg.localVault && cfg.localVault !== cloud ? cfg.localVault : null) : cloud
+    if (!otherRoot) return null
+    const dbs: Array<{ rel: string; source: string }> = []
+    const CAP = 500 // ponytail: 上限防病态目录;超了截断(日历库量级远低于此)
+    const walk = async (dir: string, rel: string): Promise<void> => {
+      if (dbs.length >= CAP) return
+      let ents: import('node:fs').Dirent[]
+      try {
+        ents = await fs.readdir(dir, { withFileTypes: true })
+      } catch {
+        return // 另一侧根不存在(未登录云 / 无本地库)→ 空
+      }
+      for (const e of ents) {
+        if (dbs.length >= CAP) break
+        if (e.name.startsWith('.') || e.isSymbolicLink()) continue // 隐藏目录/软链不追
+        const childRel = rel ? `${rel}/${e.name}` : e.name
+        if (e.isDirectory()) await walk(path.join(dir, e.name), childRel)
+        else if (e.isFile() && /\.db$/i.test(e.name)) {
+          try {
+            dbs.push({ rel: childRel, source: await fs.readFile(path.join(dir, e.name), 'utf8') })
+          } catch {
+            /* 单文件读失败跳过 */
+          }
+        }
+      }
+    }
+    await walk(otherRoot, '')
+    return { root: otherRoot, vaultName: otherRoot === cloud ? '云端' : path.basename(otherRoot), dbs }
   })
   ipcMain.handle(
     SYNC_IPC.entryEnable,
@@ -733,6 +800,20 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
     await vault.writeTextFile(drawingPath, source)
   })
 
+  // 通用 vault 文本读写(插件文件类型:ctx.app.readFile/writeFile)。读越界即 null;
+  // 写同 drawingWrite 走 writeTextFile(记自写账本,插件保存不被 watcher 当外部改动回弹)。
+  ipcMain.handle(IPC.readTextFile, async (_e, filePath: string): Promise<string | null> => {
+    if (!vault.getRoot()) return null
+    try {
+      return await fs.readFile(vault.absPath(filePath), 'utf8')
+    } catch {
+      return null
+    }
+  })
+  ipcMain.handle(IPC.writeTextFile, async (_e, filePath: string, text: string) => {
+    await vault.writeTextFile(filePath, text)
+  })
+
   // 「笔记视图」(Bases):行 = 目标文件夹直属笔记,frontmatter 是唯一真源。
   ipcMain.handle(IPC.listPageProps, async (_e, folder: string): Promise<PageProps[]> => {
     if (!vault.getRoot()) return []
@@ -918,6 +999,41 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
   // Amadeus 只是一个 Space,插件属于 Forsion 桌面本体,不属于某个 vault。
   const globalPluginsDir = (): string => path.join(forsionHomeDir(), 'plugins')
 
+  // 校验插件声明的文件类型扩展名是否「安全专用」:防 `.md`/`.txt` 这类通用后缀把整库笔记从 listPages 排空(Codex #11)。
+  // .md 派生必须是复合(`.<子类型>.md`,如 `.mindmap.md`);其它扩展名普通校验。
+  const isSafePluginExt = (ext: unknown): ext is string => {
+    if (typeof ext !== 'string') return false
+    const e = ext.trim().toLowerCase()
+    if (!e.startsWith('.') || e.length < 2 || e.length > 40) return false
+    if (e === '.md' || e === '.markdown' || e === '.txt') return false
+    return e.endsWith('.md') ? /^\.[a-z0-9][a-z0-9-]*\.md$/.test(e) : /^\.[a-z0-9][a-z0-9.-]*$/.test(e)
+  }
+
+  // 同步预扫插件目录的 manifest.json,收集并校验其 fileExtensions —— 只读 manifest,不依赖 main.js(插件坏了也保住
+  // 扩展名保护,Codex #3);同步执行以便在任何 listPages 之前就绪,关掉「listPages 先于 listPlugins 注入」的启动竞态(Codex #2)。
+  const collectPluginExts = (): string[] => {
+    const exts = new Set<string>()
+    let entries: import('node:fs').Dirent[]
+    try {
+      entries = readdirSync(globalPluginsDir(), { withFileTypes: true })
+    } catch {
+      return []
+    }
+    for (const e of entries) {
+      if (!e.isDirectory() || e.name.startsWith('.')) continue
+      try {
+        const m = JSON.parse(readFileSync(path.join(globalPluginsDir(), e.name, 'manifest.json'), 'utf8')) as {
+          fileExtensions?: unknown
+        }
+        if (Array.isArray(m.fileExtensions))
+          for (const x of m.fileExtensions) if (isSafePluginExt(x)) exts.add(x.trim().toLowerCase())
+      } catch {
+        /* skip malformed */
+      }
+    }
+    return [...exts]
+  }
+
   ipcMain.handle(IPC.listPlugins, async (): Promise<ExternalPluginSource[]> => {
     const seen = new Set<string>()
     const out: ExternalPluginSource[] = []
@@ -941,14 +1057,18 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
           minAppVersion?: string
           requiresApp?: string
           onboarding?: unknown
+          fileExtensions?: unknown
         }
         const id = m.id || e.name
         if (seen.has(id)) continue
         // 门禁:apiVersion 不匹配 / 应用太旧 → 列出但不可加载(blocked 徽章),code 不读不发。
         const blocked = gatePluginManifest(m, app.getVersion())
         const code = blocked ? '' : await fs.readFile(path.join(pdir, m.main || 'main.js'), 'utf8')
-        // README 给设置详情页;blocked 也读(无害,帮用户了解这插件是什么)。
-        const readme = await fs.readFile(path.join(pdir, 'README.md'), 'utf8').then((s) => s.slice(0, 65536), () => undefined)
+        // README 给设置详情页;blocked 也读(无害,帮用户了解这插件是什么)。CHANGELOG 同款,渲染成「更新日志」段。
+        const [readme, changelog] = await Promise.all([
+          fs.readFile(path.join(pdir, 'README.md'), 'utf8').then((s) => s.slice(0, 65536), () => undefined),
+          fs.readFile(path.join(pdir, 'CHANGELOG.md'), 'utf8').then((s) => s.slice(0, 65536), () => undefined),
+        ])
         seen.add(id)
         out.push({
           id,
@@ -960,13 +1080,20 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
           minAppVersion: typeof m.minAppVersion === 'string' ? m.minAppVersion : undefined,
           requiresApp: typeof m.requiresApp === 'string' ? m.requiresApp : undefined,
           readme,
+          changelog,
           onboarding: sanitizeOnboarding(m.onboarding),
+          fileExtensions: Array.isArray(m.fileExtensions)
+            ? m.fileExtensions.filter((x): x is string => typeof x === 'string' && !!x).slice(0, 8)
+            : undefined,
           blocked: blocked ?? undefined,
         })
       } catch {
         /* skip malformed plugin */
       }
     }
+    // 主进程 listPages 排除的扩展名 → 用独立的 manifest 预扫(不依赖各插件 main.js 是否可读,Codex #3),
+    // 而非从 out 派生。按 manifest 声明豁免(与启用态无关):禁用/坏掉的插件也不能让其文件掉回笔记被 compiler 改写=毁档。
+    vault.setPluginFileExtensions(collectPluginExts())
     return out
   })
 
@@ -989,6 +1116,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): {
     await fs.writeFile(path.join(pdir, 'manifest.json'), SAMPLE_MANIFEST, 'utf8')
     await fs.writeFile(path.join(pdir, 'main.js'), SAMPLE_MAIN, 'utf8')
   })
+
+  // 启动即同步预扫插件扩展名 → 早于渲染端 restoreVault→listPages,关掉「.mindmap.md 被当页面加载」的启动竞态(Codex #2)。
+  vault.setPluginFileExtensions(collectPluginExts())
 
   sync.start() // 云镜像同步独立于活动 vault,应用启动即拉起(未登录/显式停用时安静待命)
   void refreshSharedBindings() // 与我共享的绑定引擎(未登录时静默,syncNow/共享列表访问时再刷)

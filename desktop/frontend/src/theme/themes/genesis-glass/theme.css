@@ -1,0 +1,245 @@
+/**
+ * Genesis Glass · 琉璃 —— 设计语言:Genesis 结构 × macOS 原生玻璃。
+ *
+ * 双轴模型:语言(data-theme)只管结构,颜色由配色(data-skin)决定。
+ * 本文件**不定义任何颜色**,所有材质都是配色 token 的 color-mix 半透版 ——
+ * 故 cream/coral/teal/lavender/custom × 亮/暗 全部自动成立,
+ * 也就不存在「暗色块漏键拿到亮色值」的 28/28 对称问题(没有一个颜色键被声明)。
+ *
+ * 材质四级(分层做法参考 Zotero Glass:窗口一整块原生玻璃,各层只叠不同浓度的染色):
+ *   0 stage   外壳全透   → 交给窗口的原生 NSVisualEffectView(manifest windowMaterial=system-glass)
+ *   1 chrome  ribbon / 主区外框 / 标签栏     ← 只染色
+ *   2 pane    侧栏(文字密度高,比 chrome 更实)← 只染色
+ *   3 paper   **主视图纸卡 96% 实色 —— 可读性锚点,正文永不透背景**
+ *   4 float   菜单 / 弹窗 / toast / 命令面板 ← 唯一用 CSS backdrop-filter 的一层
+ *
+ * 两条结构性纪律,破了就出 bug:
+ *   · 每层只有**一个**元素上色 —— 上级容器一律置透明,否则染色相乘,玻璃变糊。
+ *   · 外壳层(0/1/2)**绝不加 backdrop-filter** —— 详见下方 chrome 段那段长警告。
+ *
+ * 降级:
+ *   · 设置里的性能开关 data-glass='off' → 全部材质回落实色(见文件末尾)。
+ *   · 非 macOS 无原生 vibrancy,主进程给窗口铺**写死的**实色底(#fbf8f5/#252327,不跟配色)——
+ *     外壳仍是半透染色,于是非 cream 配色下会透出与配色不符的窗口底。CSS 判不了平台,
+ *     绕不过去;要治本得让宿主的降级底色跟随当前配色。见 README「已知边界」。
+ *   · 扁平开关 data-flat='1' 由 base.css 清空三个阴影 token,顶部高光随之消失(符合扁平语义)。
+ */
+
+/* ═══ 结构层:Genesis 的纸感骨架,半径放大到贴近 macOS 面板,字体走系统(mac 即 SF Pro) ═══ */
+[data-theme='genesis-glass'] {
+  --border-width: 1px;
+  --radius-sm: 8px;
+  --radius-md: 11px;
+  --radius-lg: 16px;
+  --radius-chat-surface: 20px;
+  --radius-chat-card: 14px;
+  --font-ui: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', 'Hanken Grotesk',
+    ui-sans-serif, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+
+  /* ── 材质浓度 ──
+   * 这几档已经**接到设置界面**了(theme.json 的 settings[] → 设置→主题→选中卡下方的滑块),
+   * 宿主把值写成 :root 内联变量,所以这里一律 `var(--gl-*, 默认)` 消费。
+   * ⚠ 兜底值必须与 theme.json 里的 default 逐字一致:首帧(主题 <style> 注入前)和「重置」
+   *   之后走的都是这个兜底,对不上就会两个值来回跳。check.mjs 有断言比对。 */
+  --gl-stage: transparent;
+  --gl-chrome: color-mix(in srgb, var(--sidebar-bg) var(--gl-chrome-pct, 46%), transparent);
+  --gl-pane: color-mix(in srgb, var(--sidebar-bg) var(--gl-pane-pct, 58%), transparent);
+  /* paper 是**全实色**,不是「96% 那种几乎实色」——差别很要紧:纸卡里还有 sticky 顶栏
+   * (.amx-toolbar)要盖住滚过去的正文,它只能画同一个色。半透的话两层会叠成 99.84%,
+   * 跟四周 96% 的纸面差一档,滚动时露出一条接缝;而且半透的顶栏本来也盖不住正文。
+   * 用 var(--bg) 一条声明明暗通吃(在使用处解析),暗色块无需镜像。 */
+  --gl-paper: var(--bg);
+  --gl-float: color-mix(in srgb, var(--bg-card) var(--gl-float-pct, 84%), transparent);
+  /* 边线从 --text 派生而不是 --border:--border 在部分配色里本身就是 rgba(lavender 亮色是 0.1 alpha),
+   * 再乘一次半透就淡到看不见 —— 而浮层压在壁纸上时,边缘正是最需要交代的地方。
+   * --text 各配色恒为不透明色,且明暗自动反向(暗色下自然得到浅色描边)。 */
+  --gl-hairline: color-mix(in srgb, var(--text) 12%, transparent);
+
+  /* 只有 float 层用得上 CSS 模糊(外壳层的模糊由窗口原生材质提供,见下方 chrome 段的警告)。
+   * saturate 是「玻璃」与「灰雾」的分界:透过来的内容不提饱和度就是一层脏灰。两档都可在设置里调。 */
+  --gl-blur-float: blur(var(--gl-blur-radius, 40px)) saturate(var(--gl-saturate, 190%));
+
+  /* 顶缘高光 = 光打在玻璃上沿。走 --card-shadow 而非独立 token,好处是扁平开关能一并清掉。 */
+  --card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 1px 2px rgba(0, 0, 0, 0.06),
+    0 16px 40px -12px rgba(0, 0, 0, 0.2);
+  --btn-shadow: var(--inset);
+  --icon-shadow: var(--inset);
+
+  /* base.css 的 .modal/.toast/.jump-bottom 直接消费这个 → 免费拿到 float 材质。
+   * --panel-blur 只有 :root(0,1,0) 一个竞争者,放这儿够用;--bg-glass 不行,见下面那块。 */
+  --panel-blur: var(--gl-blur-float);
+}
+
+/* ⚠ --bg-glass 必须单独放在 (0,3,0):skins.css 在 :root[data-skin='…'](0,2,0)/
+ * :root.dark[data-skin='…'](0,3,0) 里逐配色定义了它,压过上面那个 (0,1,0) 的块。
+ * 不提特异性的话本主题的 float 材质对 .modal/.toast/.jump-bottom 完全不生效
+ * ——更糟的是 data-glass='off' 时它们会停在配色给的 0.9 alpha 上,毛玻璃关了却还是半透明。
+ * 暗色不必镜像:值是 var(--gl-float),在使用处解析,自动跟着暗色块走;
+ * 与 :root.dark[data-skin] 同为 (0,3,0) 打平,磁盘主题的 <style> 注入更晚而胜。 */
+:root[data-theme='genesis-glass'][data-skin] {
+  --bg-glass: var(--gl-float);
+}
+
+/* ═══ 暗色:只调材质浓度与高光/阴影,不碰颜色(颜色由配色的暗色块给) ═══
+ * 暗色下窗后壁纸普遍比 UI 亮,染色要更厚才压得住,否则侧栏文字发飘。
+ * 暗色不设独立旋钮:在**同一个**滑块上加一个固定增量(+10/+8/+2,即原来亮暗两组值的差),
+ * 于是用户拖一次两边一起动、亮暗的相对关系恒定。calc() 进 color-mix 百分比位实测可用。 */
+.dark[data-theme='genesis-glass'] {
+  --gl-chrome: color-mix(in srgb, var(--sidebar-bg) calc(var(--gl-chrome-pct, 46%) + 10%), transparent);
+  --gl-pane: color-mix(in srgb, var(--sidebar-bg) calc(var(--gl-pane-pct, 58%) + 8%), transparent);
+  --gl-float: color-mix(in srgb, var(--bg-card) calc(var(--gl-float-pct, 84%) + 2%), transparent);
+  --gl-hairline: color-mix(in srgb, var(--text) 14%, transparent);
+  --card-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.4),
+    0 20px 48px -12px rgba(0, 0, 0, 0.6);
+  --btn-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --icon-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* ═══ 0 stage:一路透到窗口,让原生 vibrancy 成为唯一底 ═══ */
+/* html 的实色底是 index.html 的 FOUC 脚本用**内联样式**打的(root.style.background),
+ * 选择器压不过内联,只有 author !important 能 —— 这是全文件唯一一处 !important。 */
+:root[data-theme='genesis-glass'] {
+  background: var(--gl-stage) !important;
+}
+[data-theme='genesis-glass'] body,
+[data-theme='genesis-glass'] .shell,
+[data-theme='genesis-glass'] .shell-top,
+[data-theme='genesis-glass'] .shell-work,
+[data-theme='genesis-glass'] .wb-dockview {
+  background: var(--gl-stage);
+}
+
+/* Dockview 自己那几个底色变量必须清空,否则 groupview 的玻璃上面还盖着一层实色。 */
+[data-theme='genesis-glass'] .dockview-theme-lcl {
+  --dv-background-color: transparent;
+  --dv-group-view-background-color: transparent;
+  --dv-tabs-and-actions-container-background-color: transparent;
+}
+
+/* ═══ 1 chrome:左侧 ribbon + 主区外框(纸卡四周那圈) ═══
+ *
+ * ⚠⚠ 外壳各层只染色,**绝不加 backdrop-filter** —— 加了会出两个问题,别好心加回来:
+ *
+ * 1)真会坏事:backdrop-filter 让该元素成为其 position:fixed 后代的**包含块**。
+ *    编辑器里一堆浮层是 fixed + getBoundingClientRect 算出的视口坐标、且**就地渲染不 portal**
+ *    (EventCard 的 .amx-cal-cardwrap、.amx-db-pop、.amx-hoverprev、.amx-trash-wrap、ShareCard …),
+ *    它们都在 .dv-react-part → .dv-groupview 里。给 groupview 上 filter,这些卡片会整体偏移
+ *    该组的原点,还可能被相邻组盖住。
+ * 2)且它什么也没干:外壳是最底下那层,它背后是透明的 .shell/body/html —— backdrop root 里
+ *    根本没有可糊的像素。真正的模糊来自窗口的原生 NSVisualEffectView(manifest 的
+ *    windowMaterial=system-glass),不是 CSS。
+ *
+ * CSS 模糊只留给 float 层:那一层背后真有 app 内容要糊,而且它们是叶子浮层,不含 fixed 后代。 */
+[data-theme='genesis-glass'] .rb,
+[data-theme='genesis-glass'] .dockview-theme-lcl .dv-groupview:not(:has(.wb-tab--icon)) {
+  background: var(--gl-chrome);
+}
+/* 未读角标原本用 --sidebar-bg 描边把自己从图标上抠出来,在玻璃上会变成一枚实色晕。 */
+[data-theme='genesis-glass'] .rb-badge {
+  border-color: color-mix(in srgb, var(--sidebar-bg) 60%, transparent);
+}
+
+/* ═══ 2 pane:侧栏组(图标 tab 的那些)—— 比 chrome 厚一档,托住高密度文字 ═══
+ * 同上:只染色,不加 backdrop-filter。 */
+[data-theme='genesis-glass'] .dockview-theme-lcl .dv-groupview:has(.wb-tab--icon) {
+  background: var(--gl-pane);
+}
+/* 侧栏内容面自带实色 --sidebar-bg,会把上面那层玻璃整个盖死 → 透明,只当玻璃的内容层。 */
+[data-theme='genesis-glass'] .t2s-side {
+  background: transparent;
+}
+/* 标签栏不单独上色(继承所在组的材质),也刻意不加底线 —— 与 Genesis 「tab 栏与正文无分割线」一致。
+ * 但激活标签的胶囊底 engine.css 给的是实色 --bg-card,压在半透外壳上像贴了块白片:
+ * 改成同样半透的一层薄洗,让它浮在材质里而不是盖在材质上。阴影仍走 --icon-shadow(扁平开关能清)。 */
+[data-theme='genesis-glass'] .dockview-theme-lcl .dv-tab.dv-active-tab:not(:has(.wb-tab--icon)) .wb-tab {
+  background: color-mix(in srgb, var(--bg-card) 62%, transparent);
+}
+
+/* ═══ 3 paper:主视图纸卡 = 可读性锚点 ═══
+ * 玻璃只做外壳,正文一律落在这张实色纸上。
+ * ⚠ 选择器必须逐段照抄 engine.css 那条(0,4,0),只加 [data-theme] 前缀凑成 (0,5,0) ——
+ * 少写一段 :not(:has()) 就压不过它的 background: var(--sidebar-bg),纸卡四周会糊上一层实色。
+ * ⚠ padding **不要动**:engine.css 的 sash 位移和 sashAffordance.ts 的 CARD_INSET=8 都按 8px
+ * 标定,磁盘主题改不了那个 TS 常量,改成 10px 会让分割线/刻度落在纸卡可见边缘内 2px。 */
+[data-theme='genesis-glass'] .dockview-theme-lcl .dv-groupview:not(:has(.wb-tab--icon)) .dv-content-container {
+  background: transparent;
+}
+[data-theme='genesis-glass'] .dockview-theme-lcl .dv-groupview:not(:has(.wb-tab--icon)) .dv-content-container > .dv-react-part {
+  background: var(--gl-paper);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--card-shadow);
+}
+/* Amadeus 的 sticky 顶栏就在纸卡**内部**,与纸面必须逐字节同色,否则滚动时露一条横缝。
+ * 二者都是 var(--bg),这条其实与 host 同值——留着是把这个约束写死:改了 --gl-paper 就得改这里。 */
+[data-theme='genesis-glass'] .amx-toolbar {
+  background: var(--gl-paper);
+}
+
+/* ═══ 4 float:浮在一切之上的层 —— 最厚模糊 + 描边 + 独立层叠上下文 ═══
+ * isolation 是必需的:不隔离的话 backdrop-filter 会去采样同一层叠上下文里的兄弟元素,
+ * 浮层会把自己底下的浮层也糊进来。
+ *
+ * ⚠ 只能挂在**画卡片那个元素**上,不能挂在它的 fixed 外壳上 —— 外壳往往是无背景的定位/动画容器
+ * (.amx-trash-wrap 之于 .amx-trash-pop、.amx-qf-scrim 之于 .amx-qf),给外壳上色会在卡片外
+ * 多画一个矩形。成就 toast 就是这么被剔出去的:.ach-toast 是 340×52 的定位壳,真卡是里面那颗
+ * 圆角 26px 的 .ach-toast-body,且带 clip-path 揭示动画 —— 它自己吃 --bg-card + --card-shadow,
+ * 本主题重定义了 --card-shadow,观感已经跟上,不需要单独处理。 */
+[data-theme='genesis-glass'] .ctx-menu,
+[data-theme='genesis-glass'] .cmd-panel,
+[data-theme='genesis-glass'] .project-menu,
+[data-theme='genesis-glass'] .t2c-menu,
+[data-theme='genesis-glass'] .amx-qf,
+[data-theme='genesis-glass'] .amx-trash-pop,
+[data-theme='genesis-glass'] .memv-modal-box,
+[data-theme='genesis-glass'] .dv-edge-right {
+  background: var(--gl-float);
+  backdrop-filter: var(--gl-blur-float);
+  -webkit-backdrop-filter: var(--gl-blur-float);
+  border: var(--gl-hairline-width, 1px) solid var(--gl-hairline);
+  box-shadow: var(--card-shadow);
+  isolation: isolate;
+}
+/* 命令面板的遮罩:玻璃主题下减薄压暗、加大模糊,让底下的外壳退成景深而不是被涂黑。 */
+[data-theme='genesis-glass'] .cmd-overlay {
+  background: color-mix(in srgb, var(--overlay-scrim) 45%, transparent);
+  backdrop-filter: blur(6px) saturate(120%);
+  -webkit-backdrop-filter: blur(6px) saturate(120%);
+}
+/* 右栏折叠钮是浮在工作区上的方块,圆一点才像 macOS 的悬浮控件。 */
+[data-theme='genesis-glass'] .dv-edge-right {
+  border-radius: var(--radius-sm);
+}
+
+/* ═══ 二级界面(设置 / 市场):仿 macOS 系统设置 —— 左栏玻璃,右侧内容实色纸 ═══
+ * 这些是开在主窗之上的全屏浮层(.fs-overlay)。宿主在浮层打开时把主窗 shell 藏掉
+ * (visibility:hidden),所以把浮层链透到窗口后,左栏的半透染色叠的是**窗口原生玻璃(壁纸)**,
+ * 而不是身后的主窗 UI —— 与主窗侧栏完全同一套机理(半透色 + 原生材质,不用 CSS backdrop-filter)。
+ * 右侧内容是实色纸,保证设置项文字可读(同主视图纸卡的可读性承诺)。 */
+[data-theme='genesis-glass'] .fs-overlay { background: var(--gl-stage); }
+[data-theme='genesis-glass'] .fs-overlay .settings-page { background: transparent; }
+[data-theme='genesis-glass'] .fs-overlay .settings-nav { background: var(--gl-pane); }
+[data-theme='genesis-glass'] .fs-overlay .settings-main,
+[data-theme='genesis-glass'] .fs-overlay .settings-main-head { background: var(--gl-paper); }
+
+/* ═══ 降级:性能开关关掉毛玻璃时,材质全部回落实色 ═══
+ * base.css 的 html[data-glass='off'] * 只清 backdrop-filter,不管染色 —— 不补这块的话
+ * 半透明面板会直接压在窗口底上,看着像掉色。带 [data-mode] 抬到 (0,4,0),稳压上面的暗色块。
+ * stage 也必须跟着回实色:glass=off 时 loader 会把窗口材质切回 opaque,而主进程给的实色窗口底
+ * 是写死的 #fbf8f5/#252327,不随配色走 —— 舞台再透就会露出这个与配色不符的底。 */
+:root[data-theme='genesis-glass'][data-glass='off'][data-mode] {
+  --gl-stage: var(--bg);
+  --gl-chrome: var(--sidebar-bg);
+  --gl-pane: var(--sidebar-bg);
+  --gl-float: var(--bg-card);
+  --gl-hairline: var(--border);
+}
+
+/* ═══ 非 macOS / 浏览器构建:舞台回实色 ═══
+ * 只有 darwin 会被 main.tsx 打上 data-platform='mac',别处没有原生 vibrancy,主进程铺的是
+ * **写死的** #fbf8f5/#252327(不跟配色)。舞台若还透着,coral/teal/lavender/custom 就会
+ * 压在一块与配色不符的底上。这里把舞台钉回 var(--bg),外壳各层的半透染色照旧 ——
+ * 于是非 mac 上呈现为「柔和分层的实色主题」,而不是掉色。
+ * (0,3,0) 与暗色块打平、位置更靠后,故生效;毛玻璃开关那块 (0,4,0) 仍能压过它。 */
+:root[data-theme='genesis-glass']:not([data-platform='mac']) {
+  --gl-stage: var(--bg);
+}

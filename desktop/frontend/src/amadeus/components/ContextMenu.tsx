@@ -1,7 +1,8 @@
 // A small right-click context menu positioned at the cursor. Closes on any outside
 // click, another right-click, blur, or Escape.
 
-import { useEffect, type CSSProperties } from 'react'
+import { useEffect } from 'react'
+import { useClampedMenu } from '../lib/clampMenu'
 
 export interface MenuItem {
   label: string
@@ -37,14 +38,12 @@ export function ContextMenu({
     }
   }, [onClose])
 
-  // Keep the menu inside the viewport.
-  const style: CSSProperties = {
-    left: Math.min(x, window.innerWidth - 200),
-    top: Math.min(y, window.innerHeight - (items.length * 34 + 12)),
-  }
+  // 量真实尺寸后夹进视口(纵向溢出上移、横向溢出收进屏幕),取代硬编码宽高的估算。
+  const { ref, style } = useClampedMenu(x, y, [items.length])
 
   return (
     <div
+      ref={ref}
       className="ctx-menu"
       style={style}
       onClick={(e) => e.stopPropagation()}

@@ -193,3 +193,13 @@ export async function getLocalSkill(id: string): Promise<SkillRecord | null> {
   const all = await listLocalSkills();
   return all.find((s) => s.id === id) || null;
 }
+
+/** 该 slug 是否为包内置技能(受保护:manage_skill 不得 create 覆盖 / update / delete)。 */
+export async function isBuiltinSkillName(slug: string): Promise<boolean> {
+  try {
+    await fs.access(path.join(builtinSkillsDir(), slug, 'SKILL.md'));
+    return true;
+  } catch {
+    return false;
+  }
+}

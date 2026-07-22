@@ -9,6 +9,9 @@
  * .settings-body 的 position/overflow 这类「只有 Amadeus 设、Tangu 没设」的附加属性错位弹层布局、
  * 下半区点不动。@layer 只能压同名同属性,拦不住附加属性,故改用 `.am-app` 作用域彻底隔离)。
  * bridge/recipes 无需 scope:本就 tangu-lovable + am- 前缀限定,只精修编辑器块。 */
+/* 注:编辑器块样式只经此 @import 进真身(main.tsx 只 import 本文件);
+   改 styles.css 后 vite 对「仅 @import 的 CSS」HMR 不稳,渲染器可能不刷新——
+   动本文件(如此注释)可强制重推;彻底刷新用 Cmd+R。 */
 @import './amadeus/styles.css';
 @import './amadeus/theme/lcl/recipes.css';
 @import './amadeus/lcl/bridge.css';
@@ -46,12 +49,10 @@
 .am-app .page-view { padding-left: 48px; padding-right: 48px; }
 .am-app .edge-zone { flex-basis: 0; }
 .am-app .column { padding-left: 0; padding-right: 0; }
-.am-app .block-host { grid-template-columns: 1fr; }
-.am-app .block-gutter { position: absolute; left: -26px; top: 0; }
 .am-app .block-body { padding-left: 2px; }
 .am-app .drop-line { left: 0; right: 0; }
-/* Notion 式块菜单开启时,块整体高亮(菜单 = 点 ⠿ 或块上右键;右侧小图标列已移除)。 */
-.am-app .block-host[data-menu] { background: var(--accent-soft, var(--surface, rgba(127, 127, 127, 0.08))); }
+/* 块手柄位置/选中态都归 styles.css 统管(手柄 right:100% 浮左侧页边距、正文与标题对齐);
+   此处不再覆盖 .block-gutter 位置,也不再给 [data-menu] 整块底色(会与选中底纹叠成两层,用户报) */
 
 /* 顶部工具条(sticky,随滚动常驻顶部):左 前进后退 + 路径面包屑 / 右 模式切换钮。
  * 与编辑器融为一体:实色纸面底(var(--bg),同 dockview 纸面),不玻璃、不分割线、不投影;
@@ -345,6 +346,22 @@
 }
 .am-app .embed-media-btn:hover { background: var(--overlay-light, rgba(127, 127, 127, 0.1)); color: var(--text); }
 .am-app .embed-pdf { display: block; width: 100%; height: 420px; border: none; background: var(--bg); }
+/* 自家只读 PDF 阅读器形态的嵌入外壳(iframe 版仅作解析失败兜底)。 */
+.am-app .embed-pdf-live {
+  position: relative;
+  height: 480px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.am-app .embed-pdf-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 13px;
+}
 .am-app .embed-video { display: block; width: 100%; max-height: 420px; background: #000; }
 .am-app .embed-audio { display: block; width: 100%; padding: 8px 10px; }
 

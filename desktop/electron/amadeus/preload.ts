@@ -79,6 +79,8 @@ const api: AmadeusApi = {
   writeDatabase: (dbPath, data) => ipcRenderer.invoke(IPC.dbWrite, dbPath, data),
   readDrawing: (pagePath, ref) => ipcRenderer.invoke(IPC.drawingRead, pagePath, ref),
   writeDrawing: (drawingPath, source) => ipcRenderer.invoke(IPC.drawingWrite, drawingPath, source),
+  readTextFile: (filePath) => ipcRenderer.invoke(IPC.readTextFile, filePath),
+  writeTextFile: (filePath, text) => ipcRenderer.invoke(IPC.writeTextFile, filePath, text),
   listPageProps: (folder) => ipcRenderer.invoke(IPC.listPageProps, folder),
   setPageFrontmatter: (pagePath, patch) => ipcRenderer.invoke(IPC.setPageFrontmatter, pagePath, patch),
   renamePageFile: (oldPath, newBaseName) => ipcRenderer.invoke(IPC.renamePageFile, oldPath, newBaseName),
@@ -92,6 +94,7 @@ contextBridge.exposeInMainWorld('amadeusSync', {
   get: () => ipcRenderer.invoke(SYNC_IPC.get),
   setEnabled: (on: boolean) => ipcRenderer.invoke(SYNC_IPC.setEnabled, on),
   syncNow: () => ipcRenderer.invoke(SYNC_IPC.syncNow),
+  confirmDeletions: () => ipcRenderer.invoke(SYNC_IPC.confirmDeletions),
   switchSide: (side: 'local' | 'cloud') => ipcRenderer.invoke(SYNC_IPC.switchSide, side),
   onStatus: (cb: (s: unknown) => void) => {
     const listener = (_e: IpcRendererEvent, s: unknown): void => cb(s)
@@ -102,6 +105,7 @@ contextBridge.exposeInMainWorld('amadeusSync', {
   },
   // 按条目云同步(本地 vault 子集 ↔ 云端 <Vault名>/)
   entrySyncGet: () => ipcRenderer.invoke(SYNC_IPC.entryGet),
+  otherSideCalDbs: () => ipcRenderer.invoke(SYNC_IPC.otherSideDbs),
   entrySyncEnable: (payload: unknown) => ipcRenderer.invoke(SYNC_IPC.entryEnable, payload),
   entrySyncDisable: (p: string) => ipcRenderer.invoke(SYNC_IPC.entryDisable, p),
   entrySyncClosure: (rootRel: string, kind: 'page' | 'folder') => ipcRenderer.invoke(SYNC_IPC.entryClosure, rootRel, kind),

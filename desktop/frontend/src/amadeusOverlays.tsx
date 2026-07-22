@@ -30,6 +30,15 @@ export function AmadeusOverlays() {
     window.addEventListener('amadeus:template-picker', onPick)
     return () => window.removeEventListener('amadeus:template-picker', onPick)
   }, [])
+  // 同一解耦模式:编辑器层要给用户提示时发事件(目前用于插件斜杠项失败 —— 第三方代码静默失败会被当成「点了没反应」)。
+  useEffect(() => {
+    const onToast = (e: Event): void => {
+      const d = (e as CustomEvent<{ text?: string }>).detail
+      if (d?.text) useUiStore.getState().notify(d.text) // 与插件 ctx.notify 同一条吐司通道(2.6s 自动消失)
+    }
+    window.addEventListener('amadeus:toast', onToast)
+    return () => window.removeEventListener('amadeus:toast', onToast)
+  }, [])
   // [[xxx.db]] 点击应用内开 db tab(pageStore 发事件解耦,同模板选择器模式)。
   useEffect(() => {
     const onOpenDb = (e: Event): void => {

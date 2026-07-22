@@ -17,7 +17,7 @@ import {
 } from '@dnd-kit/core'
 import { usePageStore, type Status } from '../store/pageStore'
 import { findTotal, useFindStore } from '../blocks/markdown/findInPage'
-import { BlockSelectionKeys } from '../store/blockSelection'
+import { BlockSelectionKeys, useBlockSelection } from '../store/blockSelection'
 import { edgeBlock } from '../lib/blockEdges'
 import { Row } from './Row'
 import { BacklinksPanel } from './BacklinksPanel'
@@ -222,6 +222,7 @@ export function PageView({ bare = false }: { bare?: boolean } = {}) {
   const onDragStart = (e: DragStartEvent): void => {
     setActiveId(String(e.active.id))
     setDnd(String(e.active.id), null)
+    useBlockSelection.getState().select(String(e.active.id)) // 拖拽期该块保持高亮
   }
 
   const onDragOver = (e: DragOverEvent): void => {

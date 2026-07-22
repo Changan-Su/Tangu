@@ -178,14 +178,27 @@ export interface StorageBrain {
  * 一行 = 一个 agent 的一个文件(config.toml/SOUL.md/MEMORY.md/LOG/<date>.md/Library/*),哨兵
  * slug '__user__'(USER.md) / '__meta__'(.meta.json)。文本内联,二进制 base64。可选:旧云端 404 → 调用方降级。
  */
-export interface AgentFileMeta { relPath: string; mtimeMs: number; size: number; isBinary: boolean; deleted: boolean }
-export interface AgentFileContent { content?: string; contentBase64?: string; isBinary: boolean; mtimeMs: number; deleted: boolean }
-export interface AgentFilePutBody { content?: string; contentBase64?: string; isBinary: boolean; size: number; mtimeMs: number; deviceId?: string }
+/** seq/hash 为 2026-07 起的三方对账升级字段;旧云端缺省 → 客户端回退 mtime-LWW(全部 optional 保双向兼容)。 */
+export interface AgentFileMeta { relPath: string; mtimeMs: number; size: number; isBinary: boolean; deleted: boolean; seq?: number; hash?: string | null }
+export interface AgentFileContent { content?: string; contentBase64?: string; isBinary: boolean; mtimeMs: number; deleted: boolean; seq?: number; hash?: string | null }
+export interface AgentFilePutBody {
+  content?: string; contentBase64?: string; isBinary: boolean; size: number; mtimeMs: number; deviceId?: string;
+  /** CAS 票据:0=仅创建;>0=期望当前 seq。不符 → httpBrain 抛 AgentFileConflictError。缺省 = 旧 mtime-LWW。 */
+  baseSeq?: number;
+}
 export interface AgentFilesBrain {
   getManifest(userId: string): Promise<Array<{ slug: string; files: AgentFileMeta[] }>>;
   getFile(userId: string, slug: string, relPath: string): Promise<AgentFileContent | null>;
-  putFile(userId: string, slug: string, relPath: string, body: AgentFilePutBody): Promise<{ mtimeMs: number }>;
-  deleteFile(userId: string, slug: string, relPath: string, mtimeMs: number, deviceId?: string): Promise<void>;
+  putFile(userId: string, slug: string, relPath: string, body: AgentFilePutBody): Promise<{ mtimeMs: number; seq?: number; hash?: string | null }>;
+  deleteFile(userId: string, slug: string, relPath: string, mtimeMs: number, deviceId?: string, baseSeq?: number): Promise<void>;
+}
+
+/** agent 文件 CAS 条件写失败(409)。info.seq=0 = 服务端已无 live 行;content 仅文本 live 行携带。 */
+export class AgentFileConflictError extends Error {
+  constructor(readonly info: { code: string; seq: number; hash: string | null; mtimeMs: number; deleted: boolean; content?: string | null }) {
+    super(`agent file conflict (${info.code}, seq=${info.seq})`);
+    this.name = 'AgentFileConflictError';
+  }
 }
 
 /**

@@ -25,16 +25,20 @@ import { usePageStore } from '../amadeus/store/pageStore'
 import {
   setAggCell,
   createAggEvent,
+  deleteAggRow,
+  duplicateAggRow,
   firstDateCol,
   type AggDb,
   type AggRow,
 } from '../amadeus/store/dbAggregateStore'
 import { useCalendarMembers } from '../amadeus/store/calendarMembers'
 import { useCalendarConfig, colorForDb, isHidden, defaultDbPath } from '../amadeus/store/calendarConfigStore'
-import { useCalendarNav, type CalMode } from '../amadeus/store/calendarNavStore'
+import { useCalendarNav } from '../amadeus/store/calendarNavStore'
 import { useAgentSchedules, useAgentCalDbs } from '../stores/agentScheduleStore'
+import { useOtherVaultCalDbs } from '../stores/otherVaultCalStore'
 import { useApp } from '../stores/appStore'
 import { EventCard, type Anchor } from './calendar/EventCard'
+import { MODE_ITEMS, classifyCalKey } from './calendar/calKeys'
 import {
   HOURS,
   WEEKDAYS,
@@ -106,13 +110,6 @@ function buildEvents(entries: CalEntry[], vault: string, byVault: Parameters<typ
 }
 
 /** 模式下拉(Notion Calendar 式)的条目与单键快捷键。 */
-const MODE_ITEMS: Array<{ id: CalMode; label: string; key: string }> = [
-  { id: 'day', label: '日', key: 'd' },
-  { id: 'week', label: '周', key: 'w' },
-  { id: '3day', label: '3 日', key: '3' },
-  { id: 'month', label: '月', key: 'm' },
-]
-
 const hhmm = (d: Date): string => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 const rectOf = (e: ReactMouseEvent | ReactPointerEvent): Anchor => (e.currentTarget as HTMLElement).getBoundingClientRect()
 const eventValue = (start: Date, end: Date | null, allDay: boolean): string =>
@@ -123,6 +120,7 @@ const commitTime = (ev: CalEvent, start: Date, end: Date | null): void =>
 export function CalendarView() {
   const members = useCalendarMembers()
   const agentDbs = useAgentCalDbs()
+  const otherDbs = useOtherVaultCalDbs() // 非活动侧(Local↔Cloud 另一侧)只读日历,汇总两侧(任务1)
   const cfg = useApp((s) => s.cfg)
   const vault = usePageStore((s) => s.vaultRoot) ?? ''
   const byVault = useCalendarConfig((s) => s.byVault)
@@ -134,6 +132,8 @@ export function CalendarView() {
   const [card, setCard] = useState<{ key: string; at: Anchor } | null>(null)
   const titleRef = useRef<HTMLSpanElement>(null)
   const api = useRef<CalApi>(null)
+  const selRef = useRef<CalEvent | null>(null) // 常驻键盘 effect 读当前选中(避免 [] 闭包读旧值)
+  const clipRef = useRef<{ db: AggDb; rowId: string } | null>(null) // 复制的事件(会话内内存剪贴板)
 
   // mini 日历点某日 → 主区丝滑跳转(当前挂载的 month/time 子视图各自在自身坐标系里滚动)。
   useEffect(() => {
@@ -154,14 +154,15 @@ export function CalendarView() {
   const entries = useMemo<CalEntry[]>(
     () => [
       ...members.map((m) => ({ db: m.db, dateCol: m.dateCol })),
-      ...agentDbs.map((db) => ({ db, dateCol: firstDateCol(db)?.id })).filter((x): x is CalEntry => !!x.dateCol),
+      ...[...agentDbs, ...otherDbs].map((db) => ({ db, dateCol: firstDateCol(db)?.id })).filter((x): x is CalEntry => !!x.dateCol),
     ],
-    [members, agentDbs],
+    [members, agentDbs, otherDbs],
   )
   const events = useMemo(() => buildEvents(entries, vault, byVault), [entries, vault, byVault])
   // 无名事件不上网格,但仍留在 events 里:编辑卡清空名字时卡片会话不许闪关(选中走全量查找)。
   const visible = useMemo(() => events.filter((e) => e.title), [events])
   const selected = card ? events.find((e) => e.key === card.key) ?? null : null
+  selRef.current = selected
   const openCard = (key: string, at: Anchor): void => setCard({ key, at })
 
   const resolveDefaultDb = (): CalEntry | null => {
@@ -183,16 +184,39 @@ export function CalendarView() {
     openCard(`${db.path}::${newId}`, at)
   }
 
-  // 单键快捷键(D/W/3/M,Notion Calendar 式):输入控件/修饰键组合不劫持。
+  // 键盘:D/W/3/M 切模式、←/→ 翻上/下一周期(任务3)、Cmd/Ctrl+C/V 复制粘贴选中事件、
+  // Delete/Backspace 删除(任务2)。输入控件不劫持;选中/剪贴板经 ref(effect 常驻,免闭包读旧值)。
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return
       const t = e.target as HTMLElement | null
       if (t && t.closest('input, textarea, select, [contenteditable]')) return
-      const hit = MODE_ITEMS.find((m) => m.key === e.key.toLowerCase())
-      if (!hit) return
+      const act = classifyCalKey(e)
+      if (!act) return
+      const sel = selRef.current
+      switch (act.kind) {
+        case 'copy':
+          if (sel && !sel.readonly) clipRef.current = { db: sel.db, rowId: sel.row.rowId }
+          break
+        case 'paste':
+          if (clipRef.current) void duplicateAggRow(clipRef.current.db, clipRef.current.rowId)
+          break
+        case 'delete':
+          if (sel && !sel.readonly) {
+            deleteAggRow(sel.db, sel.row.rowId)
+            setCard(null)
+          }
+          break
+        case 'prev':
+          api.current?.prev()
+          break
+        case 'next':
+          api.current?.next()
+          break
+        case 'mode':
+          useCalendarNav.getState().setMode(act.mode)
+          break
+      }
       e.preventDefault()
-      useCalendarNav.getState().setMode(hit.id)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

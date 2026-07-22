@@ -2,20 +2,34 @@
  * 本地 ↔ Forsion Brain 记忆/日志同步(out-of-band,不在 agent 热路径)。默认手动触发(隐私优先),
  * 设置可开自动。云端是统一 per-user 中心(AI Studio 网页与 Tangu 共享同一份)。
  *
- *   Memory:单 blob,**LWW(更新者覆盖)**——比较本地 localUpdatedAt 与云端 updatedAt(信任大致同步的时钟,
- *           即用户选定的「更新的内容覆盖」)。同步后把两个水位都对齐到云端 ts,避免来回 ping-pong。
+ *   Memory:单 blob,**基线三方**(2026-07 起):本地存上次收敛点快照(.MEMORY.base.md),
+ *           单侧变更定向传播(与时钟无关);双侧都变 → diff3 三方合并,干净则推合并结果('merged'),
+ *           有冲突块 → 退回 LWW 定胜负,但**输方内容先存档**为 `MEMORY (conflict …).md`,绝不静默丢。
+ *           无基线(首次升级)→ 旧 LWW,pull 覆盖前若本地有内容也先存档。
  *   Log:   按日,**带 deviceId 的追加合并**——两边条目块取并集、按块去重,各自补齐缺失的。不丢条目。
  *
  * 未登录 / 离线:云端调用失败 → 整体 no-op(catch),本地记忆照常工作。
  */
+import { diff3Merge } from 'node-diff3';
 import type { MemoryBrain } from '../seams/cloudBrain.js';
 import type { LocalMemoryStore } from '../adapters/standalone/localMemoryBrain.js';
 
 export interface SyncResult {
   ok: boolean;
-  memory: 'pushed' | 'pulled' | 'in-sync' | 'skipped';
+  memory: 'pushed' | 'pulled' | 'merged' | 'in-sync' | 'skipped';
   logs: Array<{ date: string; pushed: number; pulled: number }>;
   error?: string;
+}
+
+/** diff3 行级三方合并;有冲突块 → null(与 desktop reconcile.ts 的 mergeText3 同款)。 */
+export function mergeText3(ours: string, base: string, theirs: string): string | null {
+  const regions = diff3Merge(ours.split('\n'), base.split('\n'), theirs.split('\n'), { excludeFalseConflicts: true });
+  const out: string[] = [];
+  for (const r of regions as Array<{ ok?: string[]; conflict?: unknown }>) {
+    if (r.conflict) return null;
+    if (r.ok) out.push(...r.ok);
+  }
+  return out.join('\n');
 }
 
 /** 任意时间表示 → epoch ms(Date / ISO 串 / null)。无效 → 0。 */
@@ -67,39 +81,79 @@ async function syncMemoryBlob(store: LocalMemoryStore, cloud: MemoryBrain, userI
   const cloudMem = await cloud.getMemory(userId);
   const meta = store.readMeta();
   const localContent = store.readMemory();
+  const cloudContent = cloudMem.content ?? '';
   const localTs = meta.memory.localUpdatedAt;
   const cloudTs = toEpoch(cloudMem.updatedAt);
+  const setBase = store.writeMemoryBase?.bind(store); // 旧 store 实现无此方法时安静降级
 
   // 两边都空 → 无事
-  if (!localContent && !cloudMem.content) return 'in-sync';
+  if (!localContent && !cloudContent) return 'in-sync';
 
-  // 内容相同 → 仅对齐水位
-  if (localContent === cloudMem.content) {
+  // 内容相同 → 仅对齐水位 + 落基线
+  if (localContent === cloudContent) {
     meta.memory.lastCloudUpdatedAt = cloudTs;
     if (cloudTs) meta.memory.localUpdatedAt = cloudTs;
     store.writeMeta(meta);
+    setBase?.(localContent);
     return 'in-sync';
   }
 
-  // LWW:本地更新 → 推;云端更新(或本地为空)→ 拉。
-  const localNewer = localContent && localTs >= cloudTs;
-  if (localNewer) {
-    if (!cloud.setMemory) return 'skipped'; // 旧云端无整体覆盖能力
-    const res = await cloud.setMemory(userId, localContent);
-    const newTs = toEpoch(res.updatedAt) || Date.now();
+  const alignAfterPush = (updatedAt: any, content: string): void => {
+    const newTs = toEpoch(updatedAt) || Date.now();
     const m = store.readMeta();
     m.memory.localUpdatedAt = newTs;
     m.memory.lastCloudUpdatedAt = newTs;
     store.writeMeta(m);
-    return 'pushed';
+    setBase?.(content);
+  };
+  const push = async (content: string): Promise<SyncResult['memory']> => {
+    if (!cloud.setMemory) return 'skipped'; // 旧云端无整体覆盖能力
+    const res = await cloud.setMemory(userId, content);
+    alignAfterPush(res.updatedAt, content);
+    return content === localContent ? 'pushed' : 'merged';
+  };
+  const pull = (): SyncResult['memory'] => {
+    store.writeMemory(cloudContent);
+    const m = store.readMeta();
+    m.memory.localUpdatedAt = cloudTs || m.memory.localUpdatedAt;
+    m.memory.lastCloudUpdatedAt = cloudTs;
+    store.writeMeta(m);
+    setBase?.(cloudContent);
+    return 'pulled';
+  };
+
+  // 基线三方:单侧变更定向传播(时钟无关);双侧都变 → diff3;脏 → LWW + 输者存档。
+  const base = store.readMemoryBase?.() ?? null;
+  if (base !== null) {
+    const localChanged = localContent !== base;
+    const cloudChanged = cloudContent !== base;
+    if (localChanged && !cloudChanged) return push(localContent);
+    if (!localChanged && cloudChanged) return pull();
+    if (localChanged && cloudChanged) {
+      if (!cloud.setMemory) return 'skipped'; // 旧云端推不了任何结果:不合并不存档不覆盖,原样等待
+      const merged = mergeText3(localContent, base, cloudContent);
+      if (merged !== null) {
+        store.writeMemory(merged);
+        return push(merged);
+      }
+      // 合不干净:LWW 定胜负,输方先存档;**存档失败绝不覆盖**。
+      if (localContent && localTs >= cloudTs) {
+        if (store.archiveMemoryConflict?.(cloudContent) === false) return 'skipped';
+        return push(localContent);
+      }
+      if (localContent && store.archiveMemoryConflict?.(localContent) === false) return 'skipped';
+      return pull();
+    }
+    // base 相同但内容不同不可能同时 !localChanged && !cloudChanged(上面 equal 已返回);兜底拉。
+    return pull();
   }
-  // 拉:云端覆盖本地,水位对齐云端 ts(writeMemory 会把 localUpdatedAt 顶到 now,随后改回)
-  store.writeMemory(cloudMem.content);
-  const m = store.readMeta();
-  m.memory.localUpdatedAt = cloudTs || m.memory.localUpdatedAt;
-  m.memory.lastCloudUpdatedAt = cloudTs;
-  store.writeMeta(m);
-  return 'pulled';
+
+  // 无基线(首次升级/旧 store):旧 LWW;pull 覆盖前本地有内容先存档(可能是分叉编辑,保守不丢),
+  // 存档失败绝不覆盖。
+  const localNewer = localContent && localTs >= cloudTs;
+  if (localNewer) return push(localContent);
+  if (localContent && store.archiveMemoryConflict?.(localContent) === false) return 'skipped';
+  return pull();
 }
 
 async function syncLogDate(

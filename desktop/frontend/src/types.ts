@@ -779,6 +779,8 @@ declare global {
       get(): Promise<AmadeusSyncStatus>
       setEnabled(on: boolean): Promise<AmadeusSyncStatus>
       syncNow(): Promise<AmadeusSyncStatus>
+      /** 放行被删除保护拦下的批量删除(可选:旧 preload 构建下缺位)。 */
+      confirmDeletions?(): Promise<AmadeusSyncStatus>
       /** 胶囊滑块:Local↔Cloud 全局切活动 vault;返回与 restoreVault 同形载荷。 */
       switchSide(side: 'local' | 'cloud'): Promise<{ root: string; pages: string[]; folders: string[]; lastPage?: string; side: 'local' | 'cloud' } | null>
       onStatus(cb: (s: AmadeusSyncStatus) => void): () => void
@@ -793,8 +795,61 @@ declare global {
       /** 递归关联闭包(开启弹窗数据源):种子范围外的关联笔记+附件。 */
       entrySyncClosure?(rootRel: string, kind: 'page' | 'folder'): Promise<{ pages: string[]; files: string[] }>
       onEntrySyncChange?(cb: () => void): () => void
+      /** 非活动侧(Local↔Cloud 另一侧)的 .db 只读快照,供 Calendar 汇总两侧日历。null = 无另一侧。 */
+      otherSideCalDbs?(): Promise<AmadeusOtherSideDbs | null>
+    }
+    /** 本地库远程同步(remotely-save 式,S3/WebDAV/文件夹;桌面专属,web/mobile 下 undefined)。 */
+    remoteSync?: {
+      get(): Promise<RemoteSyncState>
+      set(patch: Partial<RemoteSyncConfig>): Promise<RemoteSyncConfig>
+      run(opts?: { dryRun?: boolean; allowMassDelete?: boolean }): Promise<RemoteSyncReport>
+      check(): Promise<{ ok: boolean; error?: string }>
+      onStatus(cb: (s: { running: boolean; lastReport: RemoteSyncReport | null }) => void): () => void
     }
   }
+}
+
+/** 本地库远程同步配置(镜像 electron/remotesyncIpc.ts 的 RemoteSyncConfig)。 */
+export interface RemoteSyncConfig {
+  backend: 'off' | 'folder' | 's3' | 'webdav' | 'penzor'
+  /** 定时同步间隔(分钟);0 = 仅手动。 */
+  intervalMin: number
+  folder?: { path: string }
+  s3?: { endpoint: string; region: string; accessKeyID: string; secretAccessKey: string; bucket: string; prefix?: string; forcePathStyle?: boolean }
+  webdav?: { address: string; username: string; password: string; authType?: 'basic' | 'digest'; baseDir?: string }
+  penzor?: { vault?: string }
+  ignore?: string[]
+  maxFileMB?: number
+}
+
+/** 一次同步的结果(镜像 electron/remotesync/types.ts 的 SyncReport)。 */
+export interface RemoteSyncReport {
+  ok: boolean
+  startedAt: number
+  finishedAt: number
+  pushed: number
+  pulled: number
+  deletedLocal: number
+  deletedRemote: number
+  conflicts: number
+  skippedLarge: string[]
+  pendingDeletions: number
+  errors: string[]
+}
+
+export interface RemoteSyncState {
+  config: RemoteSyncConfig
+  running: boolean
+  lastReport: RemoteSyncReport | null
+  root: string | null
+  rootError: string | null
+}
+
+/** 非活动侧日历只读快照(Calendar 汇总另一侧用)。root=另一侧磁盘根;vaultName=显示名(云端/文件夹名)。 */
+export interface AmadeusOtherSideDbs {
+  root: string
+  vaultName: string
+  dbs: Array<{ rel: string; source: string }>
 }
 
 /** 按条目云同步注册表(镜像 electron/amadeus/sync/entryRegistry.ts)。 */
@@ -836,6 +891,8 @@ export interface AmadeusSyncStatus {
   conflicts: number
   skipped: Array<{ path: string; reason: string }>
   error: string | null
+  /** 被删除保护拦下、等确认的删除条数(旧 preload 无此字段 → undefined 按 0 处理)。 */
+  pendingDeletions?: number
   /** 仅 get() 响应携带:当前活动 vault 在哪一侧。 */
   side?: 'local' | 'cloud'
   /** 按条目同步绑定的状态事件携带:该绑定的本地 vault 根(区分多引擎,防互相覆盖)。 */

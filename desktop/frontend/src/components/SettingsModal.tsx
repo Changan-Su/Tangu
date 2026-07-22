@@ -3,9 +3,10 @@
  * 在 Desktop 主界面内替换 Chat/Inspector 区域，而不是覆盖式弹窗。
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { X, ArrowLeft, Loader2, RefreshCw, Sun, Moon, RotateCcw, LogIn, LogOut, ExternalLink, KeyRound, Plus, Trash2, Plug, Search, Download, Sparkles, Wrench, Check, Globe2, QrCode, Smartphone, FolderOpen, Play, Trophy, FileDown, Settings2, NotebookPen, Puzzle, LayoutGrid, Palette, Keyboard, Bug, Info, Brain, Bot, Webhook, MessageCircle, Blocks } from 'lucide-react'
+import { X, ArrowLeft, Loader2, RefreshCw, Sun, Moon, MonitorCog, RotateCcw, LogIn, LogOut, ExternalLink, KeyRound, Plus, Trash2, Plug, Search, Download, Sparkles, Wrench, Check, Globe2, QrCode, Smartphone, FolderOpen, Play, Trophy, FileDown, Settings2, NotebookPen, Puzzle, LayoutGrid, Palette, Keyboard, Bug, Info, Brain, Bot, Webhook, MessageCircle, Blocks } from 'lucide-react'
 import { ThemeCard } from './ThemeCard'
-import { listLanguages, listSkins } from '../theme/registry'
+import { ThemeSettingsPanel } from './ThemeSettingsPanel'
+import { listLanguages, listSkins, forcedSchemeForLanguage } from '../theme/registry'
 import { applyTheme } from '../theme/loader'
 import { useWorkspace } from '@lcl/engine' // 工作区引擎:恢复默认布局
 import { testConnection } from '../services/agentRunService'
@@ -24,6 +25,7 @@ import type {
 import { SHOW_SYSTEM_PROMPT_KEY } from '../types'
 import { useI18n } from '../i18n'
 import { LocaleToggle } from './LocaleToggle'
+import { RemoteSyncSection } from './RemoteSyncSection'
 import { CHANGELOG } from '../changelog'
 import { Markdown } from './Markdown'
 import { UpdateActions } from './UpdateActions'
@@ -112,13 +114,17 @@ export const SettingsModal: React.FC<{
   cfg: TanguDesktopConfig
   themeLang: string
   themeSkin: string
+  /** 落地明暗(system 偏好已解析),用于主题卡明暗预览。 */
   themeMode: 'light' | 'dark'
+  /** 用户明暗偏好(可 system);明暗切换据此高亮。 */
+  themeModePref: 'light' | 'dark' | 'system'
   glassOn: boolean
   flatOn: boolean
   themeSeed: string
   onClose: () => void
   onConfigChange: (patch: Partial<TanguDesktopConfig>) => void
-  onThemeChange: (lang: string, skin: string, mode: 'light' | 'dark') => void
+  /** 第三参是明暗**偏好**(可 system);父层 setTheme 会按语言 colorScheme 解析。 */
+  onThemeChange: (lang: string, skin: string, pref: 'light' | 'dark' | 'system') => void
   onGlassChange: (on: boolean) => void
   onFlatChange: (on: boolean) => void
   onSeedChange: (hex: string) => void
@@ -1173,6 +1179,23 @@ export const SettingsModal: React.FC<{
                               </span>
                             </div>
                             {noteSync.error && <div className="hint" style={{ color: 'var(--danger, #c00)' }}>{noteSync.error}</div>}
+                            {(noteSync.pendingDeletions ?? 0) > 0 && (
+                              <div className="hint" style={{ color: 'var(--danger, #c00)' }}>
+                                {t('settings.notes.cloudSyncPendingDel', { n: String(noteSync.pendingDeletions) })}{' '}
+                                <button
+                                  className="btn sm"
+                                  disabled={noteSyncBusy || !window.amadeusSync?.confirmDeletions}
+                                  onClick={() => {
+                                    setNoteSyncBusy(true)
+                                    void window.amadeusSync!.confirmDeletions!()
+                                      .then(setNoteSync)
+                                      .finally(() => setNoteSyncBusy(false))
+                                  }}
+                                >
+                                  {t('settings.notes.cloudSyncConfirmDel')}
+                                </button>
+                              </div>
+                            )}
                             {noteSync.skipped.length > 0 && (
                               <div className="hint">
                                 {t('settings.notes.cloudSyncSkipped', { n: String(noteSync.skipped.length) })}:{' '}
@@ -1184,6 +1207,8 @@ export const SettingsModal: React.FC<{
                         )}
                       </div>
                     )}
+
+                    <RemoteSyncSection />
                   </>
                 )}
 
@@ -2048,12 +2073,18 @@ export const SettingsModal: React.FC<{
                             mode={p.themeMode}
                             active={th.manifest.id === p.themeLang}
                             onSelect={() => {
-                              applyTheme(th.manifest.id, p.themeSkin, p.themeMode, { customColor: p.themeSeed })
-                              p.onThemeChange(th.manifest.id, p.themeSkin, p.themeMode)
+                              // 传明暗**偏好**(非落地明暗):换到锁定 colorScheme 的主题时由 setTheme 解析,
+                              // 不在此处先按旧 mode 应用一次(会闪),交给 setTheme 一步到位。
+                              p.onThemeChange(th.manifest.id, p.themeSkin, p.themeModePref)
                             }}
                           />
                         ))}
                       </div>
+                      {/* 选中主题自曝的可调参数(有才渲染);key 带 lang 使换主题时重挂,存值副本跟着重取。 */}
+                      {(() => {
+                        const cur = listLanguages().find((th) => th.manifest.id === p.themeLang)
+                        return cur ? <ThemeSettingsPanel key={p.themeLang} entry={cur} /> : null
+                      })()}
                       <div className="field-row" style={{ gap: 8, marginTop: 8 }}>
                         <button type="button" className="btn sm" onClick={() => { void window.tangu?.openThemesDir?.() }}>
                           <FolderOpen size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
@@ -2085,7 +2116,7 @@ export const SettingsModal: React.FC<{
                             title={t(`settings.theme.skin.${sk.id}`)}
                             onClick={() => {
                               applyTheme(p.themeLang, sk.id, p.themeMode, { customColor: p.themeSeed })
-                              p.onThemeChange(p.themeLang, sk.id, p.themeMode)
+                              p.onThemeChange(p.themeLang, sk.id, p.themeModePref)
                             }}
                           >
                             <i className="skin-dot" style={{ background: sk.id === 'custom' ? p.themeSeed : sk.accent }} />
@@ -2133,31 +2164,37 @@ export const SettingsModal: React.FC<{
                         <div className="hint" style={{ marginTop: 4 }}>{t('settings.theme.customBgHint')}</div>
                       </div>
                     )}
-                    <div className="field">
-                      <label>{t('settings.theme.modeLabel')}</label>
-                      <div className="seg">
-                        <button
-                          className={p.themeMode === 'light' ? 'active' : ''}
-                          onClick={() => {
-                            applyTheme(p.themeLang, p.themeSkin, 'light', { customColor: p.themeSeed })
-                            p.onThemeChange(p.themeLang, p.themeSkin, 'light')
-                          }}
-                        >
-                          <Sun size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
-                          {t('settings.theme.light')}
-                        </button>
-                        <button
-                          className={p.themeMode === 'dark' ? 'active' : ''}
-                          onClick={() => {
-                            applyTheme(p.themeLang, p.themeSkin, 'dark', { customColor: p.themeSeed })
-                            p.onThemeChange(p.themeLang, p.themeSkin, 'dark')
-                          }}
-                        >
-                          <Moon size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
-                          {t('settings.theme.dark')}
-                        </button>
-                      </div>
-                    </div>
+                    {(() => {
+                      // 主题若锁定 colorScheme(如 Glass 固定 system),明暗不可手动改:高亮强制值 + 禁用按钮。
+                      // 用校验版(与 store 同一判定):脏 manifest 值(如 "auto")不会让按钮禁用而 store 却没锁。
+                      const forced = forcedSchemeForLanguage(p.themeLang)
+                      const active = forced ?? p.themeModePref
+                      const opts: Array<{ id: 'light' | 'dark' | 'system'; icon: typeof Sun; label: string }> = [
+                        { id: 'light', icon: Sun, label: t('settings.theme.light') },
+                        { id: 'dark', icon: Moon, label: t('settings.theme.dark') },
+                        { id: 'system', icon: MonitorCog, label: t('settings.theme.system') },
+                      ]
+                      return (
+                        <div className="field">
+                          <label>{t('settings.theme.modeLabel')}</label>
+                          <div className="seg">
+                            {opts.map(({ id, icon: Ic, label }) => (
+                              <button
+                                key={id}
+                                className={active === id ? 'active' : ''}
+                                disabled={!!forced}
+                                title={forced ? t('settings.theme.modeLocked') : undefined}
+                                onClick={() => p.onThemeChange(p.themeLang, p.themeSkin, id)}
+                              >
+                                <Ic size={13} style={{ verticalAlign: -2, marginRight: 4 }} />
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                          {forced && <div className="hint" style={{ marginTop: 4 }}>{t('settings.theme.modeLockedHint')}</div>}
+                        </div>
+                      )
+                    })()}
                     <div className="field">
                       <label>{t('settings.theme.flatLabel')}</label>
                       <div className="seg">

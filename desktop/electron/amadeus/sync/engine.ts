@@ -22,7 +22,7 @@ import { app } from 'electron'
 import chokidar, { type FSWatcher } from 'chokidar'
 import { defaultWorkspaceDir, forsionHomeDir } from '../../forsionHome'
 import { readConfig, writeConfig } from '../settings'
-import { conflictCopyPath, decide } from './reconcile'
+import { conflictCopyPath, decide, mergeText3, shouldTripMassDelete } from './reconcile'
 import {
   isIgnoredName,
   isTextKind,
@@ -38,6 +38,11 @@ import { createShadowSaver, loadShadow, type SyncShadow } from './shadow'
 const MAX_FILE_BYTES = 5 * 1024 * 1024 // 与服务端 MAX_TEXT_BYTES 一致;二进制同限(P1 服务端补齐)
 const RETRY_MS = 30_000
 const SCAN_DEBOUNCE_MS = 2_500
+const MERGE_MAX_BYTES = 1024 * 1024 // markdown 机会性三方合并的单侧上限(超限直接走冲突副本)
+// 删除保护:全量对账计划级(绝对 200 条 / 已跟踪文件的半数且 ≥5)+ 增量 60s 滑窗(防 watcher 风暴级联清空)。
+const MASS_DELETE_ABS = 200
+const DELETE_STORM_WINDOW_MS = 60_000
+const DELETE_STORM_MAX = 50
 
 /** 云 vault 的本地镜像目录:固定、应用管理,与用户自选 vault 无关(胶囊滑块的 Cloud 侧)。
  *  放在隐藏应用数据目录(~/.forsion),彻底不出现在任何工作区文件夹里——本地 vault 若选在
@@ -76,6 +81,8 @@ export interface SyncStatus {
   conflicts: number
   skipped: Array<{ path: string; reason: string }>
   error: string | null
+  /** 被删除保护拦下、等用户确认的删除条数(0 = 无)。confirmMassDeletions 放行。 */
+  pendingDeletions: number
 }
 
 interface EngineDeps {
@@ -155,6 +162,15 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
   let conflicts = 0
   const skipped = new Map<string, string>()
   const saver = createShadowSaver(binding.shadowName)
+  /** 删除保护:待确认的删除(serverPath → 哪一侧将被删)。shadow 保留 → 确认后 fullReconcile 重新推导执行。 */
+  const pendingDeletions = new Map<string, 'local' | 'remote'>()
+  let allowMassDeleteOnce = false
+  const recentDeleteStamps: number[] = []
+  const deleteStorm = (): boolean => {
+    const now = Date.now()
+    while (recentDeleteStamps.length && now - recentDeleteStamps[0] > DELETE_STORM_WINDOW_MS) recentDeleteStamps.shift()
+    return recentDeleteStamps.length >= DELETE_STORM_MAX
+  }
 
   // ── job 队列(严格串行)────────────────────────────────────────────────────
   interface Job {
@@ -278,6 +294,24 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
     }
   }
 
+  /** 自底向上只删**空**目录(rmdir 非递归,构造上安全);非空/失败即保留。 */
+  const removeEmptyDirs = async (abs: string): Promise<void> => {
+    let entries: import('node:fs').Dirent[]
+    try {
+      entries = await fs.readdir(abs, { withFileTypes: true })
+    } catch {
+      return // 不存在:已清
+    }
+    for (const e of entries) {
+      if (e.isDirectory()) await removeEmptyDirs(path.join(abs, e.name))
+    }
+    try {
+      await fs.rmdir(abs)
+    } catch {
+      /* 非空(有幸存文件)→ 保留 */
+    }
+  }
+
   /** 读本地文件内容 hash;不存在返回 null。文本按 utf8 字符串哈希(与服务端 sha256(content) 对齐)。 */
   const localHashOf = async (serverPath: string): Promise<{ hash: string; size: number; mtimeMs: number; buf: Buffer } | null> => {
     const abs = localAbs(serverPath)
@@ -355,21 +389,63 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
     }
     const entry = shadow.files[serverPath]
     if (local && (!entry || local.hash !== entry.hash)) {
-      // 本地有未同步改动 → 先保住:改名为冲突副本(之后作为新文件推上云)。
+      // 本地有未同步改动。markdown 先试机会性三方合并(base 按 shadow 基线从服务端版本快照找);
+      // 干净合并 → 本地落合并稿、shadow 记服务端态、排队推回(竞态由 PUT 409 兜);否则冲突副本。
+      if (entry && kind === 'page' && typeof content === 'string' && (await tryMergeText(serverPath, entry, local, content, seq, hash))) {
+        return
+      }
       await materializeConflictCopy(serverPath)
     }
     await atomicWrite(localAbs(serverPath), content)
     await setShadowEntry(serverPath, seq, hash)
   }
 
-  /** 本地当前内容 → 冲突副本文件;副本随后走正常推送(pushCreate)。 */
+  /** markdown 冲突的机会性合并:base = 服务端版本快照里 seq === shadow.seq 且 hash 对得上的那份。
+   *  找不到 base / 超限 / 合并有冲突块 / 任何网络错 → false,回落冲突副本(保守优先,绝不冒险)。 */
+  const tryMergeText = async (
+    serverPath: string,
+    entry: { seq: number; hash: string },
+    local: { buf: Buffer; hash: string },
+    serverContent: string,
+    serverSeq: number,
+    serverHash: string,
+  ): Promise<boolean> => {
+    try {
+      if (!client || !shadow) return false
+      if (local.buf.length > MERGE_MAX_BYTES || serverContent.length > MERGE_MAX_BYTES) return false
+      const versions = await client.listVersions(shadow.vaultId, serverPath)
+      const v = versions.find((x) => x.seq === entry.seq)
+      if (!v) return false
+      const base = await client.getVersion(shadow.vaultId, v.id)
+      if (sha256(base) !== entry.hash) return false // 快照对不上基线(5min 合并窗跳过等)→ 不赌
+      const merged = mergeText3(local.buf.toString('utf8'), base, serverContent)
+      if (merged === null) return false
+      await atomicWrite(localAbs(serverPath), merged)
+      await setShadowEntry(serverPath, serverSeq, serverHash) // shadow=服务端态 → 下面这单对账把合并稿推回
+      enqueue({ key: serverPath, run: () => reconcileLocal(serverPath) })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** 本地当前内容 → 冲突副本文件;副本随后走正常推送(pushCreate)。
+   *  同分钟重复冲突不互相覆盖(-2/-3… 递增);副本没保住(非 ENOENT)必须抛错中止,
+   *  让调用方(pullPath)放弃覆盖原文件——宁可这单同步卡住重试,不吃掉用户改动。 */
   const materializeConflictCopy = async (serverPath: string): Promise<void> => {
-    const copyServerPath = normalizeServerPath(conflictCopyPath(serverPath, new Date()))
-    if (!copyServerPath) return
+    const first = normalizeServerPath(conflictCopyPath(serverPath, new Date()))
+    if (!first) return
+    const dot = first.lastIndexOf('.')
+    const hasExt = dot > first.lastIndexOf('/')
+    const stem = hasExt ? first.slice(0, dot) : first
+    const ext = hasExt ? first.slice(dot) : ''
+    let copyServerPath = first
+    for (let n = 2; existsSync(localAbs(copyServerPath)); n++) copyServerPath = `${stem}-${n}${ext}`
     try {
       await fs.rename(localAbs(serverPath), localAbs(copyServerPath))
-    } catch {
-      return // 本地文件已不在:没有可保的
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') return // 本地文件已不在:没有可保的
+      throw e
     }
     conflicts++
     enqueue({ key: copyServerPath, run: () => reconcileLocal(copyServerPath) })
@@ -382,6 +458,13 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
     const entry = shadow.files[serverPath] ?? null
     const d = decide(local?.hash ?? null, entry, null)
     if (d.kind === 'deleteLocal') {
+      if (!allowMassDeleteOnce && deleteStorm()) {
+        // 远端删除风暴:保住本地与 shadow,记待确认;确认后 fullReconcile 重新推导收敛。
+        pendingDeletions.set(serverPath, 'local')
+        emitStatus()
+        return
+      }
+      recentDeleteStamps.push(Date.now())
       try {
         await fs.rm(localAbs(serverPath), { force: true })
       } catch {
@@ -474,11 +557,9 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
         for (const key of Object.keys(shadow.files)) {
           if (key === p || key.startsWith(prefix)) await applyRemoteDelete(key)
         }
-        try {
-          await fs.rm(localAbs(p), { recursive: true, force: true })
-        } catch {
-          /* 留给编辑胜删除的文件会在 pushCreate 时重建目录 */
-        }
+        // 绝不递归 rm:整目录强删会误杀「编辑胜删除」幸存者、风暴闸保住的文件、从未上云的本地文件
+        // (含待推送的冲突副本)。逐文件删除已由上面的 applyRemoteDelete 完成,这里只做空目录清扫。
+        await removeEmptyDirs(localAbs(p))
         break
       }
     }
@@ -502,7 +583,13 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
       return
     }
     if (srvContent === null && srvSeq === 0) {
-      // CONFLICT + 服务端已无此文件(基线期间被删):编辑胜删除 → 重建
+      // CONFLICT + 服务端已无此文件(基线期间被删):编辑胜删除 → 重建。
+      // 已无基线还 409(路径撞服务端文件夹等)→ 记 skipped,防「drop→重推→再 409」死循环。
+      if (!shadow?.files[serverPath]) {
+        skipped.set(serverPath, body?.code || 'EXISTS')
+        emitStatus()
+        return
+      }
       dropShadowEntry(serverPath)
       enqueue({ key: serverPath, run: () => reconcileLocal(serverPath) })
       return
@@ -537,7 +624,7 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
     }
   }
 
-  const pushBinary = async (serverPath: string): Promise<void> => {
+  const pushBinary = async (serverPath: string, baseSeq: number): Promise<void> => {
     if (!client || !shadow) return
     const local = await localHashOf(serverPath)
     if (!local) {
@@ -549,9 +636,35 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
       emitStatus()
       return
     }
-    const r = await client.putBinary(shadow.vaultId, serverPath, local.buf)
-    skipped.delete(serverPath)
-    await setShadowEntry(serverPath, r.seq, local.hash)
+    try {
+      const r = await client.putBinary(shadow.vaultId, serverPath, local.buf, { baseSeq })
+      skipped.delete(serverPath)
+      await setShadowEntry(serverPath, r.seq, local.hash)
+    } catch (e) {
+      if (e instanceof CloudHttpError && e.status === 409) {
+        const srvSeq = Number(e.body?.seq ?? 0)
+        const srvHash: string | null = e.body?.hash ?? null
+        if (srvHash !== null && srvHash === local.hash) {
+          await setShadowEntry(serverPath, srvSeq, local.hash) // 两端写了相同字节
+          return
+        }
+        if (srvSeq === 0) {
+          // 服务端已无此文件(或路径撞了文件夹/文本)。有基线 → 编辑胜删除按新文件重推;
+          // 已无基线还 409 → 记 skipped 防死循环。
+          if (!shadow.files[serverPath]) {
+            skipped.set(serverPath, e.body?.code || 'EXISTS')
+            emitStatus()
+            return
+          }
+          dropShadowEntry(serverPath)
+          enqueue({ key: serverPath, run: () => reconcileLocal(serverPath) })
+          return
+        }
+        await pullPath(serverPath, srvSeq) // 真冲突:服务端赢原路径,本地进冲突副本
+        return
+      }
+      throw e
+    }
   }
 
   const pushDelete = async (serverPath: string): Promise<void> => {
@@ -559,7 +672,7 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
     const entry = shadow.files[serverPath]
     if (!entry) return
     if (isTextKind(kindForServerPath(serverPath))) {
-      // 删除无 CAS → 先探服务端是否自基线后动过(动过=编辑胜删除,拉回)。
+      // 旧服务端兜底探测(新服务端下与 baseSeq 条件删双保险;GET→DELETE 窗口由 409 堵上)。
       try {
         const f = await client.getFile(shadow.vaultId, serverPath)
         if (f.seq !== entry.seq) {
@@ -574,8 +687,15 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
         throw e
       }
     }
-    // ponytail: 二进制不做删除前探测(asset 路由不回 seq);图片被并发编辑的窗口忽略。
-    await client.deleteFile(shadow.vaultId, serverPath)
+    try {
+      await client.deleteFile(shadow.vaultId, serverPath, entry.seq) // 条件删:基线后被写过 → 409
+    } catch (e) {
+      if (e instanceof CloudHttpError && e.status === 409) {
+        await pullPath(serverPath, Number(e.body?.seq ?? 0) || null) // 编辑胜删除:拉回
+        return
+      }
+      throw e
+    }
     dropShadowEntry(serverPath)
   }
 
@@ -603,13 +723,20 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
     switch (d.kind) {
       case 'push':
         if (isTextKind(kindForServerPath(serverPath))) await pushText(serverPath, d.baseSeq)
-        else await pushBinary(serverPath)
+        else await pushBinary(serverPath, d.baseSeq)
         break
       case 'pushCreate':
         if (isTextKind(kindForServerPath(serverPath))) await pushText(serverPath, 0)
-        else await pushBinary(serverPath)
+        else await pushBinary(serverPath, 0)
         break
       case 'pushDelete':
+        if (!allowMassDeleteOnce && deleteStorm()) {
+          // 本地删除风暴(误删镜像目录/watcher 级联):暂不删云端,等确认。
+          pendingDeletions.set(serverPath, 'remote')
+          emitStatus()
+          break
+        }
+        recentDeleteStamps.push(Date.now())
         await pushDelete(serverPath)
         break
       case 'dropShadow':
@@ -681,6 +808,10 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
     const localStats = await walkLocal()
     const paths = new Set<string>([...remote.keys(), ...localStats.keys(), ...Object.keys(shadow.files)])
 
+    // 先出全量计划(纯判定),过删除保护阈值,再执行——否则级联删除(空根/坏 tree/误删镜像)
+    // 一路执行到底,发现时已清空。tracked 用对账前的 shadow 条数。
+    const tracked = Object.keys(shadow.files).length
+    const plan: Array<{ sp: string; d: ReturnType<typeof decide>; rSeq: number | null; localHash: string | null }> = []
     for (const sp of paths) {
       const entry = shadow.files[sp] ?? null
       const r = remote.get(sp) ?? null
@@ -691,21 +822,40 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
         if (entry && entry.size === st.size && entry.mtimeMs === st.mtimeMs) localHash = entry.hash
         else localHash = (await localHashOf(sp))?.hash ?? null
       }
-      const d = decide(localHash, entry, r ? { seq: r.seq, hash: r.hash } : null)
+      plan.push({ sp, d: decide(localHash, entry, r ? { seq: r.seq, hash: r.hash } : null), rSeq: r?.seq ?? null, localHash })
+    }
+    const delCount = plan.filter((p) => p.d.kind === 'deleteLocal' || p.d.kind === 'pushDelete').length
+    const tripped = !allowMassDeleteOnce && shouldTripMassDelete(delCount, tracked, MASS_DELETE_ABS)
+    pendingDeletions.clear()
+
+    for (const { sp, d, rSeq, localHash } of plan) {
+      if (tripped && (d.kind === 'deleteLocal' || d.kind === 'pushDelete')) {
+        pendingDeletions.set(sp, d.kind === 'deleteLocal' ? 'local' : 'remote')
+        continue
+      }
+      if (d.kind === 'deleteLocal' || d.kind === 'pushDelete') {
+        // 计划是老照片:出计划到执行之间用户可能改了/重建了该文件。破坏性动作前重验本地现状,
+        // 不符 → 弃用旧决策,重新入队单路径对账。
+        const cur = (await localHashOf(sp))?.hash ?? null
+        if (cur !== localHash) {
+          enqueue({ key: sp, run: () => reconcileLocal(sp) })
+          continue
+        }
+      }
       switch (d.kind) {
         case 'adopt':
-          await setShadowEntry(sp, r!.seq, localHash!)
+          await setShadowEntry(sp, rSeq!, localHash!)
           break
         case 'pull':
-          await pullPath(sp, r?.seq ?? null)
+          await pullPath(sp, rSeq)
           break
         case 'push':
           if (isTextKind(kindForServerPath(sp))) await pushText(sp, d.baseSeq)
-          else await pushBinary(sp)
+          else await pushBinary(sp, d.baseSeq)
           break
         case 'pushCreate':
           if (isTextKind(kindForServerPath(sp))) await pushText(sp, 0)
-          else await pushBinary(sp)
+          else await pushBinary(sp, 0)
           break
         case 'pushDelete':
           await pushDelete(sp)
@@ -719,7 +869,7 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
           dropShadowEntry(sp)
           break
         case 'conflict':
-          await pullPath(sp, r?.seq ?? null) // pullPath 内脏检测会先物化冲突副本
+          await pullPath(sp, rSeq) // pullPath 内脏检测会先试合并、再物化冲突副本
           break
         case 'dropShadow':
           dropShadowEntry(sp)
@@ -728,6 +878,11 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
           break
       }
     }
+    if (allowMassDeleteOnce) {
+      allowMassDeleteOnce = false // 一次性放行已消费
+      recentDeleteStamps.length = 0
+    }
+    if (tripped) emitStatus()
 
     // 服务端文件夹 → 本地补目录(空文件夹也可见);本地空目录刻意不上推。
     for (const f of tree.folders) {
@@ -847,6 +1002,9 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
     stopWatcher()
     jobs.length = 0
     queuedKeys.clear()
+    pendingDeletions.clear()
+    allowMassDeleteOnce = false
+    recentDeleteStamps.length = 0
     const cfg = await readConfig()
     if (gen !== generation) return
     const cs = cfg.cloudSync
@@ -934,6 +1092,7 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
     conflicts,
     skipped: [...skipped].map(([p, reason]) => ({ path: p, reason })),
     error,
+    pendingDeletions: pendingDeletions.size,
   })
 
   return {
@@ -1039,6 +1198,16 @@ export function createSyncEngine(deps: EngineDeps, binding: EngineBinding = {
       } else {
         enqueue({ run: fullReconcile })
       }
+      return getStatus()
+    },
+
+    /** 放行一轮被删除保护拦下的批量删除:下一次全量对账按真实三方重新推导并执行。 */
+    confirmMassDeletions(): SyncStatus {
+      if (!pendingDeletions.size) return getStatus()
+      allowMassDeleteOnce = true
+      pendingDeletions.clear()
+      recentDeleteStamps.length = 0
+      enqueue({ run: fullReconcile })
       return getStatus()
     },
 

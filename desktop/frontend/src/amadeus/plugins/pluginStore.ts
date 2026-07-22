@@ -18,6 +18,9 @@ import { act } from '../../activity/log'
 import type {
   AmadeusPlugin,
   CommandContribution,
+  EmbedRendererContribution,
+  FileCreatorContribution,
+  FileTypeContribution,
   PanelContribution,
   PluginAppApi,
   PluginContext,
@@ -51,6 +54,9 @@ interface PluginState {
   propertyTypes: Owned<PropertyTypeContribution>[]
   settings: Owned<SettingContribution>[]
   views: Owned<ViewContribution>[]
+  fileTypes: Owned<FileTypeContribution>[]
+  embedRenderers: Owned<EmbedRendererContribution>[]
+  fileCreators: Owned<FileCreatorContribution>[]
   /** 宿主注入的视图打开器(桌面壳=workspace.openView);无工作台的宿主保持 null,ctx.openView 即 no-op。 */
   viewOpener: ((type: string) => void) | null
   setViewOpener(fn: ((type: string) => void) | null): void
@@ -82,6 +88,10 @@ function makeAppApi(): PluginAppApi {
     openSearch: () => useUiStore.getState().setPalette('search'),
     openSwitcher: () => useUiStore.getState().setPalette('switch'),
     notify: (m) => useUiStore.getState().notify(m),
+    readFile: (p) => amadeus.readTextFile(p),
+    writeFile: (p, text) => amadeus.writeTextFile(p, text),
+    // 打开文件类型视图在 amadeusNav(它引 pluginStore 的 matchFileType)→ 动态 import 破静态环。
+    openFile: (p) => { void import('../../amadeusNav').then((m) => m.openFile(p)) },
   }
 }
 
@@ -126,6 +136,7 @@ function toPlugin(src: ExternalPluginSource): AmadeusPlugin {
     minAppVersion: src.minAppVersion,
     requiresApp: src.requiresApp,
     readme: src.readme,
+    changelog: src.changelog,
     onboarding: src.onboarding,
     blocked: src.blocked,
     setup: (ctx) => {
@@ -151,6 +162,11 @@ export const usePluginStore = create<PluginState>((set, get) => {
     registerStatusItem: (item) =>
       set((s) => ({ statusItems: [...s.statusItems, { pluginId, item }] })),
     registerView: (view) => set((s) => ({ views: [...s.views, { pluginId, item: view }] })),
+    registerFileType: (def) => set((s) => ({ fileTypes: [...s.fileTypes, { pluginId, item: def }] })),
+    registerEmbedRenderer: (def) =>
+      set((s) => ({ embedRenderers: [...s.embedRenderers, { pluginId, item: def }] })),
+    registerFileCreator: (def) =>
+      set((s) => ({ fileCreators: [...s.fileCreators, { pluginId, item: def }] })),
     // 打开自己的视图:类型名由宿主统一命名空间(plugin:<id>:<viewId>),防跨插件顶替。
     openView: (viewId) => get().viewOpener?.(`plugin:${pluginId}:${viewId}`),
     registerSetting: (def) => set((s) => ({ settings: [...s.settings, { pluginId, item: def }] })),
@@ -189,6 +205,9 @@ export const usePluginStore = create<PluginState>((set, get) => {
       propertyTypes: s.propertyTypes.filter((o) => o.pluginId !== id),
       settings: s.settings.filter((o) => o.pluginId !== id),
       views: s.views.filter((o) => o.pluginId !== id),
+      fileTypes: s.fileTypes.filter((o) => o.pluginId !== id),
+      embedRenderers: s.embedRenderers.filter((o) => o.pluginId !== id),
+      fileCreators: s.fileCreators.filter((o) => o.pluginId !== id),
       disposers: { ...s.disposers, [id]: undefined },
     }))
   }
@@ -209,6 +228,9 @@ export const usePluginStore = create<PluginState>((set, get) => {
     propertyTypes: [],
     settings: [],
     views: [],
+    fileTypes: [],
+    embedRenderers: [],
+    fileCreators: [],
     viewOpener: null,
     setViewOpener: (fn) => set({ viewOpener: fn }),
     disposers: {},
@@ -235,7 +257,11 @@ export const usePluginStore = create<PluginState>((set, get) => {
       } catch (e) {
         console.error(`[amadeus] plugin "${id}" setup failed`, e)
         useUiStore.getState().notify(`插件「${plugin.name}」加载失败`)
+        // setup 抛错前可能已注册了主题/成就/属性类型 —— 三者都有 store 外的副作用(注入的 <style>、成就注册表),
+        // 只 filter zustand 状态会留下孤儿(禁用的插件主题仍挂在 head 上)。与 teardown 同口径全清。
         for (const o of get().propertyTypes) if (o.pluginId === id) unregisterPropType(o.item.type)
+        for (const o of get().themes) if (o.pluginId === id) removeThemeStyle(o.item.id)
+        unregisterPluginAchievements(id)
         set((s) => ({
           slashItems: s.slashItems.filter((o) => o.pluginId !== id),
           commands: s.commands.filter((o) => o.pluginId !== id),
@@ -245,6 +271,9 @@ export const usePluginStore = create<PluginState>((set, get) => {
           propertyTypes: s.propertyTypes.filter((o) => o.pluginId !== id),
           settings: s.settings.filter((o) => o.pluginId !== id),
           views: s.views.filter((o) => o.pluginId !== id),
+          fileTypes: s.fileTypes.filter((o) => o.pluginId !== id),
+          embedRenderers: s.embedRenderers.filter((o) => o.pluginId !== id),
+          fileCreators: s.fileCreators.filter((o) => o.pluginId !== id),
         }))
         return
       }
@@ -302,3 +331,48 @@ export const usePluginStore = create<PluginState>((set, get) => {
     },
   }
 })
+
+// ── 文件类型 / 嵌入渲染的匹配助手（供 amadeusNav、文件树、BlockHost、通用文件视图共用）。
+// 组件要响应「插件加载后才注册」须自行订阅 usePluginStore((s) => s.fileTypes / s.embedRenderers) 再调 find*;
+// 非响应式调用(nav 路由、视图挂载那一刻)用下面读快照的 match*。
+
+/** 在给定 fileTypes 列表里按路径后缀找命中的文件类型贡献(纯函数,便于组件订阅列表后调用)。 */
+export function findFileType(
+  list: { item: FileTypeContribution }[],
+  path: string,
+): FileTypeContribution | undefined {
+  const n = path.toLowerCase()
+  return list.find((o) => o.item.extensions.some((ext) => n.endsWith(ext.toLowerCase())))?.item
+}
+
+/** 当前已注册文件类型里匹配 path 的那个(读快照,非响应式)。 */
+export function matchFileType(path: string): FileTypeContribution | undefined {
+  return findFileType(usePluginStore.getState().fileTypes, path)
+}
+
+/** 文件名去掉命中的文件类型后缀(如 `思维导图.mindmap.md` + ['.mindmap.md'] → `思维导图`);兜底剥最后一段扩展名。 */
+export function fileTypeBaseName(path: string, extensions: string[]): string {
+  const name = path.split(/[\\/]/).pop() || path
+  const lower = name.toLowerCase()
+  const ext = extensions.find((e) => lower.endsWith(e.toLowerCase()))
+  return ext ? name.slice(0, name.length - ext.length) : name.replace(/\.[^.]+$/, '')
+}
+
+/** 在给定 embedRenderers 列表里找声称能渲染该 `![[target]]` 的渲染器(match 抛错视为不匹配)。 */
+export function findEmbedRenderer(
+  list: { item: EmbedRendererContribution }[],
+  target: string,
+): EmbedRendererContribution | undefined {
+  return list.find((o) => {
+    try {
+      return o.item.match(target)
+    } catch {
+      return false
+    }
+  })?.item
+}
+
+/** 当前已注册嵌入渲染器里匹配 target 的那个(读快照,非响应式)。 */
+export function matchEmbedRenderer(target: string): EmbedRendererContribution | undefined {
+  return findEmbedRenderer(usePluginStore.getState().embedRenderers, target)
+}

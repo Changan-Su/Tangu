@@ -40,6 +40,11 @@ module.exports = {
     '!node_modules/@rollup/**',
     '!node_modules/@types/**',
   ],
+  // remotesync 层含 Apache-2.0 改编代码(remotely-save):分发包必须携带其 LICENSE/NOTICE(License 4(a)/4(d))
+  extraResources: [
+    { from: 'electron/remotesync/LICENSE', to: 'licenses/remotesync/LICENSE' },
+    { from: 'electron/remotesync/NOTICE.md', to: 'licenses/remotesync/NOTICE.md' },
+  ],
   // sherpa-onnx-node(本地语音识别)是原生插件:.node + onnxruntime 动态库不能从 asar 内加载,整体解包。
   asarUnpack: [
     '**/node_modules/sherpa-onnx-node/**',

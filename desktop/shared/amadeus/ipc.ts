@@ -53,6 +53,9 @@ export const IPC = {
   dbChange: 'db:external-change',
   drawingRead: 'drawing:read',
   drawingWrite: 'drawing:write',
+  // 通用 vault 文本文件读写(供插件文件类型 ctx.app.readFile/writeFile;写走自写账本防 watcher 回弹)。
+  readTextFile: 'file:read-text',
+  writeTextFile: 'file:write-text',
   setPageFrontmatter: 'page:set-frontmatter',
   listPageProps: 'vault:page-props',
   renamePageFile: 'page:rename-file',
@@ -150,8 +153,15 @@ export interface ExternalPluginSource {
   requiresApp?: string
   /** README.md content from the plugin folder (capped), for the settings detail page. */
   readme?: string
+  /** CHANGELOG.md content from the plugin folder (capped), shown as the "更新日志" section on the detail page.
+   *  Ecosystem convention: every versioned plugin ships one so users can see what each version changed. */
+  changelog?: string
   /** Declarative first-run setup card (manifest `onboarding`, sanitized by the main process). */
   onboarding?: PluginOnboardingSpec
+  /** File suffixes this plugin claims as a custom file type (manifest `fileExtensions`, e.g. ['.mindmap.md']).
+   *  The main process excludes these from the page list (listPages) so its compiler never rewrites them
+   *  (= corruption); the renderer's registerFileType supplies the matching icon/view/embed behaviour. */
+  fileExtensions?: string[]
   /** Present → listed but not loadable: 'api' = apiVersion mismatch, 'minApp' = app too old. */
   blocked?: 'api' | 'minApp'
 }
@@ -382,6 +392,10 @@ export interface AmadeusApi {
   readDrawing(pagePath: string, ref: string): Promise<DrawingReadResult>
   /** 按 `drawing:read` 返回的确切 vault 相对路径原子写回(记自写账本,watcher 不把自己的写当外部改动)。 */
   writeDrawing(drawingPath: string, source: string): Promise<void>
+  /** 读取 vault 内确切相对路径的 UTF-8 文本(供插件文件类型);越界/不存在返回 null。 */
+  readTextFile(path: string): Promise<string | null>
+  /** 原子写回 vault 内确切相对路径的 UTF-8 文本(供插件文件类型;记自写账本,同 writeDrawing)。 */
+  writeTextFile(path: string, text: string): Promise<void>
   /** 「笔记视图」:列出 folder 直属子级笔记的 path/title/frontmatter(行的实时数据源)。 */
   listPageProps(folder: string): Promise<PageProps[]>
   /** 外科式写笔记 frontmatter(值 = undefined 删该键):保留 amadeus_* 与正文,原子写。 */

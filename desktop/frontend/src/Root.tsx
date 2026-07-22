@@ -19,6 +19,7 @@ import { FeedbackModal } from './components/FeedbackModal'
 import { AchievementsModal } from './achievements/AchievementsModal'
 import { AchievementToast } from './achievements/AchievementToast'
 import { useShallow } from 'zustand/react/shallow'
+import { installFileDropGuard } from './fileDropGuard'
 
 const PREVIEW_SIZES: Array<[number, string]> = [[390, 'iPhone'], [414, 'Max'], [768, 'iPad']]
 /** 桌面/web 移动预览「手机框」:套在整个 app 外(引擎壳 + 设置/商店/成就等 fixed 浮层),
@@ -44,6 +45,7 @@ function MobilePreviewFrame({ children }: { children: ReactNode }) {
 
 export function Root() {
   useBootstrap()
+  useEffect(() => installFileDropGuard(), []) // 全局 OS 文件拖放守卫:未被任何视图接手的拖放不再把 SPA 导航冲掉
   const theme = useTheme()
   const a = useApp(useShallow((s) => ({
     sessions: s.sessions,
@@ -81,9 +83,23 @@ export function Root() {
     }
   }, [a.onboarding])
 
+  // 全屏二级界面(设置/市场/成就/引导)盖住主窗时,把主窗藏掉(visibility 保留布局不触发 dockview 重排)。
+  // 不透明主题下浮层本就遮死主窗,藏它零可见影响 + 省一次绘制;玻璃主题下浮层透明,藏主窗后其半透侧栏
+  // 才是叠在窗口原生玻璃(壁纸)上而非叠在主窗 UI 上 —— 与主窗侧栏同一套「半透染色 + 原生材质」机理。
+  // ⚠ 打开即藏,但**关闭要等浮层退场动画播完再显**(codex Medium-3):浮层退场那 220ms 仍挂在 DOM 上,
+  //   若跟着 open flag 立刻显主窗,玻璃侧栏会在这段里叠回刚露出的主窗 UI(正是要避免的浑浊)。
+  const overlayOpen = a.settingsOpen || a.marketOpen || a.achievementsOpen || a.onboarding
+  const overlayOpenRef = useRef(overlayOpen); overlayOpenRef.current = overlayOpen
+  const [shellHidden, setShellHidden] = useState(overlayOpen)
+  useEffect(() => { if (overlayOpen) setShellHidden(true) }, [overlayOpen])
+  const onOverlayExitComplete = (): void => { if (!overlayOpenRef.current) setShellHidden(false) }
+
   return (
     <MobilePreviewFrame>
-      <div className={`shell-host${revealMain ? ' main-enter' : ''}`}>
+      <div
+        className={`shell-host${revealMain ? ' main-enter' : ''}`}
+        style={shellHidden ? { visibility: 'hidden' } : undefined}
+      >
         <Shell dark={theme.mode === 'dark'} soft={!!getLanguage(theme.lang)?.manifest.panelGap} buildDefault={buildDefaultLayout} header={<TopBar />} />
       </div>
 
@@ -95,11 +111,12 @@ export function Root() {
 
       {/* 更新提示已改为检测到新版自动弹出「更新」标签页(见 stores/bootstrap.ts),不再用顶部横幅。 */}
 
-      <AnimatePresence>
+      <AnimatePresence onExitComplete={onOverlayExitComplete}>
         {a.settingsOpen && (
         <motion.div
           key="settings"
-          style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', minWidth: 0, minHeight: 0, overflow: 'hidden', background: 'var(--bg)' }}
+          className="fs-overlay"
+          style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', minWidth: 0, minHeight: 0, overflow: 'hidden' }}
           initial={{ opacity: 0, scale: 0.985 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.985 }}
@@ -113,6 +130,7 @@ export function Root() {
             themeLang={theme.lang}
             themeSkin={theme.skin}
             themeMode={theme.mode}
+            themeModePref={theme.modePref}
             glassOn={theme.glass}
             flatOn={theme.flat}
             themeSeed={theme.seed}
@@ -134,7 +152,7 @@ export function Root() {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
+      <AnimatePresence onExitComplete={onOverlayExitComplete}>
         {a.onboarding && (
           <motion.div
             key="onboarding"
@@ -148,6 +166,7 @@ export function Root() {
             themeLang={theme.lang}
             themeSkin={theme.skin}
             themeMode={theme.mode}
+            themeModePref={theme.modePref}
             themeSeed={theme.seed}
             onThemeChange={(lang, skin, mode) => theme.setTheme(lang, skin, mode)}
             onSeedChange={(hex) => theme.setSeedValue(hex)}
@@ -171,11 +190,12 @@ export function Root() {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
+      <AnimatePresence onExitComplete={onOverlayExitComplete}>
         {a.marketOpen && (
         <motion.div
           key="market"
-          style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', minWidth: 0, minHeight: 0, overflow: 'hidden', background: 'var(--bg)' }}
+          className="fs-overlay"
+          style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', minWidth: 0, minHeight: 0, overflow: 'hidden' }}
           initial={{ opacity: 0, scale: 0.985 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.985 }}
@@ -186,7 +206,7 @@ export function Root() {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
+      <AnimatePresence onExitComplete={onOverlayExitComplete}>
         {a.achievementsOpen && (
         <motion.div
           key="achievements"

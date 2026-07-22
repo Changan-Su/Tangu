@@ -1,0 +1,49 @@
+/**
+ * Sample —— Forsion Desktop 磁盘主题模板(设计语言 = 结构层)。
+ *
+ * 双轴主题模型(务必理解再动手):
+ *   - 本文件是「设计语言」(data-theme):只定义**结构**——圆角、字体、阴影、布局;
+ *   - **颜色**属于另一根轴「配色」(data-skin,cream/coral/teal/lavender/custom),由应用内置提供。
+ *   正确姿势 = 结构 token 自己定,颜色 token(--bg/--bg-card/--accent/--border/--glow…)只「用」不「定」,
+ *   这样 你的语言 × 任意配色 都成立。若你非要定颜色:light 块定了哪些颜色变量,
+ *   `.dark[data-theme=…]` 镜像块就必须逐一同名覆盖,否则暗色会继承亮色残值(对称正确性要求)。
+ *
+ * 选择器契约:一切规则都要挂在 [data-theme='sample-theme'] 前缀下(CSS 全局注入,不前缀会泄漏到其他主题);
+ * 暗色块用 `.dark[data-theme='sample-theme']`;扁平开关是 html 上的 data-flat='1'。
+ */
+
+[data-theme='sample-theme'] {
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-chat-surface: 14px;
+  --radius-chat-card: 10px;
+  --font-ui: system-ui, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --panel-blur: none;
+  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 10px 26px rgba(0, 0, 0, 0.06);
+  --btn-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  --icon-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+/* 暗色镜像:只覆盖对暗色敏感的 token(阴影);颜色交给配色轴,无需镜像。 */
+.dark[data-theme='sample-theme'] {
+  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 26px rgba(0, 0, 0, 0.35);
+  --btn-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --icon-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* 尊重「扁平」开关(与 data-theme 同在 html 上;放在暗色块之后,同特异性靠顺序取胜)。 */
+[data-theme='sample-theme'][data-flat='1'] {
+  --card-shadow: none;
+  --btn-shadow: none;
+  --icon-shadow: none;
+}
+
+/* 结构示例:左功能条(.rb)与底部状态栏(.sb)做成圆角卡片。颜色全部来自配色 token。 */
+[data-theme='sample-theme'] .rb,
+[data-theme='sample-theme'] .sb {
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--card-shadow);
+  border: var(--border-width, 1px) solid color-mix(in srgb, var(--border) 70%, transparent);
+}

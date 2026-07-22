@@ -21,10 +21,15 @@ export function nearestFd(path: string): string | null {
   return null
 }
 
-/** children = .fd 直接子文件(pages+files 均含,不含子文件夹),basename、字典序。 */
+/** children = .fd 直接子文件(pages+files 均含,不含子文件夹),basename、字典序。
+ *  ⚠️ 先把分隔符统一成 `/`:主进程 listFiles 走 `path.relative()`,**Windows 上给出的是 `\`**,
+ *  而这里的 prefix 恒用 `/` → startsWith 永远为 false,父笔记的 `children:` 会漏掉 .fd 里的全部文件
+ *  (数据库/画板/思维导图一视同仁,不是某一种的问题,Codex)。 */
 export function computeFdChildren(parentNote: string, pages: string[], files: string[]): string[] {
-  const prefix = `${fdDirOf(parentNote)}/`
+  const slash = (p: string): string => p.replace(/\\/g, '/')
+  const prefix = `${slash(fdDirOf(parentNote))}/`
   return [...pages, ...files]
+    .map(slash)
     .filter((p) => p.startsWith(prefix) && !p.slice(prefix.length).includes('/'))
     .map((p) => p.slice(prefix.length))
     .sort((a, b) => a.localeCompare(b))

@@ -61,12 +61,12 @@ export async function syncNow(userId: string): Promise<SyncRunResult> {
   running = true;
   try {
     // 1) 每-agent 文件镜像(cloudSync 开的 agent)。
-    let af: AgentFileSyncResult = { ok: true, agents: 0, pushed: 0, pulled: 0, deleted: 0, skipped: 0 };
+    let af: AgentFileSyncResult = { ok: true, agents: 0, pushed: 0, pulled: 0, deleted: 0, skipped: 0, conflicts: 0 };
     if (brain.agentFiles) {
       try {
         af = await runAgentFilesSync(brain.agentFiles, userId);
       } catch (e: any) {
-        af = { ok: false, agents: 0, pushed: 0, pulled: 0, deleted: 0, skipped: 0, error: String(e?.message || e) };
+        af = { ok: false, agents: 0, pushed: 0, pulled: 0, deleted: 0, skipped: 0, conflicts: 0, error: String(e?.message || e) };
       }
     }
     // 2) 旧全局 xyra 记忆/日志(AI Studio 网页共享;D7 过渡保留)。失败不阻断。
